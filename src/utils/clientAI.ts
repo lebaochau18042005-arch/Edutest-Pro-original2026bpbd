@@ -63,6 +63,128 @@ export async function generateWithFallback(
   throw lastError || new Error("Không thể kết nối đến Gemini AI.");
 }
 
+/**
+ * Robust JSON sanitizer to repair unescaped LaTeX backslashes and invalid Unicode escape sequences from LLMs
+ */
+function sanitizeJsonStringLiterals(jsonStr: string): string {
+  let result = "";
+  let inString = false;
+  let isEscaped = false;
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+
+    if (!inString) {
+      if (char === '"') {
+        inString = true;
+      }
+      result += char;
+    } else {
+      if (isEscaped) {
+        isEscaped = false;
+        if (
+          char === '"' ||
+          char === '\\' ||
+          char === '/' ||
+          char === 'b' ||
+          char === 'f' ||
+          char === 'n' ||
+          char === 'r' ||
+          char === 't'
+        ) {
+          result += char;
+        } else if (char === 'u') {
+          // Check if followed by 4 valid hex digits
+          const hex = jsonStr.substring(i + 1, i + 5);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            result += char;
+          } else {
+            // Unescaped LaTeX command like \underline or \upsilon, double escape it
+            result += "\\u";
+          }
+        } else {
+          // Non-standard JSON escape like \frac, \sqrt, \alpha, \vec, \Delta. Double escape
+          result += "\\" + char;
+        }
+      } else {
+        if (char === '\\') {
+          isEscaped = true;
+          result += char;
+        } else if (char === '"') {
+          inString = false;
+          result += char;
+        } else if (char === '\n') {
+          result += "\\n";
+        } else if (char === '\r') {
+          result += "\\r";
+        } else if (char === '\t') {
+          result += "\\t";
+        } else {
+          result += char;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+export function safeJsonParse<T>(text: string, defaultValue: T): T {
+  if (!text || !text.trim()) return defaultValue;
+
+  let cleaned = text
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  // Try direct parse
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstErr) {
+    // Proceed to repair
+  }
+
+  // Find array or object boundaries
+  const firstSquare = cleaned.indexOf("[");
+  const firstCurly = cleaned.indexOf("{");
+  let startIdx = 0;
+  let endIdx = cleaned.length;
+
+  if (firstSquare !== -1 && (firstCurly === -1 || firstSquare < firstCurly)) {
+    startIdx = firstSquare;
+    const lastSquare = cleaned.lastIndexOf("]");
+    if (lastSquare !== -1) endIdx = lastSquare + 1;
+  } else if (firstCurly !== -1) {
+    startIdx = firstCurly;
+    const lastCurly = cleaned.lastIndexOf("}");
+    if (lastCurly !== -1) endIdx = lastCurly + 1;
+  }
+
+  cleaned = cleaned.substring(startIdx, endIdx);
+
+  // Fix 1: Bad Unicode escapes (\u not followed by 4 hex digits)
+  cleaned = cleaned.replace(/\\u(?![0-9a-fA-F]{4})/g, "\\\\u");
+
+  // Fix 2: Unescaped LaTeX backslashes (\frac, \sqrt, \vec, etc.)
+  cleaned = cleaned.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, "\\\\");
+
+  // Fix 3: Trailing commas before } or ]
+  cleaned = cleaned.replace(/,\s*([\]}])/g, "$1");
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (secondErr) {
+    try {
+      const sanitized = sanitizeJsonStringLiterals(cleaned);
+      return JSON.parse(sanitized);
+    } catch (thirdErr) {
+      console.warn("safeJsonParse repair attempt failed:", thirdErr);
+      return defaultValue;
+    }
+  }
+}
+
 // ──────────────────────────────────────────────
 // Helper: Extract inline options A, B, C, D
 // ──────────────────────────────────────────────
@@ -580,8 +702,7 @@ ${rawText.slice(0, 50000)}
     };
 
     const text = await generateWithFallback(prompt, key, model, config);
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned || "[]");
+    const parsed = safeJsonParse<any[]>(text, []);
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
       throw new Error("Phản hồi rỗng từ AI");
@@ -753,8 +874,7 @@ ${JSON.stringify(
     };
 
     const text = await generateWithFallback(prompt, key, model, config);
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const solutions = JSON.parse(cleaned || "[]");
+    const solutions = safeJsonParse<any[]>(text, []);
 
     const updatedQuestions = questions.map((q: Question, i: number) => {
       const sol = solutions.find((s: any) => s.index === i);
@@ -900,8 +1020,7 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC:
     };
 
     const text = await generateWithFallback(contents, key, model, config);
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned || "[]");
+    const parsed = safeJsonParse<any[]>(text, []);
 
     const isImageFile = (mimeType || "").startsWith("image/");
     const fullImageDataUri = isImageFile ? `data:${mimeType || "image/png"};base64,${cleanBase64}` : undefined;
@@ -1042,8 +1161,7 @@ YÊU CẦU ĐỊNH DẠNG:
     };
 
     const raw = await generateWithFallback(prompt, apiKey, model, config);
-    const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleaned || "[]");
+    const parsed = safeJsonParse<any[]>(raw, []);
 
     const questions: Question[] = parsed.map((item: any) => ({
       id: `ai_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1116,8 +1234,7 @@ Trả về JSON array các rubric item.`;
     };
 
     const text = await generateWithFallback(contents, apiKey, model, config);
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const items = JSON.parse(cleaned || "[]");
+    const items = safeJsonParse<any[]>(text, []);
 
     const rubric = {
       id: `rubric_${Date.now()}`,
@@ -1233,8 +1350,7 @@ Yêu cầu:
     };
 
     const text = await generateWithFallback(contents, apiKey, model, config);
-    const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const result = JSON.parse(cleaned || "{}");
+    const result = safeJsonParse<any>(text, {});
 
     const gradedPaper = {
       id: `graded_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1309,8 +1425,7 @@ Hãy trả về JSON hợp lệ (không markdown, chỉ JSON thuần) với cấ
 Tạo đúng 3 câu hỏi ôn tập trắc nghiệm phù hợp với chủ đề yếu.`;
 
     const raw = await generateWithFallback(prompt, apiKey, model);
-    const cleaned = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const data = JSON.parse(cleaned);
+    const data = safeJsonParse<any>(raw, {});
     return { success: true, data };
   } catch (err: any) {
     return { success: false, error: err.message || "Lỗi phân tích AI" };
