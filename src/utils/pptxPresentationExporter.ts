@@ -13,21 +13,26 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
   const subject = config?.subject || "ĐỊA LÝ & KHOA HỌC TỔNG HỢP";
   const grade = config?.grade || "Khối 12";
 
-  const slidesData = JSON.stringify(
-    questions.map((q, idx) => ({
-      index: idx + 1,
-      part: q.part || 1,
-      questionType: q.questionType,
-      chapter: q.chapter || "Chương trọng tâm",
-      level: q.level || "Thông hiểu",
-      content: q.content,
-      options: q.options || [],
-      correctIndex: q.correctIndex ?? 0,
-      statements: q.statements || [],
-      shortAnswer: q.shortAnswer || "",
-      explanation: q.explanation || "Chưa có lời giải chi tiết.",
-    }))
-  );
+  // Sanitize and serialize 100% of questions safely without breaking HTML script tags
+  const rawSlides = questions.map((q, idx) => ({
+    index: idx + 1,
+    part: q.part || 1,
+    partQuestionIndex: (q as any).partQuestionIndex || (idx + 1),
+    questionType: q.questionType,
+    chapter: q.chapter || "Chương trọng tâm",
+    level: q.level || "Thông hiểu",
+    content: q.content || "",
+    options: q.options || [],
+    correctIndex: q.correctIndex ?? 0,
+    statements: q.statements || [],
+    shortAnswer: q.shortAnswer || "",
+    explanation: q.explanation || "Chưa có lời giải chi tiết.",
+    passageContent: q.passageContent || "",
+    groupTitle: q.groupTitle || "",
+    diagramUrl: q.diagramUrl || "",
+  }));
+
+  const safeJsonData = JSON.stringify(rawSlides).replace(/</g, "\\u003c");
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -40,7 +45,7 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <style>
     :root {
-      --primary: #1e40af;
+      --primary: #2563eb;
       --primary-dark: #0f172a;
       --accent: #059669;
       --gold: #d97706;
@@ -48,7 +53,7 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: #090d16;
+      background: #0b0f19;
       color: #f8fafc;
       overflow: hidden;
       height: 100vh;
@@ -60,20 +65,21 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: 16px 24px;
       position: relative;
+      overflow: hidden;
     }
     .slide-card {
       width: 100%;
-      max-width: 1150px;
+      max-width: 1200px;
       height: 86vh;
-      background: linear-gradient(145deg, #0f172a, #1e293b);
-      border: 1px solid #334155;
+      background: linear-gradient(145deg, #111827, #1e293b);
+      border: 1.5px solid #334155;
       border-radius: 24px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
       display: flex;
       flex-direction: column;
-      padding: 32px 40px;
+      padding: 28px 36px;
       position: relative;
       overflow-y: auto;
     }
@@ -82,8 +88,8 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       align-items: center;
       justify-content: space-between;
       border-bottom: 2px solid #334155;
-      padding-bottom: 16px;
-      margin-bottom: 20px;
+      padding-bottom: 14px;
+      margin-bottom: 18px;
     }
     .badge {
       display: inline-flex;
@@ -100,28 +106,48 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
     .badge-p2 { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
     .badge-p3 { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     .question-title {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 800;
       color: #38bdf8;
     }
+    .passage-box {
+      background: rgba(30, 58, 138, 0.25);
+      border: 1px solid #3b82f6;
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 16px;
+      font-size: 16px;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
     .question-body {
-      font-size: 20px;
+      font-size: 21px;
       line-height: 1.6;
-      color: #f1f5f9;
-      margin-bottom: 24px;
+      color: #f8fafc;
+      margin-bottom: 22px;
       font-weight: 500;
+    }
+    .question-body img, .slide-card img {
+      max-height: 280px;
+      max-width: 100%;
+      border-radius: 12px;
+      margin: 10px auto;
+      display: block;
+      background: #ffffff;
+      padding: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
     .options-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
+      gap: 14px;
+      margin-bottom: 20px;
     }
     .option-box {
       background: #1e293b;
       border: 2px solid #334155;
-      border-radius: 16px;
-      padding: 16px 20px;
+      border-radius: 14px;
+      padding: 14px 18px;
       font-size: 18px;
       display: flex;
       align-items: flex-start;
@@ -129,11 +155,11 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       transition: all 0.3s;
     }
     .option-box.revealed-correct {
-      background: rgba(5, 150, 105, 0.25) !important;
+      background: rgba(5, 150, 105, 0.35) !important;
       border-color: #10b981 !important;
       color: #a7f3d0 !important;
       font-weight: 700;
-      box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+      box-shadow: 0 0 24px rgba(16, 185, 129, 0.4);
     }
     .opt-letter {
       width: 32px;
@@ -163,12 +189,32 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       font-size: 17px;
     }
     .tf-table th { background: #1e293b; color: #94a3b8; }
-    .tf-badge-true { background: #059669; color: white; padding: 4px 10px; border-radius: 8px; font-weight: bold; }
-    .tf-badge-false { background: #dc2626; color: white; padding: 4px 10px; border-radius: 8px; font-weight: bold; }
+    .tf-badge-true { background: #059669; color: white; padding: 4px 12px; border-radius: 8px; font-weight: bold; }
+    .tf-badge-false { background: #dc2626; color: white; padding: 4px 12px; border-radius: 8px; font-weight: bold; }
+    .tf-hidden-ans { display: none; }
+    .tf-revealed .tf-hidden-ans { display: inline-block; animation: fadeIn 0.3s ease-in-out; }
+    .short-ans-box {
+      padding: 18px 24px;
+      background: #1e293b;
+      border-radius: 16px;
+      border: 1.5px solid #3b82f6;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .short-ans-value {
+      color: #34d399;
+      font-weight: 900;
+      font-size: 26px;
+      font-family: monospace;
+      display: none;
+    }
+    .short-ans-value.visible { display: inline; animation: fadeIn 0.3s ease-in-out; }
     .explanation-panel {
-      margin-top: auto;
-      background: linear-gradient(135deg, rgba(30, 58, 138, 0.3), rgba(15, 23, 42, 0.8));
-      border: 1px solid #3b82f6;
+      margin-top: 14px;
+      background: linear-gradient(135deg, rgba(30, 58, 138, 0.35), rgba(15, 23, 42, 0.9));
+      border: 1.5px solid #3b82f6;
       border-radius: 16px;
       padding: 18px 24px;
       font-size: 16px;
@@ -178,16 +224,17 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
     }
     .explanation-panel.visible { display: block; }
     .controls-bar {
-      height: 70px;
+      height: 68px;
       background: #0f172a;
       border-top: 1px solid #1e293b;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 40px;
+      padding: 0 32px;
+      z-index: 10;
     }
     .btn {
-      padding: 10px 20px;
+      padding: 10px 18px;
       border-radius: 12px;
       border: none;
       font-size: 14px;
@@ -204,31 +251,34 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
     .btn-reveal:hover { background: #059669; transform: scale(1.03); }
     .btn-secondary { background: #334155; color: #f8fafc; }
     .btn-secondary:hover { background: #475569; }
-    .nav-indicator { font-size: 14px; color: #94a3b8; font-weight: 600; font-family: monospace; }
+    .nav-indicator { font-size: 14px; color: #94a3b8; font-weight: 700; font-family: monospace; }
     .author-credit { font-size: 12px; color: #64748b; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   </style>
 </head>
 <body>
+  <!-- Embedded JSON Data Block -->
+  <script type="application/json" id="exam-slides-data">${safeJsonData}</script>
+
   <div class="slide-container">
     <!-- Cover Slide (Slide 0) -->
     <div id="slide-cover" class="slide-card" style="align-items: center; justify-content: center; text-align: center;">
-      <span class="badge badge-p1" style="font-size: 15px; margin-bottom: 24px;">HỆ THỐNG KHẢO THÍ CHUẨN GDPT 2018</span>
-      <h1 style="font-size: 42px; font-weight: 900; color: #f8fafc; margin-bottom: 16px; line-height: 1.2;">
+      <span class="badge badge-p1" style="font-size: 14px; margin-bottom: 20px;">HỆ THỐNG KHẢO THÍ CHUẨN GDPT 2018</span>
+      <h1 style="font-size: 38px; font-weight: 900; color: #f8fafc; margin-bottom: 14px; line-height: 1.25;">
         ${period}
       </h1>
-      <h2 style="font-size: 28px; font-weight: 700; color: #38bdf8; margin-bottom: 24px;">
+      <h2 style="font-size: 26px; font-weight: 700; color: #38bdf8; margin-bottom: 20px;">
         MÔN: ${subject} • ${grade} • MÃ ĐỀ: ${examCode}
       </h2>
-      <p style="font-size: 18px; color: #94a3b8; margin-bottom: 40px; max-width: 700px;">
-        ${school} • Tài liệu bài giảng số hóa và trình chiếu chữa đề thi trực tiếp trên lớp học.
+      <p style="font-size: 17px; color: #94a3b8; margin-bottom: 32px; max-width: 760px;">
+        ${school} • Bài giảng số hóa trình chiếu chữa đề thi trực tiếp trên lớp học. Tổng số <b>${questions.length} câu hỏi</b> chuẩn 3 phần Bộ GD&ĐT.
       </p>
-      <div style="padding: 16px 28px; background: rgba(30, 41, 59, 0.8); border: 1px solid #475569; border-radius: 16px; display: inline-flex; align-items: center; gap: 16px;">
+      <div style="padding: 14px 24px; background: rgba(30, 41, 59, 0.8); border: 1px solid #475569; border-radius: 16px; display: inline-flex; align-items: center; gap: 14px;">
         <span style="font-size: 15px; font-weight: bold; color: #f59e0b;">Tác giả: Cô Lê Thị Thái (GV Môn Địa Lý)</span>
         <span style="color: #64748b;">•</span>
         <span style="font-size: 14px; color: #94a3b8;">Zalo: 0916.791.779</span>
       </div>
-      <p style="margin-top: 30px; font-size: 14px; color: #64748b;">
+      <p style="margin-top: 26px; font-size: 14px; color: #64748b;">
         Nhấn phím <b>[ → ]</b> hoặc nút <b>Tiếp theo</b> để bắt đầu bài giảng
       </p>
     </div>
@@ -243,11 +293,12 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
         <span id="slide-qnum" class="question-title">CÂU 1</span>
       </div>
 
+      <div id="slide-passage" class="passage-box" style="display: none;"></div>
       <div id="slide-body" class="question-body"></div>
       <div id="slide-options-container"></div>
 
       <div id="slide-explanation" class="explanation-panel">
-        <h4 style="font-weight: 800; color: #60a5fa; margin-bottom: 6px; font-size: 16px; display: flex; align-items: center; gap: 6px;">
+        <h4 style="font-weight: 800; color: #60a5fa; margin-bottom: 8px; font-size: 16px; display: flex; align-items: center; gap: 6px;">
           <span>💡 Lời Giải Chi Tiết & Hướng Dẫn Tư Duy:</span>
         </h4>
         <div id="slide-explanation-text"></div>
@@ -257,13 +308,13 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
 
   <!-- Controls Footer Bar -->
   <div class="controls-bar">
-    <div style="display: flex; align-items: center; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
       <button class="btn btn-secondary" onclick="prevSlide()">← Trước [←]</button>
       <button class="btn btn-secondary" onclick="nextSlide()">Sau [→] →</button>
-      <span id="slide-counter" class="nav-indicator">SLIDE 0 / 0</span>
+      <span id="slide-counter" class="nav-indicator">SLIDE 0 / ${questions.length}</span>
     </div>
 
-    <div style="display: flex; align-items: center; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
       <button id="btn-toggle-answer" class="btn btn-reveal" onclick="toggleRevealAnswer()">
         <span>✨ Hiện Đáp Án & Lời Giải [Phím cách / A]</span>
       </button>
@@ -278,9 +329,25 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
   </div>
 
   <script>
-    const questions = ${slidesData};
+    const questions = JSON.parse(document.getElementById('exam-slides-data').textContent);
     let currentSlide = 0; // 0 is cover, 1..N are questions
     let isRevealed = false;
+
+    // Helper: Convert Markdown syntax (Images, Linebreaks, Bold) to HTML
+    function formatMarkdown(text) {
+      if (!text) return '';
+      let res = text;
+      // 1. Markdown Images: ![alt](src) -> <img src="src" alt="alt"/>
+      res = res.replace(/!\\[(.*?)\\]\\(\\s*(data:image\\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\\s\\r\\n]+|https?:\\/\\/[^\\s)]+|\\/[^\\s)]+|[^\\s)]+?)\\s*\\)/gi, (m, alt, src) => {
+        const cleanSrc = src.trim().startsWith('data:image') ? src.replace(/\\s+/g, '') : src.trim();
+        return '<img src="' + cleanSrc + '" alt="' + (alt || 'Hình vẽ') + '" style="max-height:260px; max-width:100%; border-radius:10px; margin:10px auto; display:block; background:#fff; padding:4px;" />';
+      });
+      // 2. Bold: **text**
+      res = res.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
+      // 3. Newlines to <br>
+      res = res.replace(/\\n/g, '<br>');
+      return res;
+    }
 
     function renderSlide() {
       const cover = document.getElementById('slide-cover');
@@ -305,14 +372,29 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       const q = questions[currentSlide - 1];
       document.getElementById('slide-qnum').textContent = 'CÂU ' + q.index;
       document.getElementById('slide-chapter').textContent = q.chapter + ' (' + q.level + ')';
-      document.getElementById('slide-body').innerHTML = q.content;
+
+      // Passage (Reading Group)
+      const passageBox = document.getElementById('slide-passage');
+      if (q.passageContent || q.groupTitle) {
+        passageBox.style.display = 'block';
+        passageBox.innerHTML = (q.groupTitle ? '<strong>' + q.groupTitle + '</strong><br>' : '') + formatMarkdown(q.passageContent);
+      } else {
+        passageBox.style.display = 'none';
+      }
+
+      // Content Body
+      let bodyHtml = formatMarkdown(q.content);
+      if (q.diagramUrl && !bodyHtml.includes(q.diagramUrl)) {
+        bodyHtml += '<img src="' + q.diagramUrl + '" alt="Hình vẽ minh họa"/>';
+      }
+      document.getElementById('slide-body').innerHTML = bodyHtml;
 
       // Badge
       const badge = document.getElementById('slide-badge');
-      if (q.part === 2) {
+      if (q.part === 2 || q.questionType === 'true_false') {
         badge.className = 'badge badge-p2';
         badge.textContent = 'PHẦN II: ĐÚNG / SAI';
-      } else if (q.part === 3) {
+      } else if (q.part === 3 || q.questionType === 'short_answer') {
         badge.className = 'badge badge-p3';
         badge.textContent = 'PHẦN III: TRẢ LỜI NGẮN';
       } else {
@@ -324,32 +406,32 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       const optContainer = document.getElementById('slide-options-container');
       optContainer.innerHTML = '';
 
-      if (q.part === 1 || q.questionType === 'multiple_choice') {
+      if (q.part === 1 || q.questionType === 'multiple_choice' || (!q.part && (q.options || []).length > 0)) {
         const grid = document.createElement('div');
         grid.className = 'options-grid';
-        const letters = ['A', 'B', 'C', 'D'];
+        const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
         (q.options || []).forEach((opt, oIdx) => {
           const box = document.createElement('div');
           box.className = 'option-box';
           box.id = 'opt-box-' + oIdx;
-          box.innerHTML = '<span class="opt-letter">' + (letters[oIdx] || 'A') + '</span><span>' + opt + '</span>';
+          box.innerHTML = '<span class="opt-letter">' + (letters[oIdx] || 'A') + '</span><span>' + formatMarkdown(opt) + '</span>';
           grid.appendChild(box);
         });
         optContainer.appendChild(grid);
       } else if (q.part === 2 || q.questionType === 'true_false') {
-        let html = '<table class="tf-table"><thead><tr><th style="width: 80px;">Mệnh đề</th><th>Nội dung khẳng định</th><th style="width: 130px; text-align: center;">Đáp án</th></tr></thead><tbody>';
+        let html = '<table id="tf-table-view" class="tf-table"><thead><tr><th style="width: 80px;">Mệnh đề</th><th>Nội dung khẳng định</th><th style="width: 140px; text-align: center;">Đáp án</th></tr></thead><tbody>';
         (q.statements || []).forEach(st => {
-          html += '<tr><td><b>' + (st.label || st.id + ')') + '</b></td><td>' + st.text + '</td><td style="text-align: center;"><span class="' + (st.correctValue ? 'tf-badge-true' : 'tf-badge-false') + '">' + (st.correctValue ? 'ĐÚNG' : 'SAI') + '</span></td></tr>';
+          html += '<tr><td><b>' + (st.label || st.id + ')') + '</b></td><td>' + formatMarkdown(st.text) + '</td><td style="text-align: center;"><span class="tf-hidden-ans ' + (st.correctValue ? 'tf-badge-true' : 'tf-badge-false') + '">' + (st.correctValue ? 'ĐÚNG' : 'SAI') + '</span></td></tr>';
         });
         html += '</tbody></table>';
         optContainer.innerHTML = html;
       } else {
-        optContainer.innerHTML = '<div style="padding: 20px; background: #1e293b; border-radius: 16px; border: 1px solid #3b82f6; font-size: 20px;"><b>Đáp án điền số:</b> <span style="color: #34d399; font-weight: 800; font-size: 24px; font-family: monospace;">' + (q.shortAnswer || 'Đáp án chuẩn') + '</span></div>';
+        optContainer.innerHTML = '<div class="short-ans-box"><b>Đáp án điền số:</b> <span id="short-ans-val" class="short-ans-value">' + (q.shortAnswer || 'Chưa có đáp án') + '</span></div>';
       }
 
       // Explanation
       document.getElementById('slide-explanation').className = 'explanation-panel';
-      document.getElementById('slide-explanation-text').innerHTML = q.explanation;
+      document.getElementById('slide-explanation-text').innerHTML = formatMarkdown(q.explanation);
 
       // Render math formulas
       if (window.renderMathInElement) {
@@ -357,8 +439,8 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
           delimiters: [
             {left: '$$', right: '$$', display: true},
             {left: '$', right: '$', display: false},
-            {left: '\\(', right: '\\)', display: false},
-            {left: '\\[', right: '\\]', display: true}
+            {left: '\\\\(', right: '\\\\)', display: false},
+            {left: '\\\\[', right: '\\\\]', display: true}
           ],
           throwOnError: false
         });
@@ -370,6 +452,7 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       isRevealed = !isRevealed;
       const q = questions[currentSlide - 1];
 
+      // Part 1: Highlight Option
       if (q.part === 1 || q.questionType === 'multiple_choice') {
         const correctBox = document.getElementById('opt-box-' + q.correctIndex);
         if (correctBox) {
@@ -381,6 +464,31 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
         }
       }
 
+      // Part 2: Reveal True / False
+      if (q.part === 2 || q.questionType === 'true_false') {
+        const tfTable = document.getElementById('tf-table-view');
+        if (tfTable) {
+          if (isRevealed) {
+            tfTable.classList.add('tf-revealed');
+          } else {
+            tfTable.classList.remove('tf-revealed');
+          }
+        }
+      }
+
+      // Part 3: Reveal Short Answer
+      if (q.part === 3 || q.questionType === 'short_answer') {
+        const shortVal = document.getElementById('short-ans-val');
+        if (shortVal) {
+          if (isRevealed) {
+            shortVal.classList.add('visible');
+          } else {
+            shortVal.classList.remove('visible');
+          }
+        }
+      }
+
+      // Explanation Panel
       const exp = document.getElementById('slide-explanation');
       if (isRevealed) {
         exp.classList.add('visible');
@@ -419,6 +527,12 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
         toggleRevealAnswer();
       } else if (e.key === 'f' || e.key === 'F') {
         toggleFullScreen();
+      } else if (e.key === 'Home') {
+        currentSlide = 0;
+        renderSlide();
+      } else if (e.key === 'End') {
+        currentSlide = questions.length;
+        renderSlide();
       }
     });
 

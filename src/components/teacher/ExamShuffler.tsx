@@ -40,6 +40,7 @@ import {
   Maximize2,
   Paperclip,
   Gamepad2,
+  FileDown,
 } from "lucide-react";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
@@ -260,6 +261,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   const [extractedPartFilter, setExtractedPartFilter] = useState<"all" | 1 | 2 | 3>("all");
   const [previewStudentQIndex, setPreviewStudentQIndex] = useState<number>(1);
   const [generatedViewMode, setGeneratedViewMode] = useState<"student" | "paper" | "matrix">("student");
+  const [isPaperAnswersVisible, setIsPaperAnswersVisible] = useState<boolean>(false);
   const [simAnswers, setSimAnswers] = useState<Record<number, any>>({});
   const [showSolutionExplanation, setShowSolutionExplanation] = useState<boolean>(true);
 
@@ -2930,115 +2932,239 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                 if (!currentVariant) return null;
 
                 return (
-                  <div className="space-y-4 max-h-[600px] overflow-y-auto p-6 bg-slate-50 rounded-2xl border border-slate-200 text-xs">
-                    {/* Ministry Standard Header */}
-                    <div className="border-b-2 border-slate-800 pb-3 text-center space-y-1">
-                      <div className="flex justify-between text-[11px] font-bold text-slate-800 uppercase">
-                        <div>
-                          <p>{config.department}</p>
-                          <p>{config.school}</p>
-                        </div>
-                        <div>
-                          <p>{config.examPeriod}</p>
-                          <p>MÔN: {config.subject?.toUpperCase()}</p>
-                        </div>
+                  <div className="space-y-4">
+                    {/* Paper Action Toolbar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-indigo-50/80 rounded-xl border border-indigo-200 text-xs">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsPaperAnswersVisible(!isPaperAnswersVisible)}
+                          className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 shadow-2xs ${
+                            isPaperAnswersVisible
+                              ? "bg-emerald-600 text-white"
+                              : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
+                          }`}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{isPaperAnswersVisible ? "💡 Đang Hiện Đáp Án & Lời Giải" : "📄 Đang Ẩn Đáp Án (Bản Cho Học Sinh)"}</span>
+                        </button>
                       </div>
-                      <div className="pt-2 font-bold text-sm text-slate-900 uppercase">
-                        {examTitle}
-                      </div>
-                      <div className="flex justify-between text-[11px] text-slate-600 italic pt-1">
-                        <span>Thời gian: {config.duration} phút (Không kể phát đề)</span>
-                        <span className="font-mono font-bold text-slate-900">
-                          MÃ ĐỀ THI: {activeVariantTab}
-                        </span>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {/* Word Exam */}
+                        <button
+                          type="button"
+                          onClick={() => exportQuestionsToWordDoc(currentVariant.questions, `De_Thi_${config.subject}_ma_${activeVariantTab}`, false)}
+                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-blue-700 border border-blue-200 hover:bg-blue-50 flex items-center gap-1"
+                          title="Xuất file Word đề thi không có đáp án cho học sinh"
+                        >
+                          <FileDown className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Word (Đề Thi)</span>
+                        </button>
+
+                        {/* Word with Answers */}
+                        <button
+                          type="button"
+                          onClick={() => exportQuestionsToWordDoc(currentVariant.questions, `De_Thi_${config.subject}_ma_${activeVariantTab}`, true)}
+                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 flex items-center gap-1"
+                          title="Xuất file Word đề thi có sẵn đáp án chi tiết và ma trận"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Word (Kèm Đáp Án)</span>
+                        </button>
+
+                        {/* Printable PDF */}
+                        <button
+                          type="button"
+                          onClick={() => exportQuestionsToPrintablePdf(currentVariant.questions, `De_Thi_${config.subject}_ma_${activeVariantTab}`, isPaperAnswersVisible)}
+                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-slate-800 text-white hover:bg-slate-900 flex items-center gap-1"
+                          title="In hoặc lưu file PDF trực tiếp"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>In / PDF {isPaperAnswersVisible ? "(Có Đ/A)" : "(Đề Gốc)"}</span>
+                        </button>
                       </div>
                     </div>
 
-                    {/* Question Items */}
-                    {currentVariant.questions.map((q, qIdx) => {
-                      const isPart2 = q.part === 2 || q.questionType === "true_false" || (q.statements && q.statements.length > 0);
-                      const isPart3 = q.part === 3 || q.questionType === "short_answer" || (!isPart2 && q.options.length === 0);
-                      const isPart1 = !isPart2 && !isPart3;
-                      const isFirstInPart = qIdx === 0 || q.part !== currentVariant.questions[qIdx - 1]?.part;
-
-                      return (
-                        <React.Fragment key={q.questionIndex}>
-                          {isFirstInPart && (
-                            <div className="pt-3 pb-1 border-b border-slate-300">
-                              <p className="font-bold text-slate-900 uppercase">
-                                {q.part === 1
-                                  ? "PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn."
-                                  : q.part === 2
-                                  ? "PHẦN II. Câu trắc nghiệm đúng sai."
-                                  : "PHẦN III. Câu trắc nghiệm trả lời ngắn."}
-                              </p>
-                              <p className="italic text-slate-600 text-[11px]">
-                                {q.part === 1
-                                  ? "Thí sinh trả lời từ câu 1 đến câu 18. Mỗi câu hỏi thí sinh chỉ chọn một phương án."
-                                  : q.part === 2
-                                  ? "Thí sinh trả lời từ câu 1 đến câu 4. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai."
-                                  : "Thí sinh trả lời từ câu 1 đến câu 6."}
-                              </p>
-                            </div>
-                          )}
-
-                          <div className="space-y-1.5 pt-2.5 border-t border-slate-200">
-                            {q.groupTitle && (
-                              <div className="p-2 rounded bg-indigo-50 text-indigo-950 font-semibold text-[11px]">
-                                {q.groupTitle}
-                                {q.passageContent && (
-                                  <div className="font-normal mt-1">
-                                    <FormattedQuestionContent content={q.passageContent} />
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            <div className="font-bold text-slate-800">
-                              <span>
-                                Câu {q.questionIndex}
-                                {q.partQuestionIndex ? ` (Phần ${q.part === 1 ? 'I' : q.part === 2 ? 'II' : 'III'} - Câu ${q.partQuestionIndex})` : ""}:{" "}
-                              </span>
-                              <FormattedQuestionContent content={q.content} />
-                            </div>
-
-                            {isPart1 && q.options.length > 0 && (
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700 pt-1">
-                                {q.options.map((opt, optIdx) => (
-                                  <div key={optIdx} className="flex items-start gap-1">
-                                    <strong>{LETTERS[optIdx]}.</strong> <MathTextRenderer text={opt} />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {isPart2 && (
-                              <div className="space-y-1 pl-3 text-slate-700 pt-1">
-                                {(q.statements && q.statements.length > 0
-                                  ? q.statements
-                                  : [
-                                      { id: "a", label: "a)", text: "Ý a", correctValue: true },
-                                      { id: "b", label: "b)", text: "Ý b", correctValue: false },
-                                      { id: "c", label: "c)", text: "Ý c", correctValue: true },
-                                      { id: "d", label: "d)", text: "Ý d", correctValue: false },
-                                    ]
-                                ).map((st) => (
-                                  <div key={st.id} className="flex items-start gap-1">
-                                    <span className="font-bold">{st.label || `${st.id})`}</span>
-                                    <span><MathTextRenderer text={st.text} /></span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {isPart3 && (
-                              <div className="text-slate-600 italic pl-3 pt-1">
-                                Đáp án: ................................................................
-                              </div>
-                            )}
+                    {/* Paper Document Preview */}
+                    <div className="space-y-4 max-h-[600px] overflow-y-auto p-6 bg-slate-50 rounded-2xl border border-slate-200 text-xs">
+                      {/* Ministry Standard Header */}
+                      <div className="border-b-2 border-slate-800 pb-3 text-center space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold text-slate-800 uppercase">
+                          <div>
+                            <p>{config.department}</p>
+                            <p>{config.school}</p>
                           </div>
-                        </React.Fragment>
-                      );
-                    })}
+                          <div>
+                            <p>{config.examPeriod}</p>
+                            <p>MÔN: {config.subject?.toUpperCase()}</p>
+                          </div>
+                        </div>
+                        <div className="pt-2 font-bold text-sm text-slate-900 uppercase">
+                          {examTitle} {isPaperAnswersVisible ? "(HƯỚNG DẪN GIẢI & ĐÁP ÁN)" : ""}
+                        </div>
+                        <div className="flex justify-between text-[11px] text-slate-600 italic pt-1">
+                          <span>Thời gian: {config.duration} phút (Không kể phát đề)</span>
+                          <span className="font-mono font-bold text-slate-900">
+                            MÃ ĐỀ THI: {activeVariantTab}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Question Items */}
+                      {currentVariant.questions.map((q, qIdx) => {
+                        const isPart2 = q.part === 2 || q.questionType === "true_false" || (q.statements && q.statements.length > 0);
+                        const isPart3 = q.part === 3 || q.questionType === "short_answer" || (!isPart2 && q.options.length === 0);
+                        const isPart1 = !isPart2 && !isPart3;
+                        const isFirstInPart = qIdx === 0 || q.part !== currentVariant.questions[qIdx - 1]?.part;
+
+                        return (
+                          <React.Fragment key={q.questionIndex}>
+                            {isFirstInPart && (
+                              <div className="pt-3 pb-1 border-b border-slate-300">
+                                <p className="font-bold text-slate-900 uppercase">
+                                  {q.part === 1
+                                    ? "PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn."
+                                    : q.part === 2
+                                    ? "PHẦN II. Câu trắc nghiệm đúng sai."
+                                    : "PHẦN III. Câu trắc nghiệm trả lời ngắn."}
+                                </p>
+                                <p className="italic text-slate-600 text-[11px]">
+                                  {q.part === 1
+                                    ? "Thí sinh trả lời từ câu 1 đến câu 18. Mỗi câu hỏi thí sinh chỉ chọn một phương án."
+                                    : q.part === 2
+                                    ? "Thí sinh trả lời từ câu 1 đến câu 4. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai."
+                                    : "Thí sinh trả lời từ câu 1 đến câu 6."}
+                                </p>
+                              </div>
+                            )}
+
+                            <div className="space-y-1.5 pt-2.5 border-t border-slate-200">
+                              {q.groupTitle && (
+                                <div className="p-2 rounded bg-indigo-50 text-indigo-950 font-semibold text-[11px]">
+                                  {q.groupTitle}
+                                  {q.passageContent && (
+                                    <div className="font-normal mt-1">
+                                      <FormattedQuestionContent content={q.passageContent} />
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              <div className="font-bold text-slate-800">
+                                <span>
+                                  Câu {q.questionIndex}
+                                  {q.partQuestionIndex ? ` (Phần ${q.part === 1 ? 'I' : q.part === 2 ? 'II' : 'III'} - Câu ${q.partQuestionIndex})` : ""}:{" "}
+                                </span>
+                                <FormattedQuestionContent content={q.content} />
+                              </div>
+
+                              {isPart1 && q.options.length > 0 && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700 pt-1">
+                                  {q.options.map((opt, optIdx) => {
+                                    const isCorrect = isPaperAnswersVisible && optIdx === q.correctIndex;
+                                    return (
+                                      <div
+                                        key={optIdx}
+                                        className={`flex items-start gap-1 p-1 rounded transition-colors ${
+                                          isCorrect
+                                            ? "bg-emerald-100 text-emerald-950 font-bold border border-emerald-300"
+                                            : ""
+                                        }`}
+                                      >
+                                        <strong>{LETTERS[optIdx]}.</strong> <MathTextRenderer text={opt} />
+                                        {isCorrect && <span className="text-emerald-700 text-[10px]">✓</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {isPart2 && (
+                                <div className="space-y-1 pl-3 text-slate-700 pt-1">
+                                  {(q.statements && q.statements.length > 0
+                                    ? q.statements
+                                    : [
+                                        { id: "a", label: "a)", text: "Ý a", correctValue: true },
+                                        { id: "b", label: "b)", text: "Ý b", correctValue: false },
+                                        { id: "c", label: "c)", text: "Ý c", correctValue: true },
+                                        { id: "d", label: "d)", text: "Ý d", correctValue: false },
+                                      ]
+                                  ).map((st) => (
+                                    <div key={st.id} className="flex items-start gap-1.5">
+                                      <span className="font-bold">{st.label || `${st.id})`}</span>
+                                      <span className="flex-1"><MathTextRenderer text={st.text} /></span>
+                                      {isPaperAnswersVisible && (
+                                        <span
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                            st.correctValue
+                                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                              : "bg-red-100 text-red-800 border border-red-300"
+                                          }`}
+                                        >
+                                          {st.correctValue ? "ĐÚNG" : "SAI"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {isPart3 && (
+                                <div className="pl-3 pt-1">
+                                  {isPaperAnswersVisible ? (
+                                    <div className="inline-flex items-center gap-2 p-1.5 px-3 rounded bg-amber-50 border border-amber-300 text-amber-950 font-bold">
+                                      <span>Đáp án số chuẩn:</span>
+                                      <span className="font-mono text-emerald-700 text-sm">{q.shortAnswer || "Chưa có đáp án"}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-slate-600 italic">
+                                      Đáp án: ................................................................
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {isPaperAnswersVisible && q.explanation && (
+                                <div className="mt-1.5 p-2 rounded-lg bg-blue-50/80 border border-blue-200 text-blue-950 text-[11px] leading-relaxed">
+                                  <strong>💡 Lời giải chi tiết:</strong>{" "}
+                                  <FormattedQuestionContent content={q.explanation} />
+                                </div>
+                              )}
+                            </div>
+                          </React.Fragment>
+                        );
+                      })}
+
+                      {/* Bottom Answer Matrix if isPaperAnswersVisible */}
+                      {isPaperAnswersVisible && (
+                        <div className="pt-4 border-t-2 border-slate-800 mt-6 space-y-2">
+                          <h4 className="font-bold text-center text-slate-900 uppercase">
+                            BẢNG ĐÁP ÁN TỔNG HỢP (MÃ ĐỀ {activeVariantTab})
+                          </h4>
+                          <div className="grid grid-cols-5 sm:grid-cols-7 gap-1.5 text-center">
+                            {currentVariant.questions.map((q) => {
+                              const isP2 = q.part === 2 || q.questionType === "true_false";
+                              const isP3 = q.part === 3 || q.questionType === "short_answer";
+                              let ans = "";
+                              if (isP2) {
+                                ans = (q.statements || []).map((s) => `${s.label ? s.label.replace(")", "") : s.id}:${s.correctValue ? "Đ" : "S"}`).join(",");
+                              } else if (isP3) {
+                                ans = q.shortAnswer || "-";
+                              } else {
+                                ans = LETTERS[q.correctIndex ?? 0] || "A";
+                              }
+
+                              return (
+                                <div key={q.questionIndex} className="p-1 rounded bg-slate-100 border border-slate-200 text-[10px]">
+                                  <div className="font-bold text-slate-600">Câu {q.questionIndex}</div>
+                                  <div className="font-bold text-indigo-700 font-mono">{ans}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })()}

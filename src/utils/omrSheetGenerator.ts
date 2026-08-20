@@ -151,17 +151,45 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
     .short-col {
       display: inline-block;
       vertical-align: top;
-      width: 16%;
-      border: 1px solid #000;
-      margin-right: 0.6%;
-      padding: 3px;
+      width: calc(16.66% - 4px);
+      border: 1.2px solid #000;
+      margin: 0 2px;
+      padding: 2px;
+      text-align: center;
+      background: #fff;
+    }
+    .short-box-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 2px;
+    }
+    .short-box-cell {
+      border: 1.5px solid #000;
+      height: 16px;
+      width: 25%;
+      background: #fff;
+    }
+    .short-grid-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .short-grid-table td {
+      padding: 0.5px 0;
       text-align: center;
     }
-    .short-box {
-      width: 100%;
-      height: 18px;
-      border: 1.5px solid #000;
-      margin-bottom: 4px;
+    .short-bubble {
+      width: 11px;
+      height: 11px;
+      border: 1px solid #000;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 7.5px;
+      font-weight: bold;
+      color: #000;
+      background: #fff;
+      margin: 0 auto;
     }
     .footer-line {
       margin-top: 6px;
@@ -308,7 +336,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       <span>PHẦN II: Trắc nghiệm Đúng / Sai (Mỗi câu tô [Đ] hoặc [S] cho 4 ý a, b, c, d)</span>
       <span>${numPart2} CÂU (16 Ý)</span>
     </div>
-    <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+    <div style="display: flex; gap: 6px; margin-bottom: 6px;">
       ${Array.from({ length: numPart2 }).map((_, idx) => {
         const qNum = idx + 1;
         return `
@@ -329,22 +357,45 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       }).join("")}
     </div>
 
-    <!-- PART III: SHORT ANSWER -->
+    <!-- PART III: SHORT ANSWER - 4 COLUMNS MATRIX ACCORDING TO MOET STANDARD -->
     <div class="part-title">
-      <span>PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Tô số âm [-] và các chữ số tương ứng)</span>
+      <span>PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Viết vào 4 ô vuông và tô các chữ số tương ứng)</span>
       <span>${numPart3} CÂU</span>
     </div>
-    <div style="display: flex; margin-bottom: 4px;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
       ${Array.from({ length: numPart3 }).map((_, idx) => {
         const qNum = idx + 1;
         return `
         <div class="short-col">
-          <div style="font-weight: 900; font-size: 10px; margin-bottom: 2px;">CÂU ${qNum}</div>
-          <div class="short-box"></div>
-          <div style="margin-bottom: 2px;"><span class="bubble">-</span><span class="bubble">,</span></div>
-          ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `
-            <div style="margin: 1px 0;"><span class="bubble">${d}</span></div>
-          `).join("")}
+          <div style="font-weight: 900; font-size: 9.5px; margin-bottom: 2px; border-bottom: 1px solid #666; padding-bottom: 1px;">
+            CÂU ${qNum}
+          </div>
+          <!-- 4 Write-in Boxes -->
+          <table class="short-box-table">
+            <tr>
+              <td class="short-box-cell"></td>
+              <td class="short-box-cell"></td>
+              <td class="short-box-cell"></td>
+              <td class="short-box-cell"></td>
+            </tr>
+          </table>
+          <!-- Bubble Matrix (Row for - and ,, and 0-9 for all 4 columns) -->
+          <table class="short-grid-table">
+            <tr>
+              <td><span class="short-bubble">-</span></td>
+              <td><span class="short-bubble">,</span></td>
+              <td><span class="short-bubble">,</span></td>
+              <td><span class="short-bubble">,</span></td>
+            </tr>
+            ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `
+              <tr>
+                <td><span class="short-bubble">${d}</span></td>
+                <td><span class="short-bubble">${d}</span></td>
+                <td><span class="short-bubble">${d}</span></td>
+                <td><span class="short-bubble">${d}</span></td>
+              </tr>
+            `).join("")}
+          </table>
         </div>`;
       }).join("")}
     </div>
