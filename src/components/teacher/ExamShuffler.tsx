@@ -109,6 +109,9 @@ function restoreMarkdownImagesInQuestions(
 ): Question[] {
   if (!imageMap || Object.keys(imageMap).length === 0) return questions;
 
+  const imageEntries = Object.entries(imageMap);
+  const imageValues = Object.values(imageMap);
+
   return questions.map((q) => {
     let content = q.content || "";
     let passage = q.passageContent || "";
@@ -116,53 +119,67 @@ function restoreMarkdownImagesInQuestions(
     let explanation = q.explanation || "";
     let hasTableOrDiagram = q.hasTableOrDiagram;
 
-    // Options
-    let options = q.options ? q.options.map((opt) => {
-      let oStr = opt;
-      Object.entries(imageMap).forEach(([token, base64]) => {
-        if (oStr.includes(token)) {
-          oStr = oStr.replaceAll(token, base64);
+    // Helper to replace both explicit tokens and image index references
+    const replaceTokensInString = (str: string): string => {
+      if (!str) return "";
+      let res = str;
+      // 1. Direct token replacement e.g. __IMG_TOKEN_0__
+      imageEntries.forEach(([token, base64]) => {
+        if (res.includes(token)) {
+          res = res.replaceAll(token, base64);
         }
       });
-      return oStr;
-    }) : undefined;
+
+      // 2. Pattern ![Hình vẽ N](...) or ![Hình vẽ N] or ![Hình N] where URL was tokenized or lost
+      res = res.replace(/!\[(Hình\s*(?:vẽ\s*)?(\d+)|.*?)\](?:\(([^\s)]*)\))?/gi, (fullMatch, alt, numStr, insideUrl) => {
+        if (insideUrl && insideUrl.startsWith("data:image")) {
+          return `![${alt}](${insideUrl.replace(/\s+/g, "")})`;
+        }
+        if (numStr) {
+          const num = parseInt(numStr, 10);
+          const targetToken = `__IMG_TOKEN_${num - 1}__`;
+          const targetBase64 = imageMap[targetToken] || imageValues[num - 1];
+          if (targetBase64) {
+            return `![${alt}](${targetBase64})`;
+          }
+        }
+        if (insideUrl && imageMap[insideUrl]) {
+          return `![${alt}](${imageMap[insideUrl]})`;
+        }
+        return fullMatch;
+      });
+
+      return res;
+    };
+
+    content = replaceTokensInString(content);
+    passage = replaceTokensInString(passage);
+    explanation = replaceTokensInString(explanation);
+
+    if (diagramUrl) {
+      diagramUrl = replaceTokensInString(diagramUrl);
+      if (imageMap[diagramUrl]) {
+        diagramUrl = imageMap[diagramUrl];
+      }
+    }
+
+    // Auto-detect diagramUrl from content if not set
+    if (!diagramUrl) {
+      const imgMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/);
+      if (imgMatch && imgMatch[1]) {
+        diagramUrl = imgMatch[1];
+      }
+    }
+
+    // Options
+    let options = q.options ? q.options.map((opt) => replaceTokensInString(opt)) : undefined;
 
     // Statements
-    let statements = q.statements ? q.statements.map((st) => {
-      let stText = st.text;
-      let stExp = st.explanation || "";
-      Object.entries(imageMap).forEach(([token, base64]) => {
-        if (stText.includes(token)) {
-          stText = stText.replaceAll(token, base64);
-        }
-        if (stExp.includes(token)) {
-          stExp = stExp.replaceAll(token, base64);
-        }
-      });
-      return {
-        ...st,
-        text: stText,
-        explanation: stExp || undefined,
-      };
-    }) : undefined;
-
-    Object.entries(imageMap).forEach(([token, base64]) => {
-      if (content.includes(token)) {
-        content = content.replaceAll(token, base64);
-        hasTableOrDiagram = true;
-        if (!diagramUrl) diagramUrl = base64;
-      }
-      if (passage.includes(token)) {
-        passage = passage.replaceAll(token, base64);
-        hasTableOrDiagram = true;
-      }
-      if (explanation.includes(token)) {
-        explanation = explanation.replaceAll(token, base64);
-      }
-      if (diagramUrl === token) {
-        diagramUrl = base64;
-      }
-    });
+    let statements = q.statements ? q.statements.map((st) => ({
+      ...st,
+      text: replaceTokensInString(st.text),
+      explanation: st.explanation ? replaceTokensInString(st.explanation) : undefined,
+    })) : undefined;
 
     return {
       ...q,
@@ -175,6 +192,7 @@ function restoreMarkdownImagesInQuestions(
       hasTableOrDiagram: Boolean(
         hasTableOrDiagram ||
         content.includes("![") ||
+        content.includes("data:image") ||
         content.includes("|") ||
         diagramUrl
       ),
@@ -220,6 +238,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   // Input source mode: "paste" | "bank" | "upload"
   const [inputMode, setInputMode] = useState<"paste" | "bank" | "upload">("paste");
   const [rawText, setRawText] = useState(SAMPLE_EXAM_TEXT);
+  const [uploadedImageMap, setUploadedImageMap] = useState<Record<string, string>>({});
   const [isParsing, setIsParsing] = useState(false);
   const [isSolvingAI, setIsSolvingAI] = useState(false);
 
@@ -299,8 +318,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
     setParseSuccessMsg("");
 
     try {
+      const mapToUse = customImageMap || uploadedImageMap;
+      if (customImageMap) {
+        setUploadedImageMap(customImageMap);
+      }
+
       // Sanitize large base64 images into compact tokens so payload is fast & AI preserves tokens
-      const { cleanText, imageMap } = sanitizeMarkdownImages(textToParse, customImageMap);
+      const { cleanText, imageMap } = sanitizeMarkdownImages(textToParse, mapToUse);
+      // Keep uploadedImageMap updated with any newly discovered tokens
+      setUploadedImageMap((prev) => ({ ...prev, ...imageMap }));
 
       // If user had pasted raw base64 into the textarea, clean up the displayed rawText so it remains human-readable
       if (cleanText !== textToParse && customText === undefined) {
@@ -510,26 +536,28 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
         const docxHtmlResult = htmlResult ? convertDocxHtmlToMarkdown(htmlResult.value) : { markdown: "", imageMap: {} };
         
-        // Decide best markdown source & corresponding image map: deepResult has LaTeX math formulas converted from OMML
+        // Merge imageMaps from both extractors so NO embedded images or formulas are lost
+        const finalImageMap: Record<string, string> = {
+          ...(docxHtmlResult.imageMap || {}),
+          ...(deepResult?.imageMap || {}),
+        };
+        
+        // Decide best markdown source: deepResult has LaTeX math formulas converted from OMML
         let textToUse = "";
-        let finalImageMap: Record<string, string> = {};
-
         if (deepResult && deepResult.markdown && deepResult.markdown.trim().length > 30) {
           textToUse = deepResult.markdown;
-          finalImageMap = deepResult.imageMap || {};
         } else if (docxHtmlResult.markdown && docxHtmlResult.markdown.trim().length > 0) {
           textToUse = docxHtmlResult.markdown;
-          finalImageMap = docxHtmlResult.imageMap || {};
         } else {
           const rawResult = await mammoth.extractRawText({ arrayBuffer });
           textToUse = rawResult.value;
-          finalImageMap = {};
         }
 
         if (!textToUse || textToUse.trim().length === 0) {
           throw new Error("Không thể trích xuất văn bản từ file Word này. Hãy kiểm tra nội dung file.");
         }
 
+        setUploadedImageMap(finalImageMap);
         setRawText(textToUse);
         setInputMode("paste");
         handleParseRawText(textToUse, finalImageMap);

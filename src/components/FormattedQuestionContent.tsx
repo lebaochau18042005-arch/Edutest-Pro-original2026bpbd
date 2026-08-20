@@ -19,23 +19,32 @@ export const SafeExamImage: React.FC<{
   onClick?: () => void;
   inline?: boolean;
 }> = ({ src, alt = "Hình vẽ", className, onClick, inline = false }) => {
-  const [currentSrc, setCurrentSrc] = useState<string>(() => convertWmfDataUriToPng(src));
+  const cleanInitialSrc = useMemo(() => {
+    if (!src) return "";
+    const trimmed = src.trim();
+    if (trimmed.startsWith("data:image")) {
+      return trimmed.replace(/\s+/g, "");
+    }
+    return trimmed;
+  }, [src]);
+
+  const [currentSrc, setCurrentSrc] = useState<string>(() => convertWmfDataUriToPng(cleanInitialSrc));
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
-    const initial = convertWmfDataUriToPng(src);
+    const initial = convertWmfDataUriToPng(cleanInitialSrc);
     setCurrentSrc(initial);
     setHasError(false);
 
     if (
-      src &&
-      (src.startsWith("data:image/wmf") ||
-        src.startsWith("data:image/x-wmf") ||
-        src.startsWith("data:image/emf") ||
-        src.startsWith("data:image/x-emf"))
+      cleanInitialSrc &&
+      (cleanInitialSrc.startsWith("data:image/wmf") ||
+        cleanInitialSrc.startsWith("data:image/x-wmf") ||
+        cleanInitialSrc.startsWith("data:image/emf") ||
+        cleanInitialSrc.startsWith("data:image/x-emf"))
     ) {
-      convertWmfDataUriToPngAsync(src)
+      convertWmfDataUriToPngAsync(cleanInitialSrc)
         .then((converted) => {
           if (isMounted && converted) {
             setCurrentSrc(converted);
@@ -47,9 +56,9 @@ export const SafeExamImage: React.FC<{
     return () => {
       isMounted = false;
     };
-  }, [src]);
+  }, [cleanInitialSrc]);
 
-  if (hasError) {
+  if (hasError || !currentSrc) {
     return (
       <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200">
         <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
@@ -65,8 +74,8 @@ export const SafeExamImage: React.FC<{
       className={className}
       onClick={onClick}
       onError={() => {
-        if (!currentSrc.startsWith("data:image/png") && src) {
-          convertWmfDataUriToPngAsync(src)
+        if (!currentSrc.startsWith("data:image/png") && cleanInitialSrc) {
+          convertWmfDataUriToPngAsync(cleanInitialSrc)
             .then((png) => {
               if (png && png !== currentSrc) {
                 setCurrentSrc(png);
@@ -94,7 +103,7 @@ export const MathTextRenderer: React.FC<{ text: string }> = ({ text }) => {
     if (!text) return [];
 
     // Match either LaTeX math ($...$ or $$...$$) or Markdown images (![alt](src))
-    const combinedRegex = /(!\[(.*?)\]\((data:image\/[^;]+;base64,[^\s)]+|https?:\/\/[^\s)]+|\/[^\s)]+|[^\s)]+)\)|\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g;
+    const combinedRegex = /(!\[(.*?)\]\(\s*(data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\s\r\n]+|https?:\/\/[^\s)]+|\/[^\s)]+|[^\s)]+?)\s*\)|\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g;
 
     const parts: Array<{
       type: "text" | "math" | "image";
@@ -118,7 +127,8 @@ export const MathTextRenderer: React.FC<{ text: string }> = ({ text }) => {
       // Check if it's a markdown image
       if (rawMatch.startsWith("![") && match[3]) {
         const alt = match[2] || "Hình vẽ";
-        const src = convertWmfDataUriToPng(match[3]);
+        const cleanSrc = match[3].trim().startsWith("data:image") ? match[3].replace(/\s+/g, "") : match[3].trim();
+        const src = convertWmfDataUriToPng(cleanSrc);
         parts.push({
           type: "image",
           value: src,
