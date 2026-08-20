@@ -8,10 +8,10 @@ import { Question, QuestionType, TrueFalseStatement } from "../types";
 
 export const FALLBACK_MODELS = [
   "gemini-2.5-flash",
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-3.1-pro-preview",
-  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-2.5-pro",
+  "gemini-1.5-pro",
 ];
 
 function getAI(apiKey?: string): GoogleGenAI | null {
@@ -801,8 +801,26 @@ export async function clientParseExamFile(payload: {
   const { fileBase64, mimeType, fileName, subject, grade, apiKey, model } = payload;
   const key = apiKey || getStoredApiKey();
   const ai = getAI(key);
+
   if (!ai || !key) {
-    return { success: false, error: "Vui lòng cấu hình Google Gemini API Key trước khi phân tích file đa phương tiện." };
+    try {
+      const resp = await fetch("/api/ai/parse-exam-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileBase64, mimeType, fileName, subject, grade }),
+      });
+      if (resp.ok) {
+        const resJson = await resp.json();
+        if (resJson.success && resJson.data && resJson.data.length > 0) {
+          return { success: true, data: resJson.data };
+        }
+      }
+    } catch (e) {}
+
+    return {
+      success: false,
+      error: "Vui lòng nhập Google Gemini API Key trong phần Cài Đặt (nút đỏ trên Header) để nhận diện ảnh đề thi.",
+    };
   }
 
   const cleanBase64 = fileBase64.replace(/^data:[^;]+;base64,/, "");

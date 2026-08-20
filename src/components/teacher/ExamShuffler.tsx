@@ -596,6 +596,11 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
               size: (file.size / 1024).toFixed(1) + " KB",
               count: newQuestions.length,
             });
+          } else {
+            throw new Error(
+              data.error ||
+                `Không thể nhận diện câu hỏi từ file "${file.name}". Vui lòng kiểm tra lại Google Gemini API Key trong Cài Đặt (hoặc tạo API Key miễn phí tại Google AI Studio).`
+            );
           }
         } else if (fileNameLower.endsWith(".docx")) {
           const arrayBuffer = await file.arrayBuffer();

@@ -39,41 +39,41 @@ export interface ModelCardInfo {
 
 export const AVAILABLE_MODELS: ModelCardInfo[] = [
   {
-    id: "gemini-3-flash-preview",
-    name: "Gemini 3 Flash Preview",
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
     badge: "Khuyên Dùng (Default)",
     badgeColor: "bg-blue-100 text-blue-800 border-blue-200",
-    description: "Tốc độ xử lý siêu nhanh, tối ưu bóc tách đề thi, nhận diện công thức và chấm trắc nghiệm.",
+    description: "Tốc độ xử lý siêu nhanh, tối ưu bóc tách ảnh chụp đề thi, nhận diện công thức và chấm trắc nghiệm.",
     speed: "Rất nhanh (~1s)",
     accuracy: "Xuất sắc",
     isDefault: true,
   },
   {
-    id: "gemini-3-pro-preview",
-    name: "Gemini 3 Pro Preview",
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
     badge: "Chuyên Sâu & Tự Luận",
     badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200",
-    description: "Suy luận logic cực mạnh, chấm bài tự luận chi tiết theo barem từng bước.",
+    description: "Suy luận logic cực mạnh, phân tích đề thi nâng cao và chấm bài tự luận chi tiết.",
     speed: "Tiêu chuẩn (~2-3s)",
     accuracy: "Tối cao (SOTA)",
   },
   {
-    id: "gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash Lite",
-    badge: "Dự Phòng Lite Ổn Định",
-    badgeColor: "bg-amber-100 text-amber-800 border-amber-200",
-    description: "Model siêu nhẹ, tốc độ phản hồi tức thì khi các model lớn hết quota.",
-    speed: "Siêu nhanh (~0.5s)",
-    accuracy: "Rất tốt",
+    id: "gemini-2.0-flash",
+    name: "Gemini 2.0 Flash",
+    badge: "Đa Phương Thức Ổn Định",
+    badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    description: "Kiến trúc đa phương thức thế hệ mới nhận diện hình ảnh đề thi và OCR chính xác.",
+    speed: "Rất nhanh (~1s)",
+    accuracy: "Xuất sắc",
   },
   {
-    id: "gemini-3.5-flash",
-    name: "Gemini 3.5 Flash",
-    badge: "Thế Hệ Mới",
-    badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    description: "Kiến trúc đa phương thức thế hệ mới nhất cho bài thi dạng hình ảnh và PDF.",
-    speed: "Rất nhanh",
-    accuracy: "Xuất sắc",
+    id: "gemini-1.5-flash",
+    name: "Gemini 1.5 Flash",
+    badge: "Dự Phòng Ổn Định",
+    badgeColor: "bg-amber-100 text-amber-800 border-amber-200",
+    description: "Model dự phòng với độ trễ thấp và tính ổn định cao.",
+    speed: "Siêu nhanh (~0.8s)",
+    accuracy: "Rất tốt",
   },
 ];
 
@@ -87,10 +87,10 @@ export const getStoredApiKey = (): string => {
 };
 
 export const getStoredSelectedModel = (): string => {
-  if (typeof window === "undefined") return "gemini-3-flash-preview";
+  if (typeof window === "undefined") return "gemini-2.5-flash";
   return (
     localStorage.getItem("gemini_selected_model") ||
-    "gemini-3-flash-preview"
+    "gemini-2.5-flash"
   );
 };
 
