@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
-import { Question, ExamConfig, ExamVariant, ExamPackage, ExamPart, CognitiveLevel } from "../../types";
+import { Question, ExamConfig, ExamVariant, ExamPackage, ExamPart, CognitiveLevel, QuestionType, TrueFalseStatement } from "../../types";
 import {
   generateVariantsFromQuestions,
   exportAnswerKeyMatrix,
@@ -1490,9 +1490,9 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                   onDrop={(e) => {
                     e.preventDefault();
                     setIsDragging(false);
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) {
-                      processUploadedFile(file);
+                    const files = e.dataTransfer.files;
+                    if (files && files.length > 0) {
+                      processFilesBatch(Array.from(files), false);
                     }
                   }}
                   className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${
