@@ -809,13 +809,13 @@ export async function clientParseExamFile(payload: {
 
   try {
     const promptText = `Bạn là chuyên gia OCR và phân tích đề thi THPT Quốc gia chuẩn Bộ GD&ĐT Việt Nam (2025/2026).
-Hãy đọc và trích xuất TOÀN BỘ CÂU HỎI từ tài liệu đính kèm này (${fileName || "Đề thi"}) mà TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT.
+Hãy đọc và trích xuất TOÀN BỘ CÂU HỎI từ tài liệu đính kèm này (${fileName || "Đề thi"}) mà TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT BẤT KỲ CÂU NÀO.
 
-QUY TẮC BẮT BUỘC:
-1. PHẦN I: Trắc nghiệm 4 lựa chọn (part: 1, questionType: "multiple_choice") -> "options": ["Nội dung A...", "Nội dung B...", "Nội dung C...", "Nội dung D..."], "correctIndex": 0..3.
-2. PHẦN II: Trắc nghiệm Đúng / Sai (part: 2, questionType: "true_false") -> "statements": 4 ý a, b, c, d kèm correctValue (boolean).
-3. PHẦN III: Trả lời ngắn / Điền số (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả ngắn.
-4. BẢO TOÀN DỮ LIỆU & BẢNG BIỂU: Giữ nguyên công thức Toán/Lý/Hóa LaTeX ($...$) và bảng Markdown chuẩn.`;
+QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
+1. PHẦN I: Trắc nghiệm 4 lựa chọn A, B, C, D (CHỈ CHỌN 1 ĐÁP ÁN ĐÚNG DUY NHẤT). Mọi câu hỏi có các lựa chọn A, B, C, D đều BẮT BUỘC là PHẦN I (part: 1, questionType: "multiple_choice") -> "options": ["Phương án A...", "Phương án B...", "Phương án C...", "Phương án D..."], "correctIndex": 0..3.
+2. PHẦN II: Trắc nghiệm Đúng / Sai (Mỗi câu gồm 4 mệnh đề nhỏ a, b, c, d; học sinh phải chọn Đúng hoặc Sai cho TỪNG ý a, b, c, d) -> (part: 2, questionType: "true_false") -> "statements": [ {"id": "a", "label": "a)", "text": "...", "correctValue": true/false}, ... ]. TUYỆT ĐỐI KHÔNG gán câu trắc nghiệm 4 lựa chọn A-D vào Phần II!
+3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Học sinh tự tính toán và điền kết quả số) -> (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số ngắn.
+4. BẢO TOÀN DỮ LIỆU & CÔNG THỨC: Giữ nguyên công thức Toán/Lý/Hóa LaTeX ($...$ hoặc $$...$$) và bảng biểu Markdown.`;
 
     const contents = [
       {
@@ -878,7 +878,21 @@ QUY TẮC BẮT BUỘC:
     const parsed = JSON.parse(cleaned || "[]");
 
     const formatted: Question[] = parsed.map((item: any, idx: number) => {
-      const part: 1 | 2 | 3 = item.part === 2 ? 2 : item.part === 3 ? 3 : 1;
+      // Strict Part Classification
+      let part: 1 | 2 | 3 = 1;
+      const hasFourOptions = Array.isArray(item.options) && item.options.length >= 2;
+      const hasStatements = Array.isArray(item.statements) && item.statements.length >= 2;
+
+      if (hasFourOptions) {
+        part = 1;
+      } else if (hasStatements || item.part === 2 || item.questionType === "true_false") {
+        part = 2;
+      } else if (item.part === 3 || item.questionType === "short_answer" || item.shortAnswer) {
+        part = 3;
+      } else {
+        part = 1;
+      }
+
       const questionType: QuestionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
 
       let finalOptions: string[] = [];
@@ -903,8 +917,8 @@ QUY TẮC BẮT BUỘC:
         content: item.content || "",
         options: part === 1 ? finalOptions.slice(0, 4) : [],
         correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
-        statements: item.statements,
-        shortAnswer: item.shortAnswer,
+        statements: part === 2 ? item.statements : undefined,
+        shortAnswer: part === 3 ? item.shortAnswer : undefined,
         explanation: item.explanation || "",
         needsReview: true,
         isAiGenerated: true,

@@ -547,6 +547,12 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
     let part: ExamPart = 1;
     if (q.part === 1 || q.part === 2 || q.part === 3) {
       part = q.part;
+    } else if (q.options && q.options.length >= 2) {
+      part = 1;
+    } else if (q.statements && q.statements.length >= 2) {
+      part = 2;
+    } else if (q.shortAnswer && (!q.options || q.options.length === 0)) {
+      part = 3;
     } else if (total === 28) {
       if (idx < 18) part = 1;
       else if (idx < 22) part = 2;
@@ -555,10 +561,6 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       if (idx < 12) part = 1;
       else if (idx < 16) part = 2;
       else part = 3;
-    } else if (q.statements && q.statements.length > 0) {
-      part = 2;
-    } else if (q.shortAnswer && (!q.options || q.options.length === 0)) {
-      part = 3;
     }
 
     const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";

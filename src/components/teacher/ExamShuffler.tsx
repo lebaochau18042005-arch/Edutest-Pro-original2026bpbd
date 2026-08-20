@@ -41,6 +41,7 @@ import {
   Paperclip,
   Gamepad2,
   FileDown,
+  FilePlus,
 } from "lucide-react";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
@@ -425,189 +426,346 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
     }
   };
 
-  // Upload file state & Drag-and-drop
+  // Upload file state & Multi-File Drag-and-drop
   const [uploadedFileName, setUploadedFileName] = useState<string>("");
   const [uploadedFileSize, setUploadedFileSize] = useState<string>("");
+  const [uploadedFilesList, setUploadedFilesList] = useState<Array<{ name: string; size: string; count: number }>>([]);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; currentFileName: string } | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isReadingFile, setIsReadingFile] = useState<boolean>(false);
   const [isImageUploaded, setIsImageUploaded] = useState<boolean>(false);
+  const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem("edutest_saved_draft_exam"));
+    } catch {
+      return false;
+    }
+  });
 
-  // Process any uploaded file (DOCX, PDF, PNG/JPG/WEBP, TXT, XLSX, CSV, TSV)
-  const processUploadedFile = async (file: File) => {
-    if (!file) return;
+  // Quick Change Part for any question (Phần I <-> Phần II <-> Phần III)
+  const handleQuickChangeQuestionPart = (questionId: string, targetPart: 1 | 2 | 3) => {
+    setSelectedQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== questionId) return q;
+
+        if (targetPart === 1) {
+          // Convert to Part I (Multiple Choice 4 Options)
+          let opts: string[] = [];
+          if (q.options && q.options.length >= 2) {
+            opts = [...q.options];
+          } else if (q.statements && q.statements.length > 0) {
+            opts = q.statements.map((s) => s.text);
+          }
+          while (opts.length < 4) {
+            opts.push(`Phương án ${LETTERS[opts.length] || "A"}`);
+          }
+          return {
+            ...q,
+            part: 1,
+            questionType: "multiple_choice" as QuestionType,
+            options: opts.slice(0, 4),
+            statements: undefined,
+            shortAnswer: undefined,
+            correctIndex: q.correctIndex ?? 0,
+            needsReview: false,
+          };
+        } else if (targetPart === 2) {
+          // Convert to Part II (True / False 4 Sub-statements)
+          let stmts: TrueFalseStatement[] = [];
+          if (q.statements && q.statements.length >= 2) {
+            stmts = [...q.statements];
+          } else if (q.options && q.options.length > 0) {
+            stmts = q.options.map((opt, oIdx) => ({
+              id: ["a", "b", "c", "d"][oIdx] || "a",
+              label: `${["a", "b", "c", "d"][oIdx] || "a"})`,
+              text: opt,
+              correctValue: oIdx === (q.correctIndex || 0),
+            }));
+          }
+          const required = ["a", "b", "c", "d"];
+          while (stmts.length < 4) {
+            const l = required[stmts.length];
+            stmts.push({ id: l, label: `${l})`, text: `Khẳng định ý ${l}`, correctValue: true });
+          }
+          return {
+            ...q,
+            part: 2,
+            questionType: "true_false" as QuestionType,
+            statements: stmts.slice(0, 4),
+            options: [],
+            shortAnswer: undefined,
+            needsReview: false,
+          };
+        } else {
+          // Convert to Part III (Short Answer)
+          return {
+            ...q,
+            part: 3,
+            questionType: "short_answer" as QuestionType,
+            shortAnswer: q.shortAnswer || (q.options && q.options[q.correctIndex || 0]) || "0",
+            options: [],
+            statements: undefined,
+            needsReview: false,
+          };
+        }
+      })
+    );
+  };
+
+  // Restore Draft from LocalStorage
+  const handleRestoreDraft = () => {
+    try {
+      const saved = localStorage.getItem("edutest_saved_draft_exam");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.questions && parsed.questions.length > 0) {
+          setSelectedQuestions(parsed.questions);
+          if (parsed.config) setConfig(parsed.config);
+          if (parsed.examTitle) setExamTitle(parsed.examTitle);
+          if (parsed.filesList) setUploadedFilesList(parsed.filesList);
+          if (parsed.imageMap) setUploadedImageMap(parsed.imageMap);
+          const variants = generateVariantsFromQuestions(parsed.questions, parsed.config || config);
+          setGeneratedVariants(variants);
+          if (variants.length > 0) {
+            setActiveVariantTab(variants[0].examCode);
+          }
+          setParseSuccessMsg(`✅ Đã khôi phục thành công bản nháp gồm ${parsed.questions.length} câu hỏi!`);
+          setShowMissingAnswersPrompt(false);
+          return;
+        }
+      }
+      alert("Không tìm thấy bản nháp đề thi nào trước đó.");
+    } catch (e) {
+      alert("Không thể khôi phục bản nháp đề thi.");
+    }
+  };
+
+  // Process multiple files in sequence (Batch OCR & continuous question merging)
+  const processFilesBatch = async (files: File[], append: boolean = false) => {
+    if (!files || files.length === 0) return;
     setIsReadingFile(true);
-    setUploadedFileName(file.name);
-    setUploadedFileSize((file.size / 1024).toFixed(1) + " KB");
+    setIsParsing(true);
 
-    const fileNameLower = file.name.toLowerCase();
-    const isImage = fileNameLower.match(/\.(png|jpe?g|webp|gif|bmp)$/) !== null;
-    setIsImageUploaded(isImage);
+    let currentQuestionsList: Question[] = append ? [...selectedQuestions] : [];
+    let updatedFilesList = append ? [...uploadedFilesList] : [];
+    let combinedImageMap: Record<string, string> = append ? { ...uploadedImageMap } : {};
 
     try {
-      // 1. PDF & Image Files (PNG, JPG, JPEG, WEBP) -> Multimodal AI OCR Parser
-      if (
-        fileNameLower.endsWith(".pdf") ||
-        isImage
-      ) {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          try {
-            const base64Data = e.target?.result as string;
-            const mimeType =
-              file.type ||
-              (fileNameLower.endsWith(".pdf")
-                ? "application/pdf"
-                : "image/png");
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({ current: i + 1, total: files.length, currentFileName: file.name });
+        setUploadedFileName(file.name);
+        setUploadedFileSize((file.size / 1024).toFixed(1) + " KB");
 
-            setIsParsing(true);
-            const apiKey = getStoredApiKey();
-            const model = getStoredSelectedModel();
-            const data = await clientParseExamFile({
-              fileBase64: base64Data,
-              mimeType,
-              fileName: file.name,
-              subject: config.subject,
-              grade: config.grade,
-              apiKey,
-              model,
+        const fileNameLower = file.name.toLowerCase();
+        const isImage = fileNameLower.match(/\.(png|jpe?g|webp|gif|bmp)$/) !== null;
+        if (isImage) setIsImageUploaded(true);
+
+        if (fileNameLower.endsWith(".pdf") || isImage) {
+          const base64Data: string = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+
+          const mimeType = file.type || (fileNameLower.endsWith(".pdf") ? "application/pdf" : "image/png");
+          const apiKey = getStoredApiKey();
+          const model = getStoredSelectedModel();
+
+          const data = await clientParseExamFile({
+            fileBase64: base64Data,
+            mimeType,
+            fileName: file.name,
+            subject: config.subject,
+            grade: config.grade,
+            apiKey,
+            model,
+          });
+
+          if (data.success && data.data && data.data.length > 0) {
+            const startIndex = currentQuestionsList.length;
+            const newQuestions = data.data.map((q, qIdx) => ({
+              ...q,
+              id: `file_q_${Date.now()}_${startIndex + qIdx + 1}`,
+              originalOrderIndex: startIndex + qIdx + 1,
+            }));
+            currentQuestionsList = [...currentQuestionsList, ...newQuestions];
+            updatedFilesList.push({
+              name: file.name,
+              size: (file.size / 1024).toFixed(1) + " KB",
+              count: newQuestions.length,
             });
-
-            if (data.success && data.data && data.data.length > 0) {
-              setSelectedQuestions(data.data);
-              const variants = generateVariantsFromQuestions(data.data, config);
-              setGeneratedVariants(variants);
-              if (variants.length > 0) {
-                setActiveVariantTab(variants[0].examCode);
-              }
-              setExtractedViewMode("list");
-              setShowMissingAnswersPrompt(false);
-              setParseSuccessMsg(
-                isImage
-                  ? `Đã nhận diện ${data.data.length} câu hỏi từ File Ảnh "${file.name}" và tự động sẵn sàng xuất bản Word/PDF!`
-                  : `Đã trích xuất ${data.data.length} câu hỏi từ "${file.name}" kèm nhận diện hình vẽ & công thức thành công!`
-              );
-              setTimeout(() => {
-                document.getElementById("extracted-questions-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }, 150);
-            } else {
-              alert(data.error || "Không thể phân tích tài liệu này bằng AI.");
-            }
-          } catch (err: any) {
-            alert("Lỗi đọc file: " + err.message);
-          } finally {
-            setIsParsing(false);
-            setIsReadingFile(false);
           }
-        };
-        reader.readAsDataURL(file);
-        return;
+        } else if (fileNameLower.endsWith(".docx")) {
+          const arrayBuffer = await file.arrayBuffer();
+          let deepResult: any = null;
+          try {
+            deepResult = await extractDocxDeep(arrayBuffer);
+          } catch (e) {}
+
+          const mammothOptions: any = {};
+          if ((mammoth as any).images?.inline) {
+            mammothOptions.convertImage = (mammoth as any).images.inline((element: any) => {
+              return element.read("base64").then((buf: string) => ({
+                src: `data:${element.contentType || "image/png"};base64,${buf}`,
+              }));
+            });
+          }
+
+          let htmlResult: any = null;
+          try {
+            htmlResult = await mammoth.convertToHtml({ arrayBuffer }, mammothOptions);
+          } catch (e) {}
+
+          const docxHtmlResult = htmlResult ? convertDocxHtmlToMarkdown(htmlResult.value) : { markdown: "", imageMap: {} };
+          const finalImageMap = {
+            ...(docxHtmlResult.imageMap || {}),
+            ...(deepResult?.imageMap || {}),
+          };
+          combinedImageMap = { ...combinedImageMap, ...finalImageMap };
+
+          let textToUse = "";
+          if (deepResult && deepResult.markdown && deepResult.markdown.trim().length > 30) {
+            textToUse = deepResult.markdown;
+          } else if (docxHtmlResult.markdown && docxHtmlResult.markdown.trim().length > 0) {
+            textToUse = docxHtmlResult.markdown;
+          } else {
+            const raw = await mammoth.extractRawText({ arrayBuffer });
+            textToUse = raw.value;
+          }
+
+          const parsed = await clientParseExam({
+            rawText: textToUse,
+            subject: config.subject,
+            grade: config.grade,
+          });
+
+          if (parsed.success && parsed.data && parsed.data.length > 0) {
+            const restored = restoreMarkdownImagesInQuestions(parsed.data, finalImageMap);
+            const startIndex = currentQuestionsList.length;
+            const newQuestions = restored.map((q, qIdx) => ({
+              ...q,
+              id: `docx_q_${Date.now()}_${startIndex + qIdx + 1}`,
+              originalOrderIndex: startIndex + qIdx + 1,
+            }));
+            currentQuestionsList = [...currentQuestionsList, ...newQuestions];
+            updatedFilesList.push({
+              name: file.name,
+              size: (file.size / 1024).toFixed(1) + " KB",
+              count: newQuestions.length,
+            });
+          }
+        } else if (fileNameLower.endsWith(".xlsx") || fileNameLower.endsWith(".xls")) {
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: "array" });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const html = XLSX.utils.sheet_to_html(worksheet);
+          const docxResult = convertDocxHtmlToMarkdown(html);
+          const finalData = docxResult.markdown && docxResult.markdown.trim() ? docxResult.markdown : XLSX.utils.sheet_to_csv(worksheet);
+
+          const parsed = await clientParseExam({
+            rawText: finalData,
+            subject: config.subject,
+            grade: config.grade,
+          });
+
+          if (parsed.success && parsed.data && parsed.data.length > 0) {
+            const startIndex = currentQuestionsList.length;
+            const newQuestions = parsed.data.map((q, qIdx) => ({
+              ...q,
+              id: `excel_q_${Date.now()}_${startIndex + qIdx + 1}`,
+              originalOrderIndex: startIndex + qIdx + 1,
+            }));
+            currentQuestionsList = [...currentQuestionsList, ...newQuestions];
+            updatedFilesList.push({
+              name: file.name,
+              size: (file.size / 1024).toFixed(1) + " KB",
+              count: newQuestions.length,
+            });
+          }
+        } else {
+          // Plain text file (.txt, .md, .csv)
+          const content: string = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.onerror = reject;
+            reader.readAsText(file);
+          });
+
+          const parsed = await clientParseExam({
+            rawText: content,
+            subject: config.subject,
+            grade: config.grade,
+          });
+
+          if (parsed.success && parsed.data && parsed.data.length > 0) {
+            const startIndex = currentQuestionsList.length;
+            const newQuestions = parsed.data.map((q, qIdx) => ({
+              ...q,
+              id: `txt_q_${Date.now()}_${startIndex + qIdx + 1}`,
+              originalOrderIndex: startIndex + qIdx + 1,
+            }));
+            currentQuestionsList = [...currentQuestionsList, ...newQuestions];
+            updatedFilesList.push({
+              name: file.name,
+              size: (file.size / 1024).toFixed(1) + " KB",
+              count: newQuestions.length,
+            });
+          }
+        }
       }
 
-      // 2. Microsoft Word .docx (Preserves embedded media images, OMML Math equations, and Tables)
-      if (fileNameLower.endsWith(".docx")) {
-        const arrayBuffer = await file.arrayBuffer();
-
-        // A. Run deep DOCX extraction (Direct Word XML parsing for OMML math formulas -> LaTeX & media extraction)
-        let deepResult: any = null;
-        try {
-          deepResult = await extractDocxDeep(arrayBuffer);
-        } catch (e) {
-          console.warn("Deep docx extraction error, falling back to standard mammoth parser:", e);
+      if (currentQuestionsList.length > 0) {
+        setSelectedQuestions(currentQuestionsList);
+        setUploadedFilesList(updatedFilesList);
+        setUploadedImageMap(combinedImageMap);
+        const variants = generateVariantsFromQuestions(currentQuestionsList, config);
+        setGeneratedVariants(variants);
+        if (variants.length > 0) {
+          setActiveVariantTab(variants[0].examCode);
         }
+        setExtractedViewMode("list");
+        setShowMissingAnswersPrompt(false);
 
-        // B. Run mammoth converter with image inline reader
-        const mammothOptions: any = {};
-        if ((mammoth as any).images?.inline) {
-          mammothOptions.convertImage = (mammoth as any).images.inline(
-            (element: any) => {
-              return element.read("base64").then((imageBuffer: string) => {
-                return {
-                  src: `data:${element.contentType || "image/png"};base64,${imageBuffer}`,
-                };
-              });
-            }
+        // Auto Save to localStorage
+        try {
+          localStorage.setItem(
+            "edutest_saved_draft_exam",
+            JSON.stringify({
+              questions: currentQuestionsList,
+              config,
+              examTitle,
+              filesList: updatedFilesList,
+              imageMap: combinedImageMap,
+              savedAt: new Date().toISOString(),
+            })
           );
-        }
+          setHasSavedDraft(true);
+        } catch (e) {}
 
-        let htmlResult: any = null;
-        try {
-          htmlResult = await mammoth.convertToHtml({ arrayBuffer }, mammothOptions);
-        } catch (mErr) {
-          console.warn("Mammoth HTML conversion notice:", mErr);
-        }
-
-        const docxHtmlResult = htmlResult ? convertDocxHtmlToMarkdown(htmlResult.value) : { markdown: "", imageMap: {} };
-        
-        // Merge imageMaps from both extractors so NO embedded images or formulas are lost
-        const finalImageMap: Record<string, string> = {
-          ...(docxHtmlResult.imageMap || {}),
-          ...(deepResult?.imageMap || {}),
-        };
-        
-        // Decide best markdown source: deepResult has LaTeX math formulas converted from OMML
-        let textToUse = "";
-        if (deepResult && deepResult.markdown && deepResult.markdown.trim().length > 30) {
-          textToUse = deepResult.markdown;
-        } else if (docxHtmlResult.markdown && docxHtmlResult.markdown.trim().length > 0) {
-          textToUse = docxHtmlResult.markdown;
-        } else {
-          const rawResult = await mammoth.extractRawText({ arrayBuffer });
-          textToUse = rawResult.value;
-        }
-
-        if (!textToUse || textToUse.trim().length === 0) {
-          throw new Error("Không thể trích xuất văn bản từ file Word này. Hãy kiểm tra nội dung file.");
-        }
-
-        setUploadedImageMap(finalImageMap);
-        setRawText(textToUse);
-        setInputMode("paste");
-        handleParseRawText(textToUse, finalImageMap);
-      } else if (fileNameLower.endsWith(".xlsx") || fileNameLower.endsWith(".xls")) {
-        // 3. Excel file preserving tables as Markdown
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        
-        const html = XLSX.utils.sheet_to_html(worksheet);
-        const docxResult = convertDocxHtmlToMarkdown(html);
-        const finalData = docxResult.markdown && docxResult.markdown.trim() ? docxResult.markdown : XLSX.utils.sheet_to_csv(worksheet);
-
-        if (!finalData || finalData.trim().length === 0) {
-          throw new Error("File Excel không có dữ liệu ở trang tính đầu tiên.");
-        }
-        setRawText(finalData);
-        setInputMode("paste");
-        handleParseRawText(finalData, docxResult.imageMap);
+        setParseSuccessMsg(`✅ Đã nạp và ghép liên tục ${files.length} file (${currentQuestionsList.length} câu hỏi)!`);
+        setTimeout(() => {
+          document.getElementById("extracted-questions-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 150);
       } else {
-        // 4. Plain text (.txt, .csv, .tsv, .md, .json)
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const content = event.target?.result as string;
-          if (content) {
-            setRawText(content);
-            setInputMode("paste");
-            handleParseRawText(content);
-          }
-        };
-        reader.onerror = () => {
-          alert("Lỗi đọc file văn bản.");
-        };
-        reader.readAsText(file);
+        alert("Không thể trích xuất câu hỏi nào từ các file đã tải lên.");
       }
     } catch (err: any) {
       alert("Lỗi xử lý file: " + (err.message || "Định dạng file không hỗ trợ"));
     } finally {
       setIsReadingFile(false);
+      setIsParsing(false);
+      setUploadProgress(null);
     }
   };
 
-  // Upload file handler via file input
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processUploadedFile(file);
+  // Upload file handler (supports multiple files)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, append: boolean = false) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      processFilesBatch(Array.from(files), append);
     }
   };
 
@@ -1352,41 +1510,91 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                   </div>
 
                   <p className="text-sm font-bold text-slate-800 mb-1">
-                    {isReadingFile
+                    {uploadProgress
+                      ? `Đang số hóa file ${uploadProgress.current}/${uploadProgress.total}: "${uploadProgress.currentFileName}"...`
+                      : isReadingFile
                       ? "Đang đọc nội dung file..."
                       : isParsing
                       ? "AI đang bóc tách câu hỏi và lời giải..."
-                      : "Kéo thả file đề thi vào đây hoặc chọn từ máy tính"}
+                      : "Kéo thả một hoặc NHIỀU file đề thi (Ảnh / PDF / Word) vào đây"}
                   </p>
+
+                  {/* Progress Bar for Multi-File Processing */}
+                  {uploadProgress && (
+                    <div className="w-full max-w-md mx-auto my-3">
+                      <div className="flex justify-between text-[11px] font-bold text-indigo-700 mb-1">
+                        <span>Tiến trình nhận diện đa trang</span>
+                        <span>{uploadProgress.current} / {uploadProgress.total} file</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-600 transition-all duration-300 rounded-full"
+                          style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-xs text-slate-600 mb-4 max-w-lg mx-auto leading-relaxed">
-                    Hỗ trợ định dạng <strong>PDF (.pdf)</strong>, <strong>Word (.docx, .doc)</strong>, <strong>Ảnh chụp đề thi (PNG, JPG, WEBP)</strong>, <strong>TXT</strong>, <strong>Excel (.xlsx)</strong>.
+                    Hỗ trợ chọn <strong>CÙNG LÚC NHIỀU ẢNH (Trang 1, Trang 2, Trang 3...)</strong>, <strong>PDF (.pdf)</strong>, <strong>Word (.docx)</strong>, <strong>Excel (.xlsx)</strong>.
                     <span className="block mt-1 text-indigo-700 font-semibold">
-                      ✨ Đề thi dạng Ảnh sẽ được AI tự động nhận diện và chuyển đổi sang file Word (.docx) &amp; PDF để tải về sử dụng ngay!
+                      ✨ Tự động số hóa, ghép câu hỏi liên tục và tự lưu bản nháp an toàn!
                     </span>
                   </p>
 
                   <div className="flex flex-wrap items-center justify-center gap-3">
+                    {/* Primary Multi-File Button */}
                     <label className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 rounded-lg cursor-pointer shadow-sm transition-all">
                       <FileText className="w-4 h-4" />
-                      <span>Chọn File Đề Thi (PDF / Word / Ảnh / TXT / Excel)</span>
+                      <span>Chọn 1 hoặc Nhiều File (Ảnh / PDF / Word / Excel)</span>
                       <input
                         type="file"
+                        multiple
                         accept=".txt,.docx,.doc,.pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.tsv"
-                        onChange={handleFileUpload}
+                        onChange={(e) => handleFileUpload(e, false)}
                         className="hidden"
                       />
                     </label>
+
+                    {/* Append More Pages Button */}
+                    {selectedQuestions.length > 0 && (
+                      <label className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 active:scale-95 rounded-lg cursor-pointer border border-emerald-300 transition-all">
+                        <FilePlus className="w-4 h-4 text-emerald-700" />
+                        <span>➕ Tải Thêm Trang Ảnh Tiếp Theo (Nối Tiếp)</span>
+                        <input
+                          type="file"
+                          multiple
+                          accept=".txt,.docx,.doc,.pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.tsv"
+                          onChange={(e) => handleFileUpload(e, true)}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+
+                    {/* Restore Draft Button */}
+                    {hasSavedDraft && selectedQuestions.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={handleRestoreDraft}
+                        className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 active:scale-95 rounded-lg border border-amber-300 transition-all"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 text-amber-700" />
+                        <span>🔄 Khôi Phục Bản Nháp Gần Nhất</span>
+                      </button>
+                    )}
                   </div>
 
-                  {/* Uploaded File Info Card & Automatic Word/PDF Conversion */}
-                  {uploadedFileName && (
+                  {/* Uploaded Files Gallery & Automatic Word/PDF Conversion */}
+                  {(uploadedFilesList.length > 0 || uploadedFileName) && (
                     <div className="mt-4 p-4 bg-white rounded-xl border border-emerald-200 text-left shadow-2xs space-y-3">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2.5">
                           <FileCheck className="w-5 h-5 text-emerald-600 shrink-0" />
                           <div>
                             <p className="text-xs font-bold text-slate-800 flex items-center gap-2">
-                              {uploadedFileName}
+                              {uploadedFilesList.length > 1
+                                ? `Đã nạp ${uploadedFilesList.length} file tài liệu/trang ảnh`
+                                : uploadedFileName}
                               {isImageUploaded && (
                                 <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-100 text-blue-800">
                                   Ảnh Đề Thi
@@ -1394,14 +1602,28 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                               )}
                             </p>
                             <p className="text-[11px] text-slate-500">
-                              Dung lượng: {uploadedFileSize} • Đã số hóa {selectedQuestions.length} câu hỏi
+                              Tổng cộng: {selectedQuestions.length} câu hỏi đã số hóa • Đã tự động lưu nháp
                             </p>
                           </div>
                         </div>
                         <span className="px-2 py-1 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
-                          Đã xử lý thành công
+                          ✓ Đã sẵn sàng
                         </span>
                       </div>
+
+                      {/* Multi-Page File Badges */}
+                      {uploadedFilesList.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {uploadedFilesList.map((f, fIdx) => (
+                            <span
+                              key={fIdx}
+                              className="px-2 py-1 rounded bg-slate-100 border border-slate-200 text-[11px] font-medium text-slate-700 flex items-center gap-1"
+                            >
+                              <span className="font-bold text-indigo-700">Trang {fIdx + 1}:</span> {f.name} ({f.count} câu)
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Instant Export to Word & PDF for Image and other uploads */}
                       {selectedQuestions.length > 0 && (
@@ -1840,8 +2062,8 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                 (() => {
                   const currentQ = selectedQuestions[previewStudentQIndex - 1] || selectedQuestions[0];
                   if (!currentQ) return null;
-                  const isPart2 = currentQ.part === 2 || currentQ.questionType === "true_false" || (currentQ.statements && currentQ.statements.length > 0);
-                  const isPart3 = currentQ.part === 3 || currentQ.questionType === "short_answer" || (!isPart2 && currentQ.options.length === 0);
+                  const isPart2 = currentQ.part === 2 || (currentQ.part !== 1 && currentQ.part !== 3 && (currentQ.questionType === "true_false" || (currentQ.statements && currentQ.statements.length > 0 && (!currentQ.options || currentQ.options.length === 0))));
+                  const isPart3 = currentQ.part === 3 || (currentQ.part !== 1 && (currentQ.questionType === "short_answer" || (!isPart2 && currentQ.options.length === 0)));
                   const isPart1 = !isPart2 && !isPart3;
 
                   return (
@@ -1875,21 +2097,25 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                               <span className="font-extrabold text-indigo-700 text-sm">
                                 CÂU HỎI {previewStudentQIndex} / {selectedQuestions.length}
                               </span>
-                              <span
-                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                              
+                              {/* 1-Click Part Switcher Dropdown */}
+                              <select
+                                value={currentQ.part || 1}
+                                onChange={(e) => handleQuickChangeQuestionPart(currentQ.id, Number(e.target.value) as 1 | 2 | 3)}
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer transition-all ${
                                   isPart2
                                     ? "bg-purple-100 text-purple-800 border-purple-300"
                                     : isPart3
                                     ? "bg-amber-100 text-amber-900 border-amber-300"
                                     : "bg-blue-100 text-blue-800 border-blue-300"
                                 }`}
+                                title="Bấm để đổi loại câu hỏi: Phần I (4 lựa chọn) / Phần II (Đúng/Sai) / Phần III (Điền số)"
                               >
-                                {isPart2
-                                  ? "PHẦN II: Đúng / Sai (4 ý)"
-                                  : isPart3
-                                  ? "PHẦN III: Điền số"
-                                  : "PHẦN I: Trắc nghiệm 4 lựa chọn"}
-                              </span>
+                                <option value={1}>PHẦN I: Trắc nghiệm 4 lựa chọn (A-D)</option>
+                                <option value={2}>PHẦN II: Đúng / Sai (4 ý a,b,c,d)</option>
+                                <option value={3}>PHẦN III: Trả lời ngắn / Điền số</option>
+                              </select>
+
                               {currentQ.level && (
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-200">
                                   {currentQ.level}
@@ -2139,8 +2365,8 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                       .filter((q) => extractedPartFilter === "all" || q.part === extractedPartFilter);
 
                     return filteredQuestions.map((q, qIdx) => {
-                      const isPart2 = q.part === 2 || q.questionType === "true_false" || (q.statements && q.statements.length > 0);
-                      const isPart3 = q.part === 3 || q.questionType === "short_answer" || (!isPart2 && q.options.length === 0);
+                      const isPart2 = q.part === 2 || (q.part !== 1 && q.part !== 3 && (q.questionType === "true_false" || (q.statements && q.statements.length > 0 && (!q.options || q.options.length === 0))));
+                      const isPart3 = q.part === 3 || (q.part !== 1 && (q.questionType === "short_answer" || (!isPart2 && q.options.length === 0)));
                       const isPart1 = !isPart2 && !isPart3;
                       const isFirstInPart = qIdx === 0 || q.part !== filteredQuestions[qIdx - 1]?.part;
 
@@ -2195,17 +2421,25 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                                 <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold">
                                   Câu {q.originalOrderIndex || qIdx + 1}
                                 </span>
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                
+                                {/* 1-Click Part Switcher Dropdown */}
+                                <select
+                                  value={q.part || 1}
+                                  onChange={(e) => handleQuickChangeQuestionPart(q.id, Number(e.target.value) as 1 | 2 | 3)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer transition-all ${
                                     isPart2
-                                      ? "bg-purple-100 text-purple-800"
+                                      ? "bg-purple-100 text-purple-800 border-purple-300"
                                       : isPart3
-                                      ? "bg-amber-100 text-amber-800"
-                                      : "bg-blue-100 text-blue-800"
+                                      ? "bg-amber-100 text-amber-800 border-amber-300"
+                                      : "bg-blue-100 text-blue-800 border-blue-300"
                                   }`}
+                                  title="Bấm để đổi loại câu hỏi: Phần I (4 lựa chọn) / Phần II (Đúng/Sai) / Phần III (Điền số)"
                                 >
-                                  {isPart2 ? "PHẦN II: Đúng / Sai" : isPart3 ? "PHẦN III: Điền số" : "PHẦN I: Trắc nghiệm"}
-                                </span>
+                                  <option value={1}>PHẦN I: Trắc nghiệm 4 lựa chọn (A-D)</option>
+                                  <option value={2}>PHẦN II: Đúng / Sai (4 ý a,b,c,d)</option>
+                                  <option value={3}>PHẦN III: Trả lời ngắn / Điền số</option>
+                                </select>
+
                                 {(q.hasTableOrDiagram || q.content?.includes("![") || q.diagramUrl) && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold flex items-center gap-0.5">
                                     <ImageIcon className="w-3 h-3" />
