@@ -44,6 +44,7 @@ import {
   generateGradedPapersTSV,
 } from "../../utils/examHelpers";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { clientExtractRubric, clientGradePaper } from "../../utils/clientAI";
 
 interface AIGraderViewProps {
   exams: ExamPackage[];
@@ -190,10 +191,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const fetchGradedResults = async () => {
     setIsLoadingResults(true);
     try {
-      const res = await fetch("/api/grader/results");
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setGradedPapers(json.data);
+      const res = await fetch("/api/grader/results").catch(() => null);
+      if (res && res.ok && res.headers.get("content-type")?.includes("application/json")) {
+        const json = await res.json().catch(() => null);
+        if (json && json.success && Array.isArray(json.data)) {
+          setGradedPapers(json.data);
+        }
       }
     } catch (err) {
       console.warn("Could not fetch graded papers from server:", err);
@@ -264,19 +267,18 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = reader.result as string;
-        const res = await fetch("/api/ai/extract-rubric", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileData: base64,
-            mimeType: file.type || "application/pdf",
-            fileName: file.name,
-            subject: rubricSubject,
-            grade: rubricGrade,
-          }),
+        const apiKey = getStoredApiKey();
+        const model = getStoredSelectedModel();
+        const json = await clientExtractRubric({
+          fileData: base64,
+          mimeType: file.type || "application/pdf",
+          fileName: file.name,
+          subject: rubricSubject,
+          grade: rubricGrade,
+          apiKey,
+          model,
         });
 
-        const json = await res.json();
         if (json.success && json.data) {
           const newRubric: ExamRubric = {
             ...json.data,
@@ -307,23 +309,14 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     try {
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
-      const res = await fetch("/api/ai/extract-rubric", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          rawText: manualRubricText,
-          subject: rubricSubject,
-          grade: rubricGrade,
-          apiKey,
-          model,
-        }),
+      const json = await clientExtractRubric({
+        rawText: manualRubricText,
+        subject: rubricSubject,
+        grade: rubricGrade,
+        apiKey,
+        model,
       });
 
-      const json = await res.json();
       if (json.success && json.data) {
         const newRubric: ExamRubric = {
           ...json.data,
@@ -334,10 +327,10 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
         setActiveRubric(newRubric);
         setActiveStep("upload_grade");
       } else {
-        setRubricExtractError(json.error || "Không thể trích xuất biểu điểm từ văn bản.");
+        setRubricExtractError(json.error || "Không thể phân tích biểu điểm.");
       }
     } catch (err: any) {
-      setRubricExtractError(err.message || "Lỗi xử lý văn bản biểu điểm.");
+      setRubricExtractError("Lỗi kết nối AI: " + err.message);
     } finally {
       setIsExtractingRubric(false);
     }
@@ -432,29 +425,20 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
         const apiKey = getStoredApiKey();
         const model = getStoredSelectedModel();
-        const res = await fetch("/api/ai/grade-paper", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-gemini-api-key": apiKey,
-            "x-gemini-model": model,
+        const json = await clientGradePaper({
+          paperFile: {
+            data: base64Data,
+            mimeType: item.mimeType,
+            fileName: item.file.name,
           },
-          body: JSON.stringify({
-            paperFile: {
-              data: base64Data,
-              mimeType: item.mimeType,
-              fileName: item.file.name,
-            },
-            rubric: activeRubric,
-            studentNameOverride: item.studentName !== "Học sinh" ? item.studentName : undefined,
-            studentClassOverride: item.studentClass,
-            gradingStrictness,
-            apiKey,
-            model,
-          }),
+          rubric: activeRubric,
+          studentNameOverride: item.studentName !== "Học sinh" ? item.studentName : undefined,
+          studentClassOverride: item.studentClass,
+          gradingStrictness,
+          apiKey,
+          model,
         });
 
-        const json = await res.json();
         if (json.success && json.data) {
           item.status = "success";
           item.result = json.data;
@@ -603,35 +587,35 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     setWebhookStatus("");
 
     try {
-      const res = await fetch("/api/export/grade-results-sheet", {
+      const targetPapers = classFilter === "all" ? gradedPapers : gradedPapers.filter((p) => p.studentClass === classFilter);
+      const rows = targetPapers.map((p, i) => ({
+        stt: i + 1,
+        studentName: p.studentName,
+        studentClass: p.studentClass,
+        studentId: p.studentId,
+        examCode: p.examCode,
+        totalScore: p.totalScore,
+        maxScore: p.maxScore,
+        gradeClassification: p.gradeClassification,
+        gradedAt: p.gradedAt,
+        summaryEvaluation: p.summaryEvaluation,
+      }));
+
+      // Send payload to user webhook
+      await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          examTitle: activeRubric?.title,
-          filterClass: classFilter === "all" ? undefined : classFilter,
+          event: "AI_EXAM_GRADING_EXPORT",
+          timestamp: new Date().toISOString(),
+          examTitle: activeRubric?.title || "Bài kiểm tra",
+          totalGraded: rows.length,
+          rows,
         }),
+        mode: "no-cors", // Google App Script typically requires no-cors from browser
       });
 
-      const json = await res.json();
-      if (json.success && json.data) {
-        // Send payload to user webhook
-        const sendRes = await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event: "AI_EXAM_GRADING_EXPORT",
-            timestamp: new Date().toISOString(),
-            examTitle: activeRubric?.title || "Bài kiểm tra",
-            totalGraded: json.count,
-            rows: json.data,
-          }),
-          mode: "no-cors", // Google App Script typically requires no-cors from browser
-        });
-
-        setWebhookStatus("Đã gửi thành công toàn bộ kết quả bài chấm sang Google Sheets!");
-      } else {
-        setWebhookStatus("Không lấy được dữ liệu bảng điểm.");
-      }
+      setWebhookStatus(`Đã gửi thành công ${rows.length} kết quả bài chấm sang Google Sheets!`);
     } catch (err: any) {
       setWebhookStatus(`Lỗi khi gửi webhook: ${err.message || err}`);
     } finally {

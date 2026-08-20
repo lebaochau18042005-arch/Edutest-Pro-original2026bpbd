@@ -58,6 +58,7 @@ import { convertDocxHtmlToMarkdown } from "../../utils/docxTableConverter";
 import { extractDocxDeep } from "../../utils/docxDeepExtractor";
 import { FormattedQuestionContent, MathTextRenderer } from "../FormattedQuestionContent";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { clientParseExam, clientSolveExam, clientParseExamFile } from "../../utils/clientAI";
 import { exportToMoodleXMLFile, exportToGIFTFile } from "../../utils/moodleGiftExporter";
 import { openPresentationInNewTab, exportPresentationHTMLFile } from "../../utils/pptxPresentationExporter";
 import { openPrintableOMRSheet } from "../../utils/omrSheetGenerator";
@@ -308,23 +309,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
-      const res = await fetch("/api/ai/parse-exam", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          rawText: cleanText,
-          subject: config.subject,
-          grade: config.grade,
-          apiKey,
-          model,
-        }),
+      const data = await clientParseExam({
+        rawText: cleanText,
+        subject: config.subject,
+        grade: config.grade,
+        apiKey,
+        model,
       });
 
-      const data = await res.json();
       if (data.success && data.data && data.data.length > 0) {
         // Restore full base64 images back into questions & enforce strict 3-part format
         const restoredQuestions = restoreMarkdownImagesInQuestions(data.data, imageMap);
@@ -366,7 +358,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         alert(data.error || "Không thể phân tích đề thi. Hãy kiểm tra lại định dạng câu hỏi hoặc nhập nội dung đề.");
       }
     } catch (err: any) {
-      alert("Lỗi khi kết nối hệ thống phân tích: " + err.message);
+      alert("Lỗi khi phân tích đề thi: " + err.message);
     } finally {
       setIsParsing(false);
     }
@@ -383,23 +375,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
     try {
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
-      const res = await fetch("/api/ai/solve-exam", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          questions: selectedQuestions,
-          subject: config.subject,
-          grade: config.grade,
-          apiKey,
-          model,
-        }),
+      const data = await clientSolveExam({
+        questions: selectedQuestions,
+        subject: config.subject,
+        grade: config.grade,
+        apiKey,
+        model,
       });
 
-      const data = await res.json();
       if (data.success && data.data) {
         setSelectedQuestions(data.data);
         setParseSuccessMsg(`AI đã giải xong toàn bộ ${data.data.length} câu hỏi kèm lời giải chi tiết! Vui lòng kiểm duyệt.`);
@@ -451,24 +434,16 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             setIsParsing(true);
             const apiKey = getStoredApiKey();
             const model = getStoredSelectedModel();
-            const res = await fetch("/api/ai/parse-exam-file", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-gemini-api-key": apiKey,
-                "x-gemini-model": model,
-              },
-              body: JSON.stringify({
-                fileBase64: base64Data,
-                mimeType,
-                fileName: file.name,
-                subject: config.subject,
-                grade: config.grade,
-                apiKey,
-                model,
-              }),
+            const data = await clientParseExamFile({
+              fileBase64: base64Data,
+              mimeType,
+              fileName: file.name,
+              subject: config.subject,
+              grade: config.grade,
+              apiKey,
+              model,
             });
-            const data = await res.json();
+
             if (data.success && data.data && data.data.length > 0) {
               setSelectedQuestions(data.data);
               const variants = generateVariantsFromQuestions(data.data, config);

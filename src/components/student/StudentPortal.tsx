@@ -32,6 +32,8 @@ import {
 import { ExamPackage, StudentSubmission, GradedPaperResult, StudentTab } from "../../types";
 import { StudentExamRoom } from "./StudentExamRoom";
 import { StudentResultView } from "./StudentResultView";
+import { clientGradePaper } from "../../utils/clientAI";
+import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
 
 interface StudentPortalProps {
   exams: ExamPackage[];
@@ -220,23 +222,56 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         const reader = new FileReader();
         reader.onload = async () => {
           const base64 = reader.result as string;
-          const res = await fetch("/api/ai/grade-paper", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              paperFile: {
-                data: base64,
-                mimeType: paperFile.type || "image/jpeg",
-                fileName: paperFile.name,
-              },
-              examId: foundExam.id,
-              examCode: selectedVariantCode,
-              studentNameOverride: studentName,
-              studentClassOverride: studentClass,
-            }),
+          const targetVariant = foundExam.variants.find((v) => v.examCode === selectedVariantCode) || foundExam.variants[0];
+          const rubricItems = targetVariant ? targetVariant.questions.map((q) => {
+            let points = 0.25;
+            if (q.part === 2) points = 1.0;
+            else if (q.part === 3) points = 0.5;
+            let corAns = "";
+            if (q.part === 1 || q.questionType === "multiple_choice") {
+              const letter = ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A";
+              const optVal = q.options && q.options[q.correctIndex ?? 0] ? `: ${q.options[q.correctIndex ?? 0]}` : "";
+              corAns = `${letter}${optVal}`;
+            } else if (q.part === 2 || q.questionType === "true_false") {
+              corAns = (q.statements || []).map((s) => `${s.label || s.id}: ${s.correctValue ? "Đúng" : "Sai"}`).join(" | ");
+            } else {
+              corAns = q.shortAnswer || "";
+            }
+            return {
+              questionIndex: q.questionIndex,
+              content: q.content,
+              correctAnswer: corAns,
+              points,
+              criteria: q.explanation || "",
+              questionType: q.questionType,
+            };
+          }) : [];
+
+          const activeRubric = {
+            id: `rubric-${foundExam.id}`,
+            title: `Biểu điểm: ${foundExam.title}`,
+            subject: foundExam.config.subject,
+            grade: foundExam.config.grade,
+            maxScore: foundExam.config.maxScore || 10.0,
+            examCode: selectedVariantCode,
+            items: rubricItems,
+          };
+
+          const apiKey = getStoredApiKey();
+          const model = getStoredSelectedModel();
+          const json = await clientGradePaper({
+            paperFile: {
+              data: base64,
+              mimeType: paperFile.type || "image/jpeg",
+              fileName: paperFile.name,
+            },
+            rubric: activeRubric,
+            studentNameOverride: studentName,
+            studentClassOverride: studentClass,
+            apiKey,
+            model,
           });
 
-          const json = await res.json();
           if (json.success && json.data) {
             setGradedPaperResult(json.data);
             setPortalState("paper_result");

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { StudentSubmission, ExamVariant, Question } from "../../types";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { clientDiagnosticRemediation } from "../../utils/clientAI";
 import { FormattedQuestionContent } from "../FormattedQuestionContent";
 
 interface AIDiagnosticCardProps {
@@ -108,25 +109,16 @@ export const AIDiagnosticCard: React.FC<AIDiagnosticCardProps> = ({
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
 
-      const res = await fetch("/api/ai/diagnostic-remediation", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          submission,
-          wrongQuestions,
-          correctQuestions,
-          subject: submission.examTitle || "Tổng hợp",
-          grade: submission.grade || "Khối 12",
-          apiKey,
-          model,
-        }),
+      const data = await clientDiagnosticRemediation({
+        submission,
+        wrongQuestions,
+        correctQuestions,
+        subject: submission.examTitle || "Tổng hợp",
+        grade: submission.grade || "Khối 12",
+        apiKey,
+        model,
       });
 
-      const data = await res.json();
       if (data.success && data.data) {
         setDiagnosticData(data.data);
       } else {

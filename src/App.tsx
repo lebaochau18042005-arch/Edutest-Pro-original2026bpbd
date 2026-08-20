@@ -385,17 +385,17 @@ export default function App() {
         fetch("/api/submissions").catch(() => null),
       ]);
 
-      if (resQ && resQ.ok) {
-        const d = await resQ.json();
-        if (d.data) setQuestionBank(d.data);
+      if (resQ && resQ.ok && resQ.headers.get("content-type")?.includes("application/json")) {
+        const d = await resQ.json().catch(() => null);
+        if (d && d.data) setQuestionBank(d.data);
       }
-      if (resExams && resExams.ok) {
-        const d = await resExams.json();
-        if (d.data) setActiveExams(d.data);
+      if (resExams && resExams.ok && resExams.headers.get("content-type")?.includes("application/json")) {
+        const d = await resExams.json().catch(() => null);
+        if (d && d.data) setActiveExams(d.data);
       }
-      if (resSubs && resSubs.ok) {
-        const d = await resSubs.json();
-        if (d.data) setSubmissions(d.data);
+      if (resSubs && resSubs.ok && resSubs.headers.get("content-type")?.includes("application/json")) {
+        const d = await resSubs.json().catch(() => null);
+        if (d && d.data) setSubmissions(d.data);
       }
     } catch (e) {
       console.warn("Backend not active, using local state", e);

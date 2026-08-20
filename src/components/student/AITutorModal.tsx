@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Question } from "../../types";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { clientQuestionTutor } from "../../utils/clientAI";
 import { FormattedQuestionContent } from "../FormattedQuestionContent";
 
 interface AITutorModalProps {
@@ -65,25 +66,15 @@ export const AITutorModal: React.FC<AITutorModalProps> = ({
     try {
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
-      const res = await fetch("/api/ai/question-tutor", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          question,
-          studentAnswer,
-          isCorrect,
-          userMessage: "Hãy giải thích chi tiết phương pháp giải câu này, chỉ ra vì sao phương án đúng là chính xác và mẹo tránh bẫy.",
-          chatHistory: [],
-          apiKey,
-          model,
-        }),
+      const json = await clientQuestionTutor({
+        question,
+        studentAnswer,
+        isCorrect,
+        userMessage: "Hãy giải thích chi tiết phương pháp giải câu này, chỉ ra vì sao phương án đúng là chính xác và mẹo tránh bẫy.",
+        chatHistory: [],
+        apiKey,
+        model,
       });
-
-      const json = await res.json();
       if (json.success && json.text) {
         setMessages([
           {
@@ -137,25 +128,15 @@ export const AITutorModal: React.FC<AITutorModalProps> = ({
     try {
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
-      const res = await fetch("/api/ai/question-tutor", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          question,
-          studentAnswer,
-          isCorrect,
-          userMessage: textToSend,
-          chatHistory: newHistory.map((m) => ({ role: m.role, text: m.text })),
-          apiKey,
-          model,
-        }),
+      const json = await clientQuestionTutor({
+        question,
+        studentAnswer,
+        isCorrect,
+        userMessage: textToSend,
+        chatHistory: newHistory.map((m) => ({ role: m.role, text: m.text })),
+        apiKey,
+        model,
       });
-
-      const json = await res.json();
       if (json.success && json.text) {
         setMessages([
           ...newHistory,

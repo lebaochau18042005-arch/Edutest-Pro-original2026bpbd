@@ -14,6 +14,7 @@ import {
 import { Question, CognitiveLevel, SubjectType, GradeType } from "../../types";
 import { LETTERS } from "../../utils/examHelpers";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { clientGenerateQuestions } from "../../utils/clientAI";
 
 interface QuestionBankViewProps {
   questions: Question[];
@@ -132,25 +133,16 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
     try {
       const apiKey = getStoredApiKey();
       const model = getStoredSelectedModel();
-      const res = await fetch("/api/ai/generate-questions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-gemini-api-key": apiKey,
-          "x-gemini-model": model,
-        },
-        body: JSON.stringify({
-          subject: aiSubject,
-          grade: aiGrade,
-          topic: aiTopic,
-          count: aiCount,
-          level: aiLevel,
-          apiKey,
-          model,
-        }),
+      const data = await clientGenerateQuestions({
+        subject: aiSubject,
+        grade: aiGrade,
+        topic: aiTopic,
+        count: aiCount,
+        level: aiLevel,
+        apiKey,
+        model,
       });
 
-      const data = await res.json();
       if (data.success && data.data) {
         setAiGeneratedResults(data.data);
       } else {
