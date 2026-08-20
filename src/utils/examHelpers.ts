@@ -1481,12 +1481,114 @@ D. for
 export const SAMPLE_EXAM_TEXT = SAMPLE_28Q_BGD_EXAM_TEXT;
 
 /**
- * Tự động chuyển đổi và xuất danh sách câu hỏi đã số hóa từ Ảnh/File sang bản Word (.doc / .docx)
+ * Helper: Convert Markdown content (Tables, Diagrams, Images, Math) to rich Word/PDF HTML
  */
-export function exportQuestionsToWordDoc(questions: Question[], title: string = "De_Thi_Chuyen_Doi_Tu_Anh", includeAnswers: boolean = false) {
-  const answerTitle = includeAnswers ? `${title} (Kèm Đáp Án & Lời Giải Chi Tiết)` : title;
 
-  // Generate answer key summary table if includeAnswers is true
+function convertMarkdownToExportHtml(rawText: string, diagramUrl?: string): string {
+  if (!rawText && !diagramUrl) return "";
+
+  let text = (rawText || "").trim();
+
+  // 1. Process Markdown Tables: | Col 1 | Col 2 | \n |---|---| \n | D1 | D2 |
+  const lines = text.split("\n");
+  const parsedLines: string[] = [];
+  let inTable = false;
+  let tableRows: string[][] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith("|") && line.endsWith("|")) {
+      if (/^\|[\s-:]+\|$/.test(line)) {
+        // Table divider row
+        continue;
+      }
+      const cells = line.split("|").map((c) => c.trim()).slice(1, -1);
+      if (cells.length > 0) {
+        inTable = true;
+        tableRows.push(cells);
+        continue;
+      }
+    }
+
+    if (inTable) {
+      if (tableRows.length > 0) {
+        const header = tableRows[0];
+        const body = tableRows.slice(1);
+        let tableHtml = `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin: 10px auto; width: 90%; font-size: 11pt; border: 1px solid #334155; text-align: center;">`;
+        if (header && header.length > 0) {
+          tableHtml += `<thead style="background-color: #f1f5f9; font-weight: bold;"><tr>`;
+          header.forEach((c) => {
+            tableHtml += `<th style="padding: 6px 10px; border: 1px solid #334155;">${c}</th>`;
+          });
+          tableHtml += `</tr></thead>`;
+        }
+        tableHtml += `<tbody>`;
+        body.forEach((r, rIdx) => {
+          tableHtml += `<tr style="background-color: ${rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'};">`;
+          r.forEach((c) => {
+            tableHtml += `<td style="padding: 6px 10px; border: 1px solid #334155;">${c}</td>`;
+          });
+          tableHtml += `</tr>`;
+        });
+        tableHtml += `</tbody></table>`;
+        parsedLines.push(tableHtml);
+      }
+      inTable = false;
+      tableRows = [];
+    }
+
+    parsedLines.push(line);
+  }
+
+  if (inTable && tableRows.length > 0) {
+    const header = tableRows[0];
+    const body = tableRows.slice(1);
+    let tableHtml = `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin: 10px auto; width: 90%; font-size: 11pt; border: 1px solid #334155; text-align: center;">`;
+    if (header && header.length > 0) {
+      tableHtml += `<thead style="background-color: #f1f5f9; font-weight: bold;"><tr>`;
+      header.forEach((c) => {
+        tableHtml += `<th style="padding: 6px 10px; border: 1px solid #334155;">${c}</th>`;
+      });
+      tableHtml += `</tr></thead>`;
+    }
+    tableHtml += `<tbody>`;
+    body.forEach((r, rIdx) => {
+      tableHtml += `<tr style="background-color: ${rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'};">`;
+      r.forEach((c) => {
+        tableHtml += `<td style="padding: 6px 10px; border: 1px solid #334155;">${c}</td>`;
+      });
+      tableHtml += `</tr>`;
+    });
+    tableHtml += `</tbody></table>`;
+    parsedLines.push(tableHtml);
+  }
+
+  let formatted = parsedLines.join("<br/>");
+
+  // 2. Process Markdown Images: ![alt](src)
+  formatted = formatted.replace(
+    /!\[(.*?)\]\(\s*(data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\s\r\n]+|https?:\/\/[^\s)]+|\/[^\s)]+|[^\s)]+?)\s*\)/g,
+    (_, alt, src) => {
+      const cleanSrc = src.trim().startsWith("data:image") ? src.replace(/\s+/g, "") : src.trim();
+      return `<div style="text-align: center; margin: 10px 0;"><img src="${cleanSrc}" alt="${alt || 'Hình vẽ'}" style="max-width: 450px; max-height: 300px; display: block; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 6px;" /><div style="font-size: 10pt; color: #64748b; font-style: italic; margin-top: 4px;">${alt || 'Hình vẽ minh họa'}</div></div>`;
+    }
+  );
+
+  // 3. Process diagramUrl
+  if (diagramUrl && !formatted.includes(diagramUrl)) {
+    formatted += `<div style="text-align: center; margin: 10px 0;"><img src="${diagramUrl}" alt="Hình vẽ minh họa" style="max-width: 450px; max-height: 300px; display: block; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 6px;" /><div style="font-size: 10pt; color: #64748b; font-style: italic; margin-top: 4px;">Hình vẽ / Bảng số liệu đính kèm</div></div>`;
+  }
+
+  // 4. Bold and Italic formatting
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  formatted = formatted.replace(/\*(.*?)\*/g, "<em>$1</em>");
+
+  return formatted;
+}
+
+export function exportQuestionsToWordDoc(questions: Question[], title: string = "De_Thi_Chuyen_Doi_Tu_Anh", includeAnswers: boolean = false) {
+  const answerTitle = includeAnswers ? `${title} (Kèm Đáp Án & Hướng Dẫn Giải Chi Tiết)` : title;
+
   let answerKeyTableHtml = "";
   if (includeAnswers) {
     answerKeyTableHtml = `
@@ -1539,14 +1641,14 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
         .header-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; border: none; }
         .header-table td { border: none; vertical-align: top; }
         .question-block { margin-bottom: 14px; page-break-inside: avoid; }
-        .question-title { font-weight: bold; font-size: 13pt; }
+        .question-title { font-weight: bold; font-size: 13pt; margin-bottom: 4px; }
         .options-grid { margin-top: 5px; margin-left: 20px; }
         .option-item { margin-bottom: 4px; }
         .correct-badge { font-weight: bold; color: #047857; }
         .tf-true { font-weight: bold; color: #059669; }
         .tf-false { font-weight: bold; color: #dc2626; }
         .explanation-box { margin-top: 6px; padding: 6px 10px; background-color: #f8fafc; border-left: 3px solid #2563eb; font-size: 11.5pt; color: #1e293b; font-style: italic; }
-        img { max-width: 400px; max-height: 280px; display: block; margin: 6px 0; }
+        img { max-width: 450px; max-height: 300px; display: block; margin: 6px auto; }
       </style>
     </head>
     <body>
@@ -1576,7 +1678,7 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
               ${(q.options || []).map((opt, oIdx) => {
                 const isCorrect = includeAnswers && oIdx === q.correctIndex;
                 return `<div class="option-item ${isCorrect ? "correct-badge" : ""}">
-                  <strong>${LETTERS[oIdx]}.</strong> ${opt} ${isCorrect ? " ✓ <em>(Đáp án đúng)</em>" : ""}
+                  <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? " ✓ <em>(Đáp án đúng)</em>" : ""}
                 </div>`;
               }).join("")}
             </div>`;
@@ -1594,7 +1696,7 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
                   ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
                   : "";
                 return `<div class="option-item">
-                  <strong>${st.label || `${st.id})`}</strong> ${st.text}${ansTag}
+                  <strong>${st.label || `${st.id})`}</strong> ${convertMarkdownToExportHtml(st.text)}${ansTag}
                 </div>`;
               }).join("")}
             </div>`;
@@ -1608,11 +1710,18 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
             }
           }
 
-          const expHtml = (includeAnswers && q.explanation) ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${q.explanation}</div>` : "";
+          const groupHtml = q.groupTitle
+            ? `<div style="margin: 8px 0; padding: 6px 12px; background-color: #f1f5f9; border-left: 4px solid #4f46e5; font-size: 11pt;">
+                <strong>📌 ${q.groupTitle}</strong>
+                ${q.passageContent ? `<div style="margin-top: 4px;">${convertMarkdownToExportHtml(q.passageContent)}</div>` : ""}
+              </div>`
+            : "";
+
+          const expHtml = (includeAnswers && q.explanation) ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${convertMarkdownToExportHtml(q.explanation)}</div>` : "";
 
           return `<div class="question-block">
-            <div class="question-title">Câu ${idx + 1}: ${q.content || ""}</div>
-            ${q.diagramUrl ? `<div><img src="${q.diagramUrl}" style="max-width: 400px; max-height: 280px;"/></div>` : ""}
+            ${groupHtml}
+            <div class="question-title">Câu ${idx + 1}: ${convertMarkdownToExportHtml(q.content, q.diagramUrl)}</div>
             ${optHtml}
             ${expHtml}
           </div>`;
@@ -1709,7 +1818,7 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
         .tf-true { font-weight: bold; color: #059669; }
         .tf-false { font-weight: bold; color: #dc2626; }
         .explanation-box { margin-top: 4px; padding: 4px 8px; background-color: #f8fafc; border-left: 3px solid #2563eb; font-size: 11pt; color: #1e293b; font-style: italic; }
-        img { max-width: 380px; max-height: 250px; display: block; margin: 8px 0; }
+        img { max-width: 450px; max-height: 300px; display: block; margin: 8px auto; border: 1px solid #e2e8f0; }
         @media print {
           body { padding: 0; }
         }
@@ -1742,7 +1851,7 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
               ${(q.options || []).map((opt, oIdx) => {
                 const isCorrect = includeAnswers && oIdx === q.correctIndex;
                 return `<div class="option-item ${isCorrect ? "correct-badge" : ""}">
-                  <strong>${LETTERS[oIdx]}.</strong> ${opt} ${isCorrect ? " ✓ <em>(Đáp án)</em>" : ""}
+                  <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? " ✓ <em>(Đáp án)</em>" : ""}
                 </div>`;
               }).join("")}
             </div>`;
@@ -1760,7 +1869,7 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
                   ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
                   : "";
                 return `<div class="option-item" style="margin-bottom: 3px;">
-                  <strong>${st.label || `${st.id})`}</strong> ${st.text}${ansTag}
+                  <strong>${st.label || `${st.id})`}</strong> ${convertMarkdownToExportHtml(st.text)}${ansTag}
                 </div>`;
               }).join("")}
             </div>`;
@@ -1774,11 +1883,18 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
             }
           }
 
-          const expHtml = (includeAnswers && q.explanation) ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${q.explanation}</div>` : "";
+          const groupHtml = q.groupTitle
+            ? `<div style="margin: 8px 0; padding: 6px 12px; background-color: #f1f5f9; border-left: 4px solid #4f46e5; font-size: 11pt;">
+                <strong>📌 ${q.groupTitle}</strong>
+                ${q.passageContent ? `<div style="margin-top: 4px;">${convertMarkdownToExportHtml(q.passageContent)}</div>` : ""}
+              </div>`
+            : "";
+
+          const expHtml = (includeAnswers && q.explanation) ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${convertMarkdownToExportHtml(q.explanation)}</div>` : "";
 
           return `<div class="question-block">
-            <div class="question-title">Câu ${idx + 1}: ${q.content || ""}</div>
-            ${q.diagramUrl ? `<div><img src="${q.diagramUrl}" /></div>` : ""}
+            ${groupHtml}
+            <div class="question-title">Câu ${idx + 1}: ${convertMarkdownToExportHtml(q.content, q.diagramUrl)}</div>
             ${optHtml}
             ${expHtml}
           </div>`;

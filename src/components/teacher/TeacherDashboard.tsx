@@ -42,6 +42,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           questionBank={questionBank}
           onPublishExam={onPublishExam}
           onOpenStudentExam={onOpenStudentExam}
+          onAddQuestion={onAddQuestion}
+          onAddMultipleQuestions={onAddMultipleQuestions}
         />
       )}
 

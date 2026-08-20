@@ -833,7 +833,15 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
 1. PHẦN I: Trắc nghiệm 4 lựa chọn A, B, C, D (CHỈ CHỌN 1 ĐÁP ÁN ĐÚNG DUY NHẤT). Mọi câu hỏi có các lựa chọn A, B, C, D đều BẮT BUỘC là PHẦN I (part: 1, questionType: "multiple_choice") -> "options": ["Phương án A...", "Phương án B...", "Phương án C...", "Phương án D..."], "correctIndex": 0..3.
 2. PHẦN II: Trắc nghiệm Đúng / Sai (Mỗi câu gồm 4 mệnh đề nhỏ a, b, c, d; học sinh phải chọn Đúng hoặc Sai cho TỪNG ý a, b, c, d) -> (part: 2, questionType: "true_false") -> "statements": [ {"id": "a", "label": "a)", "text": "...", "correctValue": true/false}, ... ]. TUYỆT ĐỐI KHÔNG gán câu trắc nghiệm 4 lựa chọn A-D vào Phần II!
 3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Học sinh tự tính toán và điền kết quả số) -> (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số ngắn.
-4. BẢO TOÀN DỮ LIỆU & CÔNG THỨC: Giữ nguyên công thức Toán/Lý/Hóa LaTeX ($...$ hoặc $$...$$) và bảng biểu Markdown.`;
+
+QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC:
+4. BẢNG SỐ LIỆU / BẢNG BIẾN THIÊN / BẢNG THỐNG KÊ: BẮT BUỘC trích xuất 100% ở định dạng BẢNG MARKDOWN CHUẨN:
+   | Tiêu đề 1 | Tiêu đề 2 | Tiêu đề 3 |
+   |-----------|-----------|-----------|
+   | Giá trị 1 | Giá trị 2 | Giá trị 3 |
+   TUYỆT ĐỐI KHÔNG viết bảng thành dạng đoạn văn xuôi!
+5. HÌNH VẼ / BIỂU ĐỒ / ĐỒ THỊ: Nếu câu hỏi có hình vẽ, đồ thị hàm số, biểu đồ cột/tròn, hình khối không gian, hãy đặt "hasTableOrDiagram": true.
+6. CÔNG THỨC: Giữ nguyên LaTeX chuẩn ($...$ hoặc $$...$$).`;
 
     const contents = [
       {
@@ -895,6 +903,9 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
     const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleaned || "[]");
 
+    const isImageFile = (mimeType || "").startsWith("image/");
+    const fullImageDataUri = isImageFile ? `data:${mimeType || "image/png"};base64,${cleanBase64}` : undefined;
+
     const formatted: Question[] = parsed.map((item: any, idx: number) => {
       // Strict Part Classification
       let part: 1 | 2 | 3 = 1;
@@ -924,6 +935,11 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
         }
       }
 
+      const hasDiagram = Boolean(
+        item.hasTableOrDiagram ||
+        /hình|đồ thị|biểu đồ|bảng|sơ đồ/i.test(item.content || "")
+      );
+
       return {
         id: `file_parsed_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
         subject: subject || "Tổng hợp",
@@ -940,7 +956,8 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
         explanation: item.explanation || "",
         needsReview: true,
         isAiGenerated: true,
-        hasTableOrDiagram: Boolean(item.hasTableOrDiagram || item.content?.includes("|")),
+        hasTableOrDiagram: hasDiagram || Boolean(item.content?.includes("|")),
+        diagramUrl: (hasDiagram && fullImageDataUri && !item.content?.includes("![") && !item.content?.includes("|")) ? fullImageDataUri : undefined,
       };
     });
 

@@ -206,12 +206,16 @@ interface ExamShufflerProps {
   questionBank: Question[];
   onPublishExam: (exam: ExamPackage) => void;
   onOpenStudentExam: (examId: string, examCode: string) => void;
+  onAddQuestion?: (q: Question) => void;
+  onAddMultipleQuestions?: (qList: Question[]) => void;
 }
 
 export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   questionBank,
   onPublishExam,
   onOpenStudentExam,
+  onAddQuestion,
+  onAddMultipleQuestions,
 }) => {
   // General Configurations
   const [config, setConfig] = useState<ExamConfig>({
@@ -1898,6 +1902,24 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                     </button>
                   </div>
 
+                  {/* Save All to Question Bank Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedQuestions.length === 0) return;
+                      if (onAddMultipleQuestions) {
+                        onAddMultipleQuestions(selectedQuestions);
+                      }
+                      setParseSuccessMsg(`✅ Đã lưu thành công toàn bộ ${selectedQuestions.length} câu hỏi vào Ngân hàng câu hỏi!`);
+                      alert(`Đã lưu thành công ${selectedQuestions.length} câu hỏi vào Ngân hàng câu hỏi!`);
+                    }}
+                    className="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-lg flex items-center gap-1.5 transition-all shadow-2xs"
+                    title="Lưu toàn bộ danh sách câu hỏi đã trích xuất vào Ngân hàng câu hỏi"
+                  >
+                    <Save className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Lưu Vào Ngân Hàng ({selectedQuestions.length} câu)</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => exportQuestionsToWordDoc(selectedQuestions, uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Trich_Xuat")}
@@ -2128,14 +2150,31 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                               )}
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={() => setEditingQuestion(currentQ)}
-                              className="px-2.5 py-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg flex items-center gap-1 transition-all"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>Sửa Câu Này</span>
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onAddQuestion) {
+                                    onAddQuestion(currentQ);
+                                  }
+                                  alert(`Đã lưu Câu ${previewStudentQIndex} vào Ngân hàng câu hỏi!`);
+                                }}
+                                className="px-2.5 py-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1 transition-all"
+                                title="Lưu câu hỏi này vào Ngân hàng"
+                              >
+                                <Save className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Lưu Vào Bank</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setEditingQuestion(currentQ)}
+                                className="px-2.5 py-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg flex items-center gap-1 transition-all"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Sửa Câu Này</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* Passage / Group Reading Content */}
@@ -2463,6 +2502,20 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                               </div>
 
                               <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (onAddQuestion) {
+                                      onAddQuestion(q);
+                                    }
+                                    alert(`Đã lưu Câu ${q.originalOrderIndex || qIdx + 1} vào Ngân hàng câu hỏi!`);
+                                  }}
+                                  className="px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded flex items-center gap-1"
+                                  title="Lưu câu hỏi này vào Ngân hàng"
+                                >
+                                  <Save className="w-3 h-3 text-emerald-600" />
+                                  <span>Lưu Bank</span>
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => setEditingQuestion(q)}
