@@ -37,7 +37,7 @@ export async function convertMetafileBufferToPng(
 
     // 1. Try emf-converter as WMF with bounded size
     try {
-      const pngUrl = await convertWmfToDataUrl(buffer, { maxWidth: 1000, maxHeight: 800, dpiScale: 1.5 });
+      const pngUrl = await convertWmfToDataUrl(buffer, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
       if (pngUrl && pngUrl.startsWith("data:image/png") && pngUrl.length > 200) {
         return pngUrl;
       }
@@ -45,9 +45,21 @@ export async function convertMetafileBufferToPng(
       // Continue to next attempts
     }
 
+    // 1b. Try stripped buffer with emf-converter
+    try {
+      const stripped = stripAldusHeader(u8);
+      const strippedBuf = stripped.buffer.slice(stripped.byteOffset, stripped.byteOffset + stripped.byteLength);
+      const pngUrl = await convertWmfToDataUrl(strippedBuf, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
+      if (pngUrl && pngUrl.startsWith("data:image/png") && pngUrl.length > 200) {
+        return pngUrl;
+      }
+    } catch (err1b) {
+      // Continue
+    }
+
     // 2. Try emf-converter as EMF with bounded size
     try {
-      const emfUrl = await convertEmfToDataUrl(buffer, { maxWidth: 1000, maxHeight: 800, dpiScale: 1.5 });
+      const emfUrl = await convertEmfToDataUrl(buffer, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
       if (emfUrl && emfUrl.startsWith("data:image/png") && emfUrl.length > 200) {
         return emfUrl;
       }
@@ -55,20 +67,36 @@ export async function convertMetafileBufferToPng(
       // Continue
     }
 
+    // 2b. Try stripped buffer as EMF
+    try {
+      const stripped = stripAldusHeader(u8);
+      const strippedBuf = stripped.buffer.slice(stripped.byteOffset, stripped.byteOffset + stripped.byteLength);
+      const emfUrl = await convertEmfToDataUrl(strippedBuf, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
+      if (emfUrl && emfUrl.startsWith("data:image/png") && emfUrl.length > 200) {
+        return emfUrl;
+      }
+    } catch (err2b) {
+      // Continue
+    }
+
     // 3. Fallback: SheetJS WMF with Aldus header stripping
     const stripped = stripAldusHeader(u8);
     const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 600;
     try {
       WMF.draw_canvas(stripped, canvas);
       if (canvas.width > 0 && canvas.height > 0) {
-        return canvas.toDataURL("image/png");
+        const url = canvas.toDataURL("image/png");
+        if (url && url.length > 200) return url;
       }
     } catch (wmfErr) {
       // Try raw buffer without stripping
       try {
         WMF.draw_canvas(u8, canvas);
         if (canvas.width > 0 && canvas.height > 0) {
-          return canvas.toDataURL("image/png");
+          const url = canvas.toDataURL("image/png");
+          if (url && url.length > 200) return url;
         }
       } catch (e3) {
         // Fallback failed
@@ -92,17 +120,21 @@ export function convertWmfBufferToPng(wmfData: Uint8Array | ArrayBuffer): string
 
     const stripped = stripAldusHeader(u8);
     const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 600;
 
     try {
       WMF.draw_canvas(stripped, canvas);
       if (canvas.width > 0 && canvas.height > 0) {
-        return canvas.toDataURL("image/png");
+        const url = canvas.toDataURL("image/png");
+        if (url && url.length > 200) return url;
       }
     } catch (e1) {
       try {
         WMF.draw_canvas(u8, canvas);
         if (canvas.width > 0 && canvas.height > 0) {
-          return canvas.toDataURL("image/png");
+          const url = canvas.toDataURL("image/png");
+          if (url && url.length > 200) return url;
         }
       } catch (e2) {
         // Fallback failed

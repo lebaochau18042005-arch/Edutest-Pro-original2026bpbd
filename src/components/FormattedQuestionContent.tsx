@@ -341,8 +341,8 @@ export const FormattedQuestionContent: React.FC<FormattedQuestionContentProps> =
   // Extract markdown images `![Alt](src)` and structure content
   const segments = useMemo(() => {
     const output: Array<{ type: "text" | "table" | "image" | "diagram"; data: any; alt?: string }> = [];
-    // Match ![alt](dataUri/url)
-    const imageRegex = /!\[(.*?)\]\((data:image\/[^;]+;base64,[^\s)]+|https?:\/\/[^\s)]+|\/[^\s)]+|[^\s)]+)\)/g;
+    // Match ![alt](dataUri/url) robustly even with whitespace or newlines inside base64
+    const imageRegex = /!\[(.*?)\]\(\s*(data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\s\r\n]+|https?:\/\/[^\s)]+|\/[^\s)]+|[^\s)]+?)\s*\)/g;
 
     let lastIndex = 0;
     let match;
@@ -356,7 +356,8 @@ export const FormattedQuestionContent: React.FC<FormattedQuestionContentProps> =
       }
 
       const altText = match[1] || "Hình vẽ / Biểu đồ câu hỏi";
-      const src = convertWmfDataUriToPng(match[2]);
+      const cleanSrc = match[2].trim().startsWith("data:image") ? match[2].replace(/\s+/g, "") : match[2].trim();
+      const src = convertWmfDataUriToPng(cleanSrc);
       output.push({
         type: "image",
         data: src,
