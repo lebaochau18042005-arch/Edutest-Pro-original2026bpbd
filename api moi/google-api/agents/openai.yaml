@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google AI API Key Validation"
+  short_description: "Accept Gemini keys starting with AIzaSy or AQ"
+  default_prompt: "Use $google-ai-api-key-validation to update this app so Google AI/Gemini API keys starting with AIzaSy or AQ are accepted."

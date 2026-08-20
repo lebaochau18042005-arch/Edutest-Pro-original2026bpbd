@@ -1,0 +1,8 @@
+{
+  "name": "EduTest Pro - Khảo Thí & Chấm Thi AI",
+  "description": "Hệ thống trộn đề trắc nghiệm, quản lý ngân hàng câu hỏi, thi trực tuyến chống gian lận và chấm thi AI tự động. Tác giả: Lê Thị Thái, GV Môn Địa Lý - Trường THPT Bình Phú - Bình Dương, Zalo: 0916791779.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

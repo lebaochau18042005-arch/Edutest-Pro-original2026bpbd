@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gemini Model Overload Fallback"
+  short_description: "Handle Gemini 503 overload with fallbacks"
+  default_prompt: "Use $gemini-model-overload-fallback to fix Gemini 503 UNAVAILABLE or high demand errors with model fallback."
