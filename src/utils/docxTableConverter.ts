@@ -56,8 +56,8 @@ export function convertDocxHtmlToMarkdown(
       if (rows.length === 0) return "";
 
       const flatCells = rows.flat().filter(Boolean);
-      const hasOptions = flatCells.some((c) => /^[A-D][.)/:]\s+/i.test(c));
-      const hasStatements = flatCells.some((c) => /^[a-d][.)/:]\s+/i.test(c));
+      const hasOptions = flatCells.some((c) => /^\*{0,2}(?:\[?[A-D]\]?|\([A-D]\))[.)/:]/i.test(c.trim()));
+      const hasStatements = flatCells.some((c) => /^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?[a-d]\]?|\([a-d]\)|[a-d])[.)/:]/i.test(c.trim()) || /^\([a-d]\)\s+/i.test(c.trim()));
 
       if (hasOptions || hasStatements) {
         return "\n" + flatCells.join("\n") + "\n";

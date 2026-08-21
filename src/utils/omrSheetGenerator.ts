@@ -152,40 +152,54 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       display: inline-block;
       vertical-align: top;
       width: calc(16.66% - 4px);
-      border: 1.2px solid #000;
+      border: 1.5px solid #000;
       margin: 0 2px;
-      padding: 2px;
+      padding: 3px 2px;
       text-align: center;
       background: #fff;
+    }
+    .short-col-header {
+      font-weight: 900;
+      font-size: 10px;
+      margin-bottom: 3px;
+      border-bottom: 1.2px solid #000;
+      padding-bottom: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
     .short-box-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
     .short-box-cell {
       border: 1.5px solid #000;
-      height: 16px;
+      height: 18px;
       width: 25%;
       background: #fff;
+      font-size: 11px;
+      font-weight: bold;
+      text-align: center;
+      line-height: 18px;
     }
     .short-grid-table {
       width: 100%;
       border-collapse: collapse;
     }
     .short-grid-table td {
-      padding: 0.5px 0;
+      padding: 0.8px 0;
       text-align: center;
+      vertical-align: middle;
     }
     .short-bubble {
-      width: 11px;
-      height: 11px;
-      border: 1px solid #000;
+      width: 12px;
+      height: 12px;
+      border: 1.2px solid #000;
       border-radius: 50%;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 7.5px;
+      font-size: 8px;
       font-weight: bold;
       color: #000;
       background: #fff;
@@ -359,7 +373,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
 
     <!-- PART III: SHORT ANSWER - 4 COLUMNS MATRIX ACCORDING TO MOET STANDARD -->
     <div class="part-title">
-      <span>PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Viết vào 4 ô vuông và tô các chữ số tương ứng)</span>
+      <span>PHẦN III: CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN (Thí sinh viết kết quả vào 4 ô vuông và tô các ô tròn tương ứng ở cột phía dưới)</span>
       <span>${numPart3} CÂU</span>
     </div>
     <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
@@ -367,7 +381,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
         const qNum = idx + 1;
         return `
         <div class="short-col">
-          <div style="font-weight: 900; font-size: 9.5px; margin-bottom: 2px; border-bottom: 1px solid #666; padding-bottom: 1px;">
+          <div class="short-col-header">
             CÂU ${qNum}
           </div>
           <!-- 4 Write-in Boxes -->
@@ -381,6 +395,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
           </table>
           <!-- Bubble Matrix (Row for - and ,, and 0-9 for all 4 columns) -->
           <table class="short-grid-table">
+            <!-- Row for Signs: Col 1 has '-', Col 2,3,4 have ',' -->
             <tr>
               <td><span class="short-bubble">-</span></td>
               <td><span class="short-bubble">,</span></td>

@@ -606,8 +606,8 @@ export async function extractDocxDeep(
 
         // Check if this table is an option table (e.g. cells like A. ..., B. ..., C. ..., D. ...)
         const flatCells = rows.flat().filter(Boolean);
-        const hasOptionsInTable = flatCells.some((c) => /^[A-D][.)/:]\s+/i.test(c));
-        const hasStatementsInTable = flatCells.some((c) => /^[a-d][.)/:]\s+/i.test(c));
+        const hasOptionsInTable = flatCells.some((c) => /^\*{0,2}(?:\[?[A-D]\]?|\([A-D]\))[.)/:]/i.test(c.trim()));
+        const hasStatementsInTable = flatCells.some((c) => /^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?[a-d]\]?|\([a-d]\)|[a-d])[.)/:]/i.test(c.trim()) || /^\([a-d]\)\s+/i.test(c.trim()));
 
         if (hasOptionsInTable || hasStatementsInTable) {
           // Output each cell on a new line so options/statements are cleanly parsed

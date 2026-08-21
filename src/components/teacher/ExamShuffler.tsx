@@ -727,6 +727,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
       }
 
       if (currentQuestionsList.length > 0) {
+        currentQuestionsList = normalizeExamQuestions3Parts(currentQuestionsList);
         setSelectedQuestions(currentQuestionsList);
         setUploadedFilesList(updatedFilesList);
         setUploadedImageMap(combinedImageMap);
@@ -2290,23 +2291,43 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                           )}
 
                           {/* PART III: Short Answer Numeric Input */}
-                          {isPart3 && (
-                            <div className="space-y-2 pt-2 bg-amber-50/70 p-4 rounded-xl border border-amber-200 text-xs">
-                              <div className="font-bold text-amber-950">Nhập kết quả số (Dạng Phần III):</div>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={currentQ.shortAnswer || ""}
-                                  onChange={(e) => handleUpdateShortAnswer(currentQ.id, e.target.value)}
-                                  placeholder="Nhập số đúng (VD: 15.8, 800, 64)..."
-                                  className="flex-1 px-3 py-2 bg-white border border-amber-300 rounded-lg font-mono font-bold text-sm text-amber-950 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                                />
-                                <span className="text-[11px] text-amber-800 font-medium">
-                                  ✓ Đã lưu tự động
-                                </span>
+                          {isPart3 && (() => {
+                            const val = (currentQ.shortAnswer || "").trim();
+                            const chars = [val[0] || "", val[1] || "", val[2] || "", val[3] || ""];
+                            return (
+                              <div className="space-y-3 pt-2 bg-amber-50/70 p-4 rounded-xl border border-amber-200 text-xs">
+                                <div className="flex items-center justify-between font-bold text-amber-950">
+                                  <span>Đáp án chuẩn Phần III (Điền số - 4 ô theo mẫu BGD):</span>
+                                  <span className="text-[11px] text-amber-800 font-medium">✓ Đã lưu tự động</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-4">
+                                  {/* 4 Write-in Boxes Preview */}
+                                  <div className="flex items-center gap-1.5">
+                                    {[0, 1, 2, 3].map((colIdx) => (
+                                      <div
+                                        key={colIdx}
+                                        className={`w-9 h-9 rounded-lg border-2 font-mono text-base font-black flex items-center justify-center ${
+                                          chars[colIdx]
+                                            ? "border-amber-600 bg-white text-amber-950 shadow-xs"
+                                            : "border-dashed border-amber-300 bg-amber-100/50 text-amber-400"
+                                        }`}
+                                      >
+                                        {chars[colIdx] || ""}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <input
+                                    type="text"
+                                    maxLength={4}
+                                    value={currentQ.shortAnswer || ""}
+                                    onChange={(e) => handleUpdateShortAnswer(currentQ.id, e.target.value.slice(0, 4))}
+                                    placeholder="Nhập đáp án số (VD: -1.5, 2.75, 800)..."
+                                    className="flex-1 min-w-[200px] px-3 py-2 bg-white border border-amber-300 rounded-lg font-mono font-bold text-sm text-amber-950 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                                  />
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           {/* Explanation Box */}
                           {currentQ.explanation && (
@@ -3836,55 +3857,58 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                   <label className="block font-bold text-slate-700">
                     4 Mệnh Đề Đúng / Sai (a, b, c, d):
                   </label>
-                  {(editingQuestion.statements && editingQuestion.statements.length > 0
-                    ? editingQuestion.statements
-                    : [
-                        { id: "a", label: "a)", text: "Mệnh đề a", correctValue: true },
-                        { id: "b", label: "b)", text: "Mệnh đề b", correctValue: false },
-                        { id: "c", label: "c)", text: "Mệnh đề c", correctValue: true },
-                        { id: "d", label: "d)", text: "Mệnh đề d", correctValue: false },
-                      ]
-                  ).map((st, sIdx) => (
-                    <div key={st.id} className="flex items-center gap-2">
-                      <span className="font-bold text-purple-700 w-5">{st.label || `${st.id})`}</span>
-                      <input
-                        type="text"
-                        value={st.text}
-                        onChange={(e) => {
-                          const newStmts = [...(editingQuestion.statements || [])];
-                          newStmts[sIdx] = { ...st, text: e.target.value };
-                          setEditingQuestion({ ...editingQuestion, statements: newStmts });
-                        }}
-                        className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newStmts = [...(editingQuestion.statements || [])];
-                          newStmts[sIdx] = { ...st, correctValue: true };
-                          setEditingQuestion({ ...editingQuestion, statements: newStmts });
-                        }}
-                        className={`px-3 py-1 text-xs font-bold rounded-lg ${
-                          st.correctValue ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        Đúng
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newStmts = [...(editingQuestion.statements || [])];
-                          newStmts[sIdx] = { ...st, correctValue: false };
-                          setEditingQuestion({ ...editingQuestion, statements: newStmts });
-                        }}
-                        className={`px-3 py-1 text-xs font-bold rounded-lg ${
-                          !st.correctValue ? "bg-rose-600 text-white" : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        Sai
-                      </button>
-                    </div>
-                  ))}
+                  {(() => {
+                    const currentStmts =
+                      editingQuestion.statements && editingQuestion.statements.length === 4
+                        ? editingQuestion.statements
+                        : [
+                            { id: "a", label: "a)", text: editingQuestion.statements?.[0]?.text || "Mệnh đề a", correctValue: editingQuestion.statements?.[0]?.correctValue ?? true },
+                            { id: "b", label: "b)", text: editingQuestion.statements?.[1]?.text || "Mệnh đề b", correctValue: editingQuestion.statements?.[1]?.correctValue ?? false },
+                            { id: "c", label: "c)", text: editingQuestion.statements?.[2]?.text || "Mệnh đề c", correctValue: editingQuestion.statements?.[2]?.correctValue ?? true },
+                            { id: "d", label: "d)", text: editingQuestion.statements?.[3]?.text || "Mệnh đề d", correctValue: editingQuestion.statements?.[3]?.correctValue ?? false },
+                          ];
+                    return currentStmts.map((st, sIdx) => (
+                      <div key={st.id} className="flex items-center gap-2">
+                        <span className="font-bold text-purple-700 w-5">{st.label || `${st.id})`}</span>
+                        <input
+                          type="text"
+                          value={st.text}
+                          onChange={(e) => {
+                            const newStmts = [...currentStmts];
+                            newStmts[sIdx] = { ...st, text: e.target.value };
+                            setEditingQuestion({ ...editingQuestion, statements: newStmts });
+                          }}
+                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newStmts = [...currentStmts];
+                            newStmts[sIdx] = { ...st, correctValue: true };
+                            setEditingQuestion({ ...editingQuestion, statements: newStmts });
+                          }}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg ${
+                            st.correctValue ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          Đúng
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newStmts = [...currentStmts];
+                            newStmts[sIdx] = { ...st, correctValue: false };
+                            setEditingQuestion({ ...editingQuestion, statements: newStmts });
+                          }}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg ${
+                            !st.correctValue ? "bg-rose-600 text-white" : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          Sai
+                        </button>
+                      </div>
+                    ));
+                  })()}
                 </div>
               )}
 

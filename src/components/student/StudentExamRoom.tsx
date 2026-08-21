@@ -1119,116 +1119,204 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
               )}
 
               {/* ----------------- DẠNG 3: TRẮC NGHIỆM TRẢ LỜI NGẮN (PHẦN III) ----------------- */}
-              {(currentQuestion.part === 3 || currentQuestion.questionType === "short_answer") && (
-                <div className="space-y-4 pt-2">
-                  <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2 text-xs text-amber-900">
-                    <p className="font-semibold">Hướng dẫn điền kết quả:</p>
-                    <p className="text-[11px] text-amber-800">
-                      Điền số nguyên hoặc số thập phân (dùng dấu chấm <code>.</code> hoặc dấu phẩy <code>,</code>, vd: <code>28.3</code>, <code>-1.5</code>, <code>800</code>). Hỗ trợ bàn phím ảo bên dưới.
-                    </p>
-                  </div>
+              {(currentQuestion.part === 3 || currentQuestion.questionType === "short_answer") && (() => {
+                const currentVal = (answers[currentQIndex] || "").trim();
+                const chars = [currentVal[0] || "", currentVal[1] || "", currentVal[2] || "", currentVal[3] || ""];
 
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="relative flex-1 max-w-md">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={answers[currentQIndex] || ""}
-                          onChange={(e) => handleInputShortAnswer(currentQIndex, e.target.value)}
-                          placeholder="Nhập kết quả số..."
-                          className="w-full px-4 py-3 bg-white border-2 border-indigo-300 rounded-2xl font-mono text-lg font-bold text-indigo-950 focus:outline-hidden focus:border-indigo-600 shadow-xs"
-                        />
-                      </div>
+                const handleSetColChar = (colIdx: number, char: string) => {
+                  const newChars = [...chars];
+                  if (newChars[colIdx] === char) {
+                    newChars[colIdx] = "";
+                  } else {
+                    newChars[colIdx] = char;
+                  }
+                  const joined = newChars.join("").trim();
+                  handleInputShortAnswer(currentQIndex, joined);
+                };
 
-                      <button
-                        type="button"
-                        onClick={() => setShowMathKeypad((prev) => !prev)}
-                        className={`px-4 py-3 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5 min-h-[48px] ${
-                          showMathKeypad
-                            ? "bg-indigo-600 text-white shadow-xs"
-                            : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
-                        }`}
-                      >
-                        <Calculator className="w-4 h-4" />
-                        <span>{showMathKeypad ? "Ẩn Bàn Phím" : "Bàn Phím Số Ảo"}</span>
-                      </button>
-
-                      {answers[currentQIndex] && (
-                        <button
-                          type="button"
-                          onClick={() => handleClearAnswer(currentQIndex)}
-                          className="px-3 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl text-xs font-semibold min-h-[48px]"
-                        >
-                          Xóa Trắng
-                        </button>
-                      )}
+                return (
+                  <div className="space-y-4 pt-2">
+                    <div className="p-3.5 bg-amber-50/80 border border-amber-200 rounded-2xl space-y-1.5 text-xs text-amber-900">
+                      <p className="font-bold flex items-center gap-1.5 text-amber-950">
+                        <span>📝 Quy định tô phiếu Trả lời ngắn (Phần III - Chuẩn Bộ GD&ĐT):</span>
+                      </p>
+                      <p className="text-[11px] text-amber-800 leading-relaxed">
+                        Thí sinh điền kết quả vào <strong>4 ô vuông</strong> từ trái sang phải, sau đó tô ô tròn tương ứng ở cột phía dưới (Gồm các chữ số <code>0–9</code>, dấu âm <code>-</code> ở cột 1 và dấu phẩy <code>,</code> ở các cột 2, 3, 4).
+                      </p>
                     </div>
 
-                    {/* Virtual Math & Number Keypad */}
-                    {showMathKeypad && (
-                      <div className="p-4 bg-slate-900 text-white rounded-3xl border border-indigo-500/40 shadow-xl max-w-md space-y-3 animate-scale-in">
-                        <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-2">
-                          <span className="font-semibold text-indigo-300 flex items-center gap-1">
-                            <Calculator className="w-3.5 h-3.5" />
-                            <span>Bàn phím hỗ trợ thí sinh nhập nhanh</span>
-                          </span>
-                          <span className="font-mono text-[10px]">Math Keypad v2</span>
+                    <div className="flex flex-col lg:flex-row items-start gap-6">
+                      {/* Left: Interactive 4-Box Write-in and 4-Column OMR Matrix */}
+                      <div className="p-4 bg-white rounded-2xl border-2 border-indigo-200 shadow-sm max-w-sm w-full mx-auto space-y-3">
+                        <div className="text-center font-bold text-xs text-indigo-950 uppercase tracking-wide border-b border-slate-100 pb-2">
+                          Mô Phỏng Phiếu Tô Bộ GD&ĐT (Câu {currentQIndex + 1})
                         </div>
 
-                        <div className="grid grid-cols-4 gap-2">
-                          {["7", "8", "9", "/"].map((k) => (
-                            <button
-                              key={k}
-                              type="button"
-                              onClick={() => handleInsertMathKeypad(k)}
-                              className="py-3 bg-slate-800 hover:bg-slate-700 active:bg-indigo-600 text-white rounded-xl font-mono text-base font-bold transition-colors shadow-xs"
-                            >
-                              {k}
-                            </button>
-                          ))}
-                          {["4", "5", "6", "-"].map((k) => (
-                            <button
-                              key={k}
-                              type="button"
-                              onClick={() => handleInsertMathKeypad(k)}
-                              className="py-3 bg-slate-800 hover:bg-slate-700 active:bg-indigo-600 text-white rounded-xl font-mono text-base font-bold transition-colors shadow-xs"
-                            >
-                              {k}
-                            </button>
-                          ))}
-                          {["1", "2", "3", "."].map((k) => (
-                            <button
-                              key={k}
-                              type="button"
-                              onClick={() => handleInsertMathKeypad(k)}
-                              className="py-3 bg-slate-800 hover:bg-slate-700 active:bg-indigo-600 text-white rounded-xl font-mono text-base font-bold transition-colors shadow-xs"
-                            >
-                              {k}
-                            </button>
-                          ))}
-                          {["0", "BACKSPACE", "CLEAR"].map((k) => (
-                            <button
-                              key={k}
-                              type="button"
-                              onClick={() => handleInsertMathKeypad(k)}
-                              className={`py-3 rounded-xl font-mono font-bold transition-colors shadow-xs ${
-                                k === "0"
-                                  ? "col-span-2 bg-slate-800 hover:bg-slate-700 text-white text-base"
-                                  : k === "BACKSPACE"
-                                  ? "bg-amber-600 hover:bg-amber-700 text-white text-xs"
-                                  : "bg-rose-600 hover:bg-rose-700 text-white text-xs"
+                        {/* 4 Write-in Boxes */}
+                        <div className="grid grid-cols-4 gap-2 text-center">
+                          {[0, 1, 2, 3].map((colIdx) => (
+                            <div
+                              key={colIdx}
+                              className={`h-11 rounded-xl border-2 font-mono text-xl font-black flex items-center justify-center transition-all ${
+                                chars[colIdx]
+                                  ? "border-indigo-600 bg-indigo-50/60 text-indigo-950 shadow-xs"
+                                  : "border-slate-300 bg-slate-50 text-slate-400"
                               }`}
                             >
-                              {k === "0" ? "0" : k === "BACKSPACE" ? "⌫ Xóa 1 ký tự" : "AC Xóa hết"}
-                            </button>
+                              {chars[colIdx] || ""}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* OMR Column Bubbles */}
+                        <div className="grid grid-cols-4 gap-2 pt-1 border-t border-slate-100">
+                          {/* Row for Signs: Col 1 has '-', Col 2,3,4 have ',' */}
+                          {[0, 1, 2, 3].map((colIdx) => {
+                            const sign = colIdx === 0 ? "-" : ",";
+                            const isSelected = chars[colIdx] === sign;
+                            return (
+                              <div key={`sign-${colIdx}`} className="text-center py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetColChar(colIdx, sign)}
+                                  className={`w-7 h-7 rounded-full font-bold text-xs border transition-all mx-auto flex items-center justify-center ${
+                                    isSelected
+                                      ? "bg-slate-900 text-white border-slate-900 shadow-xs scale-105"
+                                      : "border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 bg-white"
+                                  }`}
+                                  title={`Tô dấu ${sign} ở ô ${colIdx + 1}`}
+                                >
+                                  {sign}
+                                </button>
+                              </div>
+                            );
+                          })}
+
+                          {/* Rows for digits 0 to 9 */}
+                          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
+                            <React.Fragment key={`digit-row-${digit}`}>
+                              {[0, 1, 2, 3].map((colIdx) => {
+                                const isSelected = chars[colIdx] === String(digit);
+                                return (
+                                  <div key={`digit-${digit}-${colIdx}`} className="text-center py-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetColChar(colIdx, String(digit))}
+                                      className={`w-7 h-7 rounded-full font-bold text-xs border transition-all mx-auto flex items-center justify-center ${
+                                        isSelected
+                                          ? "bg-slate-900 text-white border-slate-900 shadow-xs scale-105"
+                                          : "border-slate-300 hover:border-indigo-500 hover:bg-indigo-50 text-slate-700 bg-white"
+                                      }`}
+                                      title={`Tô số ${digit} ở ô ${colIdx + 1}`}
+                                    >
+                                      {digit}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </React.Fragment>
                           ))}
                         </div>
                       </div>
-                    )}
+
+                      {/* Right: Quick keyboard & Direct input */}
+                      <div className="flex-1 w-full space-y-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700">
+                            Hoặc Nhập trực tiếp từ bàn phím:
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              maxLength={4}
+                              value={answers[currentQIndex] || ""}
+                              onChange={(e) => handleInputShortAnswer(currentQIndex, e.target.value.slice(0, 4))}
+                              placeholder="VD: -1.5, 2.75, 800..."
+                              className="w-full px-4 py-3 bg-white border-2 border-indigo-300 rounded-2xl font-mono text-lg font-bold text-indigo-950 focus:outline-hidden focus:border-indigo-600 shadow-xs"
+                            />
+                            {answers[currentQIndex] && (
+                              <button
+                                type="button"
+                                onClick={() => handleClearAnswer(currentQIndex)}
+                                className="px-3 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl text-xs font-semibold whitespace-nowrap min-h-[48px]"
+                              >
+                                Xóa Trắng
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowMathKeypad((prev) => !prev)}
+                          className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                            showMathKeypad
+                              ? "bg-indigo-600 text-white shadow-xs"
+                              : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
+                          }`}
+                        >
+                          <Calculator className="w-4 h-4" />
+                          <span>{showMathKeypad ? "Ẩn Bàn Phím Số Ảo" : "Hiện Bàn Phím Số Ảo (Tùy chọn)"}</span>
+                        </button>
+
+                        {/* Virtual Math Keypad */}
+                        {showMathKeypad && (
+                          <div className="p-3 bg-slate-900 text-white rounded-2xl border border-indigo-500/40 shadow-xl space-y-2 animate-scale-in">
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {["7", "8", "9", "-"].map((k) => (
+                                <button
+                                  key={k}
+                                  type="button"
+                                  onClick={() => handleInsertMathKeypad(k)}
+                                  className="py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-indigo-600 text-white rounded-lg font-mono text-sm font-bold transition-colors"
+                                >
+                                  {k}
+                                </button>
+                              ))}
+                              {["4", "5", "6", ","].map((k) => (
+                                <button
+                                  key={k}
+                                  type="button"
+                                  onClick={() => handleInsertMathKeypad(k)}
+                                  className="py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-indigo-600 text-white rounded-lg font-mono text-sm font-bold transition-colors"
+                                >
+                                  {k}
+                                </button>
+                              ))}
+                              {["1", "2", "3", "."].map((k) => (
+                                <button
+                                  key={k}
+                                  type="button"
+                                  onClick={() => handleInsertMathKeypad(k)}
+                                  className="py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-indigo-600 text-white rounded-lg font-mono text-sm font-bold transition-colors"
+                                >
+                                  {k}
+                                </button>
+                              ))}
+                              {["0", "BACKSPACE", "CLEAR"].map((k) => (
+                                <button
+                                  key={k}
+                                  type="button"
+                                  onClick={() => handleInsertMathKeypad(k)}
+                                  className={`py-2.5 rounded-lg font-mono font-bold transition-colors ${
+                                    k === "0"
+                                      ? "col-span-2 bg-slate-800 hover:bg-slate-700 text-white text-sm"
+                                      : k === "BACKSPACE"
+                                      ? "bg-amber-600 hover:bg-amber-700 text-white text-xs"
+                                      : "bg-rose-600 hover:bg-rose-700 text-white text-xs"
+                                  }`}
+                                >
+                                  {k === "0" ? "0" : k === "BACKSPACE" ? "⌫ Xóa" : "AC Hết"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Navigation Prev / Next Buttons */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-100">

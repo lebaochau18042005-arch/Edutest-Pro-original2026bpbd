@@ -462,7 +462,7 @@ export function splitRawTextIntoOptions(text: string): string[] {
 }
 
 /**
- * Tách các khẳng định đúng sai Phần II bị gộp trên 1 dòng hoặc trong bảng
+ * Tách các khẳng định đúng sai Phần II bị gộp trên 1 dòng hoặc trong bảng hoặc trong văn bản
  */
 export function splitRawTextIntoStatements(text: string): { id: string; label: string; text: string; correctValue: boolean }[] {
   if (!text || !text.trim()) return [];
@@ -475,13 +475,34 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
     for (const line of lines) {
       if (!line.includes("|") || /^\|[\s-:]+\|$/.test(line.trim())) continue;
       const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
+
+      // Case 1: Row structure | a) | Nội dung mệnh đề | Đúng |
+      if (cells.length >= 2) {
+        const firstCellMatch = cells[0].match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*$/i);
+        if (firstCellMatch) {
+          const l = (firstCellMatch[1] || firstCellMatch[2] || firstCellMatch[3] || firstCellMatch[4] || firstCellMatch[5] || "a").toLowerCase();
+          const stmtText = cells[1] || "";
+          const restRow = cells.slice(2).join(" ");
+          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(restRow) || /\(Đúng\)|\[Đúng\]|\(Đ\)/i.test(stmtText);
+          const cleanText = stmtText.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "").trim();
+          tableStmts.push({
+            id: l,
+            label: `${l})`,
+            text: cleanText || `Ý ${l}`,
+            correctValue: isCorrect,
+          });
+          continue;
+        }
+      }
+
+      // Case 2: Each cell contains full statement e.g. | a) Nội dung | b) Nội dung |
       for (const cell of cells) {
-        const sm = cell.match(/^(?:\*{0,2}(?:\[?([a-d])\]?|\(([a-d])\))[.)/:]\*{0,2})\s*(.*)/i);
+        const sm = cell.match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i);
         if (sm) {
-          const l = (sm[1] || sm[2] || "a").toLowerCase();
-          const rawVal = sm[3] || "";
-          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(rawVal) || /\bĐúng\b/i.test(cell);
-          const cleanText = rawVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
+          const l = (sm[1] || sm[2] || sm[3] || sm[4] || sm[5] || "a").toLowerCase();
+          const rawVal = sm[6] || "";
+          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawVal) || /\bĐúng\b/i.test(cell);
+          const cleanText = rawVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "").trim();
           tableStmts.push({
             id: l,
             label: `${l})`,
@@ -492,16 +513,29 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
       }
     }
     if (tableStmts.length >= 2) {
-      return tableStmts;
+      const uniqueMap: Record<string, { id: string; label: string; text: string; correctValue: boolean }> = {};
+      tableStmts.forEach((st) => { uniqueMap[st.id] = st; });
+      return Object.values(uniqueMap);
     }
   }
 
-  const pattern = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?([a-d])\]?|\(([a-d])\))[.)/:]\*{0,2})\s*/gi;
+  // 2. Position-based splitting for non-table text (preserves 100% of text without truncation)
+  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*/gi;
   const matches: { letter: string; index: number; matchLength: number }[] = [];
   let m;
 
-  while ((m = pattern.exec(clean)) !== null) {
-    const letter = (m[1] || m[2] || "").toLowerCase();
+  while ((m = markerRegex.exec(clean)) !== null) {
+    const matchIdx = m.index;
+    const beforeStr = clean.substring(0, matchIdx);
+
+    // Skip if inside markdown link/image like [alt](url)
+    const lastUrlOpen = beforeStr.lastIndexOf("](");
+    const lastUrlClose = beforeStr.lastIndexOf(")");
+    if (lastUrlOpen !== -1 && (lastUrlClose === -1 || lastUrlClose < lastUrlOpen)) continue;
+
+    const letter = (m[1] || m[2] || m[3] || m[4] || m[5] || "").toLowerCase();
+    if (!letter || !["a", "b", "c", "d"].includes(letter)) continue;
+
     matches.push({
       letter,
       index: m.index,
@@ -516,16 +550,21 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
       const start = current.index + current.matchLength;
       const end = i < matches.length - 1 ? matches[i + 1].index : clean.length;
       const rawTextVal = clean.substring(start, end).trim();
-      const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(rawTextVal);
-      const val = rawTextVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
+
+      const isCorrect = /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+      const cleanText = rawTextVal
+        .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
+        .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+        .trim();
 
       stmts.push({
         id: current.letter,
         label: `${current.letter})`,
-        text: val || `Ý ${current.letter}`,
+        text: cleanText || `Ý ${current.letter}`,
         correctValue: isCorrect,
       });
     }
+
     if (stmts.length >= 2) {
       return stmts;
     }
@@ -539,7 +578,7 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
  * - Phần I: Trắc nghiệm 4 lựa chọn (Đủ 4 phương án A, B, C, D, 1 lệnh hỏi/câu)
  * - Phần II: Đúng / Sai (BẮT BUỘC ĐỦ 4 ý a, b, c, d có đúng/sai, 4 lệnh hỏi/câu)
  * - Phần III: Trả lời ngắn / Điền số (1 lệnh hỏi/câu)
- * - BÓC TÁCH NGUYÊN BẢN 100% CÁC PHƯƠNG ÁN A, B, C, D TỪ FILE GỐC, KHÔNG ĐỂ RƠI RỚT HOẶC GỘP PHƯƠNG ÁN
+ * - BÓC TÁCH NGUYÊN BẢN 100% CÁC PHƯƠNG ÁN A, B, C, D VÀ CÁC MỆNH ĐỀ a, b, c, d TỪ FILE GỐC, KHÔNG ĐỂ RƠI RỚT HOẶC MẤT NỘI DUNG
  */
 export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question[] {
   const total = rawQuestions.length;
@@ -613,23 +652,64 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       }
     }
 
-    // XỬ LÝ VÀ BÓC TÁCH 4 MỆNH ĐỀ PHẦN II (ĐÚNG/SAI)
+    // XỬ LÝ VÀ BÓC TÁCH 4 MỆNH ĐỀ PHẦN II (ĐÚNG/SAI) BẢO ĐẢM KHÔNG BỎ SÓT NỘI DUNG
     let statements = q.statements ? [...q.statements] : undefined;
     if (part === 2) {
-      // Nếu statements rỗng hoặc bị gộp hoặc là placeholder, thử bóc tách từ content
+      // 1. Kiểm tra nếu statements rỗng, bị gộp hoặc chỉ là placeholder "Khẳng định ý a"
       const isPlaceholderStatements =
         !statements ||
         statements.length < 2 ||
-        statements.every((s) => /^Khẳng định ý [a-d]$/i.test(s.text.trim()));
+        statements.every(
+          (s) =>
+            !s.text ||
+            !s.text.trim() ||
+            /^Khẳng định ý [a-d]$/i.test(s.text.trim()) ||
+            /^Ý [a-d]$/i.test(s.text.trim()) ||
+            /^Mệnh đề [a-d]$/i.test(s.text.trim())
+        );
 
       if (isPlaceholderStatements) {
         const splittedStmts = splitRawTextIntoStatements(cleanContent);
         if (splittedStmts.length >= 2) {
           statements = splittedStmts;
           // Loại bỏ phần mệnh đề khỏi content chính
-          const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:\[?a\]?|\(a\))[.)/:]\*{0,2})\s+/i);
+          const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
           if (firstLetterMatch !== -1) {
             cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+          }
+        }
+      }
+
+      // 2. Nếu statements đã có một số phần tử nhưng bị thiếu text, hãy bổ sung từ cleanContent
+      if (statements && statements.length > 0) {
+        const hasSomeEmptyOrPlaceholder = statements.some(
+          (s) =>
+            !s.text ||
+            !s.text.trim() ||
+            /^Khẳng định ý [a-d]$/i.test(s.text.trim()) ||
+            /^Ý [a-d]$/i.test(s.text.trim())
+        );
+        if (hasSomeEmptyOrPlaceholder) {
+          const fromContent = splitRawTextIntoStatements(cleanContent);
+          if (fromContent.length >= 2) {
+            const contentMap: Record<string, string> = {};
+            fromContent.forEach((st) => { contentMap[st.id] = st.text; });
+            statements = statements.map((st) => {
+              if (
+                (!st.text ||
+                  !st.text.trim() ||
+                  /^Khẳng định ý [a-d]$/i.test(st.text.trim()) ||
+                  /^Ý [a-d]$/i.test(st.text.trim())) &&
+                contentMap[st.id]
+              ) {
+                return { ...st, text: contentMap[st.id] };
+              }
+              return st;
+            });
+            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+            if (firstLetterMatch !== -1) {
+              cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+            }
           }
         }
       }
@@ -643,10 +723,13 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
 
       statements = requiredLetters.map((l) => {
         if (existingMap[l]) {
+          let cleanText = (existingMap[l].text || "").trim();
+          // Làm sạch tiền tố redundant a), a., Ý a:, (a) ở đầu nội dung nếu bị thừa
+          cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.)/:]\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
           return {
             id: l,
             label: `${l})`,
-            text: existingMap[l].text || `Khẳng định ý ${l}`,
+            text: cleanText || `Khẳng định ý ${l}`,
             correctValue: typeof existingMap[l].correctValue === "boolean" ? existingMap[l].correctValue : true,
             explanation: existingMap[l].explanation || "",
           };
@@ -678,7 +761,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       questionType,
       options: part === 1 ? finalOptions.slice(0, 4) : [],
       statements: part === 2 ? statements : undefined,
-      shortAnswer: part === 3 ? (q.shortAnswer || "") : undefined,
+      shortAnswer: part === 3 ? (q.shortAnswer || finalShortAnswer || "") : undefined,
     };
   });
 }

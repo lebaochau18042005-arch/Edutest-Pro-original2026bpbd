@@ -5,6 +5,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { getStoredApiKey, getStoredSelectedModel } from "../components/ModelSettingsModal";
 import { Question, QuestionType, TrueFalseStatement } from "../types";
+import { normalizeExamQuestions3Parts } from "./examHelpers";
 
 export const FALLBACK_MODELS = [
   "gemini-2.5-flash",
@@ -289,19 +290,40 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
   if (!text || !text.trim()) return [];
   const clean = text.replace(/\u00A0/g, " ").trim();
 
+  // 1. Kiểm tra nếu là dạng bảng Markdown
   if (clean.includes("|")) {
     const lines = clean.split("\n");
     const tableStmts: TrueFalseStatement[] = [];
     for (const line of lines) {
       if (!line.includes("|") || /^\|[\s-:]+\|$/.test(line.trim())) continue;
       const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
+
+      // Structure | a) | Nội dung mệnh đề | Đúng |
+      if (cells.length >= 2) {
+        const firstCellMatch = cells[0].match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*$/i);
+        if (firstCellMatch) {
+          const l = (firstCellMatch[1] || firstCellMatch[2] || firstCellMatch[3] || firstCellMatch[4] || firstCellMatch[5] || "a").toLowerCase();
+          const stmtText = cells[1] || "";
+          const restRow = cells.slice(2).join(" ");
+          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(restRow) || /\(Đúng\)|\[Đúng\]|\(Đ\)/i.test(stmtText);
+          const cleanText = stmtText.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "").trim();
+          tableStmts.push({
+            id: l,
+            label: `${l})`,
+            text: cleanText || `Ý ${l}`,
+            correctValue: isCorrect,
+          });
+          continue;
+        }
+      }
+
       for (const cell of cells) {
-        const sm = cell.match(/^(?:\*{0,2}(?:\[?([a-d])\]?|\(([a-d])\))[.)/:]\*{0,2})\s*(.*)/i);
+        const sm = cell.match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i);
         if (sm) {
-          const l = (sm[1] || sm[2] || "a").toLowerCase();
-          const rawVal = sm[3] || "";
-          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(rawVal) || /\bĐúng\b/i.test(cell);
-          const cleanText = rawVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
+          const l = (sm[1] || sm[2] || sm[3] || sm[4] || sm[5] || "a").toLowerCase();
+          const rawVal = sm[6] || "";
+          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawVal) || /\bĐúng\b/i.test(cell);
+          const cleanText = rawVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "").trim();
           tableStmts.push({
             id: l,
             label: `${l})`,
@@ -312,7 +334,59 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
       }
     }
     if (tableStmts.length >= 2) {
-      return tableStmts;
+      const uniqueMap: Record<string, TrueFalseStatement> = {};
+      tableStmts.forEach((st) => { uniqueMap[st.id] = st; });
+      return Object.values(uniqueMap);
+    }
+  }
+
+  // 2. Position-based splitting for non-table text
+  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*/gi;
+  const matches: { letter: string; index: number; matchLength: number }[] = [];
+  let m;
+
+  while ((m = markerRegex.exec(clean)) !== null) {
+    const matchIdx = m.index;
+    const beforeStr = clean.substring(0, matchIdx);
+
+    const lastUrlOpen = beforeStr.lastIndexOf("](");
+    const lastUrlClose = beforeStr.lastIndexOf(")");
+    if (lastUrlOpen !== -1 && (lastUrlClose === -1 || lastUrlClose < lastUrlOpen)) continue;
+
+    const letter = (m[1] || m[2] || m[3] || m[4] || m[5] || "").toLowerCase();
+    if (!letter || !["a", "b", "c", "d"].includes(letter)) continue;
+
+    matches.push({
+      letter,
+      index: m.index,
+      matchLength: m[0].length,
+    });
+  }
+
+  if (matches.length >= 2) {
+    const stmts: TrueFalseStatement[] = [];
+    for (let i = 0; i < matches.length; i++) {
+      const current = matches[i];
+      const start = current.index + current.matchLength;
+      const end = i < matches.length - 1 ? matches[i + 1].index : clean.length;
+      const rawTextVal = clean.substring(start, end).trim();
+
+      const isCorrect = /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+      const cleanText = rawTextVal
+        .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
+        .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+        .trim();
+
+      stmts.push({
+        id: current.letter,
+        label: `${current.letter})`,
+        text: cleanText || `Ý ${current.letter}`,
+        correctValue: isCorrect,
+      });
+    }
+
+    if (stmts.length >= 2) {
+      return stmts;
     }
   }
 
@@ -368,31 +442,26 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
 
   const questionRegex = /^(?:\*{0,2}(?:Câu|Bài|Question)\s*(\d+)|\*{0,2}(\d+)[.)/:]|\[Câu\s*(\d+)\])(?:\s*[\(\[][^\)\]]+[\)\]])?[\s.:-]/i;
   const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/i;
-  const subStatementRegex = /^(?:\*{0,2}([a-d])[.)/:]\*{0,2})\s*(.*)/i;
-  const inlineSubStatementRegex = /\b([a-d])[.)/:]\s*([^a-d\n]+)/gi;
+  const subStatementRegex = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i;
   const answerLineRegex = /^(?:Đáp án|Kết quả|Đ\/A|Key|Answer)[\s.:]+(.*)/i;
 
   const finalizeCurrentQ = () => {
     if (!currentQ) return;
 
     if (currentQ.part === 2 && currentQ.statements.length < 4 && currentQ.content) {
-      const inlineMatches = Array.from(currentQ.content.matchAll(inlineSubStatementRegex)) as RegExpMatchArray[];
-      if (inlineMatches.length >= 2) {
+      const extractedStmts = splitRawTextIntoStatements(currentQ.content);
+      if (extractedStmts.length >= 2) {
         const foundMap: Record<string, any> = {};
         currentQ.statements.forEach((s: any) => { foundMap[s.id] = s; });
-        inlineMatches.forEach((m) => {
-          const l = m[1].toLowerCase();
-          if (!foundMap[l]) {
-            const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(m[2]);
-            const textVal = m[2].replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
-            currentQ.statements.push({
-              id: l,
-              label: `${l})`,
-              text: textVal || `Ý ${l}`,
-              correctValue: isCorrect,
-            });
+        extractedStmts.forEach((st) => {
+          if (!foundMap[st.id]) {
+            currentQ.statements.push(st);
           }
         });
+        const firstLetterMatch = currentQ.content.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+        if (firstLetterMatch !== -1) {
+          currentQ.content = currentQ.content.substring(0, firstLetterMatch).trim();
+        }
       }
     }
 
@@ -411,18 +480,21 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
 
     if (currentQ.part === 2) {
       const requiredLetters = ["a", "b", "c", "d"];
-      const existingLetters = currentQ.statements.map((s: any) => s.id);
-      requiredLetters.forEach((l) => {
-        if (!existingLetters.includes(l)) {
-          currentQ.statements.push({
-            id: l,
-            label: `${l})`,
-            text: `Khẳng định ý ${l}`,
-            correctValue: true,
-          });
-        }
+      const existingMap: Record<string, any> = {};
+      currentQ.statements.forEach((s: any) => {
+        existingMap[s.id] = s;
       });
-      currentQ.statements.sort((a: any, b: any) => a.id.localeCompare(b.id));
+      currentQ.statements = requiredLetters.map((l) => {
+        if (existingMap[l]) {
+          return existingMap[l];
+        }
+        return {
+          id: l,
+          label: `${l})`,
+          text: `Khẳng định ý ${l}`,
+          correctValue: true,
+        };
+      });
       currentQ.options = [];
     }
 
@@ -584,9 +656,9 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       } else if (currentQ.part === 2) {
         const subMatch = trimmed.match(subStatementRegex);
         if (subMatch) {
-          const subLetter = (subMatch[1] || "a").toLowerCase();
+          const subLetter = (subMatch[1] || subMatch[2] || subMatch[3] || subMatch[4] || subMatch[5] || "a").toLowerCase();
           const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(trimmed);
-          const subText = (subMatch[2] || "").replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
+          const subText = (subMatch[6] || "").replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
           currentQ.statements.push({
             id: subLetter,
             label: `${subLetter})`,
@@ -611,7 +683,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
   }
 
   finalizeCurrentQ();
-  return questions;
+  return normalizeExamQuestions3Parts(questions);
 }
 
 // ──────────────────────────────────────────────
@@ -643,15 +715,20 @@ export async function clientParseExam(payload: {
   }
 
   try {
-    const prompt = `Bạn là chuyên gia phân tích và bóc tách đề thi Tốt nghiệp THPT chuẩn Bộ GD&ĐT Việt Nam (Chương trình GDPT 2018).
-Hãy đọc kỹ toàn bộ văn bản đề thi dưới đây và trích xuất TOÀN BỘ CÁC CÂU HỎI VÀ ĐỦ 100% CÁC LỆNH HỎI.
+    const prompt = `Bạn là chuyên gia phân tích và bóc tách đề thi Tốt nghiệp THPT chuẩn Bộ GD&ĐT Việt Nam (Chương trình GDPT 2018 mới nhất).
+Hãy đọc kỹ toàn bộ văn bản đề thi dưới đây và trích xuất TOÀN BỘ CÁC CÂU HỎI VÀ ĐỦ 100% CÁC LỆNH HỎI, KHÔNG ĐƯỢC BỎ SÓT NỘI DUNG NÀO!
 
-QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH & ĐỒ THỊ:
-1. CÔNG THỨC TOÁN HỌC: Tất cả công thức toán, phân số, căn thức, tích phân, đạo hàm, véc-tơ PHẢI ĐƯỢC BIỂU DIỄN BẰNG LATEX kẹp giữa $...$ hoặc $$...$$.
+QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, ĐỒ THỊ & 3 DẠNG CÂU HỎI:
+1. CÔNG THỨC TOÁN HỌC & KHOA HỌC: Tất cả công thức toán, phân số, căn thức, tích phân, đạo hàm, véc-tơ PHẢI ĐƯỢC BIỂU DIỄN BẰNG LATEX kẹp giữa $...$ hoặc $$...$$.
 2. HÌNH VẼ, BIỂU ĐỒ: Giữ nguyên các token hình ảnh Markdown dạng ![Alt](url) hoặc __IMG_TOKEN_X__ trong "content".
-3. PHẦN I: Trắc nghiệm 4 lựa chọn (part: 1, questionType: "multiple_choice") -> "options": ["A...", "B...", "C...", "D..."], "correctIndex": 0..3.
-4. PHẦN II: Trắc nghiệm Đúng/Sai (part: 2, questionType: "true_false") -> "statements": 4 mệnh đề a, b, c, d kèm correctValue (boolean).
-5. PHẦN III: Trả lời ngắn / Điền số (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả ngắn dạng số hoặc text.
+3. PHẦN I: Trắc nghiệm 4 lựa chọn (part: 1, questionType: "multiple_choice") -> "options": ["A...", "B...", "C...", "D..."], "correctIndex": 0..3. TUYỆT ĐỐI KHÔNG gộp phương án.
+4. PHẦN II: Trắc nghiệm Đúng/Sai (part: 2, questionType: "true_false"):
+   - "content": CHỈ chứa phần thân/dẫn/đề bài chung của câu hỏi. TUYỆT ĐỐI KHÔNG để các ý a, b, c, d trong "content".
+   - "statements": MỖI CÂU BẮT BUỘC ĐỦ 4 MỆNH ĐỀ a, b, c, d. Thuộc tính "text" của mỗi statement BẮT BUỘC PHẢI CHỨA 100% NGUYÊN VĂN NỘI DUNG CỦA MỆNH ĐỀ ĐÓ từ file gốc (kể cả công thức LaTeX).
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC để "text" rỗng hoặc ghi placeholder như "Ý a", "Khẳng định ý a"!
+   - "correctValue": true nếu mệnh đề đó đúng, false nếu mệnh đề đó sai.
+   - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
+5. PHẦN III: Trả lời ngắn / Điền số (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả ngắn dạng số hoặc text. "options": [].
 
 Văn bản đề thi:
 """
@@ -787,7 +864,7 @@ ${rawText.slice(0, 50000)}
       };
     });
 
-    return { success: true, data: formatted };
+    return { success: true, data: normalizeExamQuestions3Parts(formatted) };
   } catch (err: any) {
     console.warn("AI parse encountered error, falling back to local parser:", err?.message || err);
     const fallback = fallbackParseExam(rawText, subject, grade);
@@ -932,7 +1009,7 @@ export async function clientParseExamFile(payload: {
       if (resp.ok) {
         const resJson = await resp.json();
         if (resJson.success && resJson.data && resJson.data.length > 0) {
-          return { success: true, data: resJson.data };
+          return { success: true, data: normalizeExamQuestions3Parts(resJson.data) };
         }
       }
     } catch (e) {}
@@ -947,12 +1024,15 @@ export async function clientParseExamFile(payload: {
 
   try {
     const promptText = `Bạn là chuyên gia OCR và phân tích đề thi THPT Quốc gia chuẩn Bộ GD&ĐT Việt Nam (2025/2026).
-Hãy đọc và trích xuất TOÀN BỘ CÂU HỎI từ tài liệu đính kèm này (${fileName || "Đề thi"}) mà TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT BẤT KỲ CÂU NÀO.
+Hãy đọc và trích xuất TOÀN BỘ CÂU HỎI từ tài liệu đính kèm này (${fileName || "Đề thi"}) mà TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT BẤT KỲ CÂU NÀO HOẶC MỆNH ĐỀ NÀO!
 
 QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
-1. PHẦN I: Trắc nghiệm 4 lựa chọn A, B, C, D (CHỈ CHỌN 1 ĐÁP ÁN ĐÚNG DUY NHẤT). Mọi câu hỏi có các lựa chọn A, B, C, D đều BẮT BUỘC là PHẦN I (part: 1, questionType: "multiple_choice") -> "options": ["Phương án A...", "Phương án B...", "Phương án C...", "Phương án D..."], "correctIndex": 0..3.
-2. PHẦN II: Trắc nghiệm Đúng / Sai (Mỗi câu gồm 4 mệnh đề nhỏ a, b, c, d; học sinh phải chọn Đúng hoặc Sai cho TỪNG ý a, b, c, d) -> (part: 2, questionType: "true_false") -> "statements": [ {"id": "a", "label": "a)", "text": "...", "correctValue": true/false}, ... ]. TUYỆT ĐỐI KHÔNG gán câu trắc nghiệm 4 lựa chọn A-D vào Phần II!
-3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Học sinh tự tính toán và điền kết quả số) -> (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số ngắn.
+1. PHẦN I: Trắc nghiệm 4 lựa chọn A, B, C, D (CHỈ CHỌN 1 ĐÁP ÁN ĐÚNG DUY NHẤT). Mọi câu hỏi có các lựa chọn A, B, C, D đều BẮT BUỘC là PHẦN I (part: 1, questionType: "multiple_choice") -> "options": ["Phương án A...", "Phương án B...", "Phương án C...", "Phương án D..."], "correctIndex": 0..3. TUYỆT ĐỐI KHÔNG gộp phương án.
+2. PHẦN II: Trắc nghiệm Đúng / Sai (Mỗi câu gồm 4 mệnh đề nhỏ a, b, c, d; học sinh chọn Đúng hoặc Sai cho TỪNG ý a, b, c, d) -> (part: 2, questionType: "true_false"):
+   - "content": CHỈ chứa phần dẫn chung của câu hỏi. TUYỆT ĐỐI KHÔNG để các ý a, b, c, d trong "content".
+   - "statements": BẮT BUỘC ĐỦ 4 phần tử a, b, c, d. Thuộc tính "text" BẮT BUỘC PHẢI CHỨA 100% NGUYÊN VĂN NỘI DUNG CỦA MỆNH ĐỀ ĐÓ (kể cả công thức LaTeX). TUYỆT ĐỐI KHÔNG ĐƯỢC để trống "text" hay ghi "Ý a", "Khẳng định ý a".
+   - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
+3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Học sinh tự tính toán và điền kết quả số) -> (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số ngắn. "options": [].
 
 QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC:
 4. BẢNG SỐ LIỆU / BẢNG BIẾN THIÊN / BẢNG THỐNG KÊ: BẮT BUỘC trích xuất 100% ở định dạng BẢNG MARKDOWN CHUẨN:
@@ -1080,7 +1160,7 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC:
       };
     });
 
-    return { success: true, data: formatted };
+    return { success: true, data: normalizeExamQuestions3Parts(formatted) };
   } catch (err: any) {
     return { success: false, error: err.message || "Lỗi khi trích xuất tài liệu đa phương tiện." };
   }
