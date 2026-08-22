@@ -1373,11 +1373,24 @@ function splitRawTextIntoStatementsServer(text: string): { id: string; label: st
       const end = i < matches.length - 1 ? matches[i + 1].index : clean.length;
       const rawTextVal = clean.substring(start, end).trim();
 
-      const isCorrect = /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
-      const cleanText = rawTextVal
+      const startsWithSai = /^(?:\(Sai\)|\[Sai\]|\(S\)|Sai\b|False\b)/i.test(rawTextVal);
+      const startsWithDung = /^(?:\(Đúng\)|\[Đúng\]|\(Đ\)|Đúng\b|True\b)/i.test(rawTextVal);
+      const isCorrect = startsWithDung
+        ? true
+        : startsWithSai
+        ? false
+        : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+
+      let cleanText = rawTextVal
         .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
         .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+        .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
+        .replace(/^(?:vì|do|bởi vì)\s+/i, "")
         .trim();
+
+      if (cleanText) {
+        cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
+      }
 
       stmts.push({
         id: current.letter,
@@ -1593,34 +1606,62 @@ ${sanitizedText.substring(0, 150000)}
           statements.every((s: any) => !s.text || !s.text.trim() || /^Khẳng định ý [a-d]$/i.test((s.text || "").trim()) || /^Ý [a-d]$/i.test((s.text || "").trim()));
 
         if (isPlaceholderOrEmpty) {
-          const splittedStmts = splitRawTextIntoStatementsServer(cleanContent);
+          let splittedStmts = splitRawTextIntoStatementsServer(cleanContent);
+          let foundSource = "content";
+          if (splittedStmts.length < 2 && item.passageContent) {
+            splittedStmts = splitRawTextIntoStatementsServer(item.passageContent);
+            foundSource = "passage";
+          }
+          if (splittedStmts.length < 2 && item.explanation) {
+            splittedStmts = splitRawTextIntoStatementsServer(item.explanation);
+            foundSource = "explanation";
+          }
+
           if (splittedStmts.length >= 2) {
             statements = splittedStmts;
-            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
-            if (firstLetterMatch !== -1) {
-              cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+            if (foundSource === "content") {
+              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+              if (firstLetterMatch !== -1) {
+                cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+              }
             }
           }
         }
 
         if (Array.isArray(statements) && statements.length > 0) {
           const hasSomeEmptyOrPlaceholder = statements.some(
-            (s: any) => !s.text || !s.text.trim() || /^Khẳng định ý [a-d]$/i.test((s.text || "").trim()) || /^Ý [a-d]$/i.test((s.text || "").trim())
+            (s: any) => !s.text || !s.text.trim() || /^Khẳng định ý [a-d]$/i.test((s.text || "").trim()) || /^Ý [a-d]$/i.test((s.text || "").trim()) || /^Mệnh đề [a-d]$/i.test((s.text || "").trim())
           );
           if (hasSomeEmptyOrPlaceholder) {
             const fromContent = splitRawTextIntoStatementsServer(cleanContent);
-            if (fromContent.length >= 2) {
-              const contentMap: Record<string, string> = {};
-              fromContent.forEach((st) => { contentMap[st.id] = st.text; });
+            const fromPassage = item.passageContent ? splitRawTextIntoStatementsServer(item.passageContent) : [];
+            const fromExplanation = item.explanation ? splitRawTextIntoStatementsServer(item.explanation) : [];
+            const recoveredList = fromContent.length >= 2 ? fromContent : fromPassage.length >= 2 ? fromPassage : fromExplanation;
+
+            if (recoveredList.length >= 2) {
+              const contentMap: Record<string, { text: string; correctValue?: boolean }> = {};
+              recoveredList.forEach((st) => { contentMap[st.id] = { text: st.text, correctValue: st.correctValue }; });
               statements = statements.map((st: any) => {
-                if ((!st.text || !st.text.trim() || /^Khẳng định ý [a-d]$/i.test((st.text || "").trim()) || /^Ý [a-d]$/i.test((st.text || "").trim())) && contentMap[st.id]) {
-                  return { ...st, text: contentMap[st.id] };
+                const isPl =
+                  !st.text ||
+                  !st.text.trim() ||
+                  /^Khẳng định ý [a-d]$/i.test((st.text || "").trim()) ||
+                  /^Ý [a-d]$/i.test((st.text || "").trim()) ||
+                  /^Mệnh đề [a-d]$/i.test((st.text || "").trim());
+                if (isPl && contentMap[st.id]) {
+                  return {
+                    ...st,
+                    text: contentMap[st.id].text,
+                    correctValue: contentMap[st.id].correctValue !== undefined ? contentMap[st.id].correctValue : st.correctValue,
+                  };
                 }
                 return st;
               });
-              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
-              if (firstLetterMatch !== -1) {
-                cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+              if (recoveredList === fromContent) {
+                const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+                if (firstLetterMatch !== -1) {
+                  cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+                }
               }
             }
           }
@@ -1918,34 +1959,62 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
           statements.every((s: any) => !s.text || !s.text.trim() || /^Khẳng định ý [a-d]$/i.test((s.text || "").trim()) || /^Ý [a-d]$/i.test((s.text || "").trim()));
 
         if (isPlaceholderOrEmpty) {
-          const splittedStmts = splitRawTextIntoStatementsServer(cleanContent);
+          let splittedStmts = splitRawTextIntoStatementsServer(cleanContent);
+          let foundSource = "content";
+          if (splittedStmts.length < 2 && item.passageContent) {
+            splittedStmts = splitRawTextIntoStatementsServer(item.passageContent);
+            foundSource = "passage";
+          }
+          if (splittedStmts.length < 2 && item.explanation) {
+            splittedStmts = splitRawTextIntoStatementsServer(item.explanation);
+            foundSource = "explanation";
+          }
+
           if (splittedStmts.length >= 2) {
             statements = splittedStmts;
-            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
-            if (firstLetterMatch !== -1) {
-              cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+            if (foundSource === "content") {
+              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+              if (firstLetterMatch !== -1) {
+                cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+              }
             }
           }
         }
 
         if (Array.isArray(statements) && statements.length > 0) {
           const hasSomeEmptyOrPlaceholder = statements.some(
-            (s: any) => !s.text || !s.text.trim() || /^Khẳng định ý [a-d]$/i.test((s.text || "").trim()) || /^Ý [a-d]$/i.test((s.text || "").trim())
+            (s: any) => !s.text || !s.text.trim() || /^Khẳng định ý [a-d]$/i.test((s.text || "").trim()) || /^Ý [a-d]$/i.test((s.text || "").trim()) || /^Mệnh đề [a-d]$/i.test((s.text || "").trim())
           );
           if (hasSomeEmptyOrPlaceholder) {
             const fromContent = splitRawTextIntoStatementsServer(cleanContent);
-            if (fromContent.length >= 2) {
-              const contentMap: Record<string, string> = {};
-              fromContent.forEach((st) => { contentMap[st.id] = st.text; });
+            const fromPassage = item.passageContent ? splitRawTextIntoStatementsServer(item.passageContent) : [];
+            const fromExplanation = item.explanation ? splitRawTextIntoStatementsServer(item.explanation) : [];
+            const recoveredList = fromContent.length >= 2 ? fromContent : fromPassage.length >= 2 ? fromPassage : fromExplanation;
+
+            if (recoveredList.length >= 2) {
+              const contentMap: Record<string, { text: string; correctValue?: boolean }> = {};
+              recoveredList.forEach((st) => { contentMap[st.id] = { text: st.text, correctValue: st.correctValue }; });
               statements = statements.map((st: any) => {
-                if ((!st.text || !st.text.trim() || /^Khẳng định ý [a-d]$/i.test((st.text || "").trim()) || /^Ý [a-d]$/i.test((st.text || "").trim())) && contentMap[st.id]) {
-                  return { ...st, text: contentMap[st.id] };
+                const isPl =
+                  !st.text ||
+                  !st.text.trim() ||
+                  /^Khẳng định ý [a-d]$/i.test((st.text || "").trim()) ||
+                  /^Ý [a-d]$/i.test((st.text || "").trim()) ||
+                  /^Mệnh đề [a-d]$/i.test((st.text || "").trim());
+                if (isPl && contentMap[st.id]) {
+                  return {
+                    ...st,
+                    text: contentMap[st.id].text,
+                    correctValue: contentMap[st.id].correctValue !== undefined ? contentMap[st.id].correctValue : st.correctValue,
+                  };
                 }
                 return st;
               });
-              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
-              if (firstLetterMatch !== -1) {
-                cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+              if (recoveredList === fromContent) {
+                const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+                if (firstLetterMatch !== -1) {
+                  cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+                }
               }
             }
           }

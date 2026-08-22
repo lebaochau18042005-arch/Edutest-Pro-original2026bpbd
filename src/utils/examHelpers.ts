@@ -551,11 +551,24 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
       const end = i < matches.length - 1 ? matches[i + 1].index : clean.length;
       const rawTextVal = clean.substring(start, end).trim();
 
-      const isCorrect = /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
-      const cleanText = rawTextVal
+      const startsWithSai = /^(?:\(Sai\)|\[Sai\]|\(S\)|Sai\b|False\b)/i.test(rawTextVal);
+      const startsWithDung = /^(?:\(Đúng\)|\[Đúng\]|\(Đ\)|Đúng\b|True\b)/i.test(rawTextVal);
+      const isCorrect = startsWithDung
+        ? true
+        : startsWithSai
+        ? false
+        : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+
+      let cleanText = rawTextVal
         .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
         .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+        .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
+        .replace(/^(?:vì|do|bởi vì)\s+/i, "")
         .trim();
+
+      if (cleanText) {
+        cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
+      }
 
       stmts.push({
         id: current.letter,
@@ -669,46 +682,72 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         );
 
       if (isPlaceholderStatements) {
-        const splittedStmts = splitRawTextIntoStatements(cleanContent);
+        let splittedStmts = splitRawTextIntoStatements(cleanContent);
+        let foundSource: "content" | "passage" | "explanation" = "content";
+
+        if (splittedStmts.length < 2 && q.passageContent) {
+          splittedStmts = splitRawTextIntoStatements(q.passageContent);
+          foundSource = "passage";
+        }
+        if (splittedStmts.length < 2 && q.explanation) {
+          splittedStmts = splitRawTextIntoStatements(q.explanation);
+          foundSource = "explanation";
+        }
+        if (splittedStmts.length < 2 && q.groupTitle) {
+          splittedStmts = splitRawTextIntoStatements(q.groupTitle);
+        }
+
         if (splittedStmts.length >= 2) {
           statements = splittedStmts;
-          // Loại bỏ phần mệnh đề khỏi content chính
-          const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
-          if (firstLetterMatch !== -1) {
-            cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+          if (foundSource === "content") {
+            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+            if (firstLetterMatch !== -1) {
+              cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+            }
           }
         }
       }
 
-      // 2. Nếu statements đã có một số phần tử nhưng bị thiếu text, hãy bổ sung từ cleanContent
+      // 2. Nếu statements đã có một số phần tử nhưng bị thiếu text hoặc là placeholder, hãy bổ sung từ content/passage/explanation
       if (statements && statements.length > 0) {
         const hasSomeEmptyOrPlaceholder = statements.some(
           (s) =>
             !s.text ||
             !s.text.trim() ||
             /^Khẳng định ý [a-d]$/i.test(s.text.trim()) ||
-            /^Ý [a-d]$/i.test(s.text.trim())
+            /^Ý [a-d]$/i.test(s.text.trim()) ||
+            /^Mệnh đề [a-d]$/i.test(s.text.trim())
         );
         if (hasSomeEmptyOrPlaceholder) {
           const fromContent = splitRawTextIntoStatements(cleanContent);
-          if (fromContent.length >= 2) {
-            const contentMap: Record<string, string> = {};
-            fromContent.forEach((st) => { contentMap[st.id] = st.text; });
+          const fromPassage = q.passageContent ? splitRawTextIntoStatements(q.passageContent) : [];
+          const fromExplanation = q.explanation ? splitRawTextIntoStatements(q.explanation) : [];
+          const recoveredList = fromContent.length >= 2 ? fromContent : fromPassage.length >= 2 ? fromPassage : fromExplanation;
+
+          if (recoveredList.length >= 2) {
+            const contentMap: Record<string, { text: string; correctValue?: boolean }> = {};
+            recoveredList.forEach((st) => { contentMap[st.id] = { text: st.text, correctValue: st.correctValue }; });
             statements = statements.map((st) => {
-              if (
-                (!st.text ||
-                  !st.text.trim() ||
-                  /^Khẳng định ý [a-d]$/i.test(st.text.trim()) ||
-                  /^Ý [a-d]$/i.test(st.text.trim())) &&
-                contentMap[st.id]
-              ) {
-                return { ...st, text: contentMap[st.id] };
+              const isPl =
+                !st.text ||
+                !st.text.trim() ||
+                /^Khẳng định ý [a-d]$/i.test(st.text.trim()) ||
+                /^Ý [a-d]$/i.test(st.text.trim()) ||
+                /^Mệnh đề [a-d]$/i.test(st.text.trim());
+              if (isPl && contentMap[st.id]) {
+                return {
+                  ...st,
+                  text: contentMap[st.id].text,
+                  correctValue: contentMap[st.id].correctValue !== undefined ? contentMap[st.id].correctValue : st.correctValue,
+                };
               }
               return st;
             });
-            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
-            if (firstLetterMatch !== -1) {
-              cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+            if (recoveredList === fromContent) {
+              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+              if (firstLetterMatch !== -1) {
+                cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+              }
             }
           }
         }

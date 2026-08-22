@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Clock,
   ShieldAlert,
@@ -42,7 +42,7 @@ import {
   ViolationLog,
   QuestionTimeRecord,
 } from "../../types";
-import { LETTERS, gradeSubmission } from "../../utils/examHelpers";
+import { LETTERS, gradeSubmission, normalizeExamQuestions3Parts } from "../../utils/examHelpers";
 import { FormattedQuestionContent, MathTextRenderer } from "../FormattedQuestionContent";
 
 interface StudentExamRoomProps {
@@ -66,9 +66,17 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
   onSubmitExam,
   onExit,
 }) => {
-  // Find Variant
-  const variant: ExamVariant =
+  // Find Variant & strictly normalize questions
+  const rawVariant: ExamVariant =
     exam.variants.find((v) => v.examCode === selectedVariantCode) || exam.variants[0];
+
+  const variant: ExamVariant = useMemo(() => {
+    if (!rawVariant) return { examCode: "101", questions: [], answerKey: {} };
+    return {
+      ...rawVariant,
+      questions: normalizeExamQuestions3Parts(rawVariant.questions || []),
+    };
+  }, [rawVariant, selectedVariantCode]);
 
   const totalQuestions = variant.questions.length;
 

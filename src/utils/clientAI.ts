@@ -371,11 +371,24 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
       const end = i < matches.length - 1 ? matches[i + 1].index : clean.length;
       const rawTextVal = clean.substring(start, end).trim();
 
-      const isCorrect = /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
-      const cleanText = rawTextVal
+      const startsWithSai = /^(?:\(Sai\)|\[Sai\]|\(S\)|Sai\b|False\b)/i.test(rawTextVal);
+      const startsWithDung = /^(?:\(Đúng\)|\[Đúng\]|\(Đ\)|Đúng\b|True\b)/i.test(rawTextVal);
+      const isCorrect = startsWithDung
+        ? true
+        : startsWithSai
+        ? false
+        : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+
+      let cleanText = rawTextVal
         .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
         .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+        .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
+        .replace(/^(?:vì|do|bởi vì)\s+/i, "")
         .trim();
+
+      if (cleanText) {
+        cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
+      }
 
       stmts.push({
         id: current.letter,
