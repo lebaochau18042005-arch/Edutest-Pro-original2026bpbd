@@ -862,7 +862,49 @@ ${rawText.slice(0, 50000)}
       };
     });
 
-    return { success: true, data: normalizeExamQuestions3Parts(formatted) };
+    // --- RAWTEXT RECOVERY: For Part II questions where AI returned placeholder statements ---
+    // Search the original rawText directly for a/b/c/d markers near each question's content.
+    // This is the most reliable fallback since rawText contains 100% of the original document.
+    const enriched = formatted.map(q => {
+      if (q.part !== 2 || !rawText) return q;
+
+      const isAllPlaceholder = (q.statements || []).length === 0 || (q.statements || []).every(s =>
+        !s.text || !s.text.trim() ||
+        /^(Khẳng định ý|Ý|Mệnh đề) [a-d]$/i.test(s.text.trim())
+      );
+      if (!isAllPlaceholder) return q;
+
+      // Find where this question's content starts in rawText
+      const contentSnippet = (q.content || '').trim().substring(0, 50).toLowerCase();
+      if (contentSnippet.length < 15) return q;
+
+      const idx = rawText.toLowerCase().indexOf(contentSnippet.substring(0, 30));
+      if (idx === -1) return q;
+
+      // Search a window of rawText starting from the question content position
+      const searchWindow = rawText.substring(idx, Math.min(rawText.length, idx + 6000));
+      const recovered = splitRawTextIntoStatements(searchWindow);
+
+      if (recovered.length >= 2) {
+        // Preserve correctValue from AI if it was explicitly set (non-default)
+        const aiCorrectValues: Record<string, boolean> = {};
+        (q.statements || []).forEach((s: any) => {
+          if (s.id && typeof s.correctValue === 'boolean') {
+            aiCorrectValues[s.id] = s.correctValue;
+          }
+        });
+        return {
+          ...q,
+          statements: recovered.map(s => ({
+            ...s,
+            correctValue: aiCorrectValues[s.id] !== undefined ? aiCorrectValues[s.id] : s.correctValue,
+          })),
+        };
+      }
+      return q;
+    });
+
+    return { success: true, data: normalizeExamQuestions3Parts(enriched) };
   } catch (err: any) {
     console.warn("AI parse encountered error, falling back to local parser:", err?.message || err);
     const fallback = fallbackParseExam(rawText, subject, grade);
