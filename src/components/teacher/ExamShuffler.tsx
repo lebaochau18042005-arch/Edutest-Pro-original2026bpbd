@@ -476,9 +476,19 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         } else if (targetPart === 2) {
           // Convert to Part II (True / False 4 Sub-statements)
           let stmts: TrueFalseStatement[] = [];
-          if (q.statements && q.statements.length >= 2) {
+          let newContent = q.content || "";
+
+          // 1. Try extracting from content first (if content contains a), b), c), d))
+          const fromContent = splitRawTextIntoStatements(newContent);
+          if (fromContent.length >= 2) {
+            stmts = fromContent;
+            const firstMatch = newContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+            if (firstMatch !== -1) {
+              newContent = newContent.substring(0, firstMatch).trim();
+            }
+          } else if (q.statements && q.statements.length >= 2 && !q.statements.every(s => !s.text || /^Khẳng định/i.test(s.text.trim()))) {
             stmts = [...q.statements];
-          } else if (q.options && q.options.length > 0) {
+          } else if (q.options && q.options.length > 0 && !q.options.every(o => /^Phương án/i.test(o.trim()))) {
             stmts = q.options.map((opt, oIdx) => ({
               id: ["a", "b", "c", "d"][oIdx] || "a",
               label: `${["a", "b", "c", "d"][oIdx] || "a"})`,
@@ -486,16 +496,40 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
               correctValue: oIdx === (q.correctIndex || 0),
             }));
           }
+
           const required = ["a", "b", "c", "d"];
-          while (stmts.length < 4) {
-            const l = required[stmts.length];
-            stmts.push({ id: l, label: `${l})`, text: `Khẳng định ý ${l}`, correctValue: true });
-          }
+          const existingMap: Record<string, TrueFalseStatement> = {};
+          stmts.forEach((s) => {
+            const key = (s.id || s.label?.replace(/[^a-d]/gi, "") || "a").toLowerCase();
+            existingMap[key] = s;
+          });
+
+          const finalStatements: TrueFalseStatement[] = required.map((l, lIdx) => {
+            if (existingMap[l] && existingMap[l].text && !/^Khẳng định/i.test(existingMap[l].text.trim())) {
+              return existingMap[l];
+            }
+            if (q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
+              return {
+                id: l,
+                label: `${l})`,
+                text: q.options[lIdx],
+                correctValue: lIdx === (q.correctIndex || 0),
+              };
+            }
+            return {
+              id: l,
+              label: `${l})`,
+              text: existingMap[l]?.text || `Mệnh đề ${l}`,
+              correctValue: true,
+            };
+          });
+
           return {
             ...q,
+            content: newContent,
             part: 2,
             questionType: "true_false" as QuestionType,
-            statements: stmts.slice(0, 4),
+            statements: finalStatements,
             options: [],
             shortAnswer: undefined,
             needsReview: false,

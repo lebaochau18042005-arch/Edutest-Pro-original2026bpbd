@@ -562,6 +562,20 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       }
     }
 
+    if (currentQ.part !== 2 && (!currentQ.options || currentQ.options.length < 2) && currentQ.content) {
+      const extracted = splitRawTextIntoStatements(currentQ.content);
+      if (extracted.length >= 2) {
+        currentQ.part = 2;
+        currentQ.questionType = "true_false";
+        currentQ.statements = extracted;
+        currentQ.options = [];
+        const firstLetterMatch = currentQ.content.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+        if (firstLetterMatch !== -1) {
+          currentQ.content = currentQ.content.substring(0, firstLetterMatch).trim();
+        }
+      }
+    }
+
     if (currentQ.statements && currentQ.statements.length >= 2) {
       currentQ.part = 2;
       currentQ.questionType = "true_false";
@@ -581,10 +595,13 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       currentQ.statements.forEach((s: any) => {
         existingMap[s.id] = s;
       });
-      currentQ.statements = requiredLetters.map((l) => {
+      currentQ.statements = requiredLetters.map((l, lIdx) => {
         if (existingMap[l]) {
           let cleanText = (existingMap[l].text || "").trim();
           cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
+          if (/^Khẳng định/i.test(cleanText) && currentQ.options && currentQ.options[lIdx] && !/^Phương án/i.test(currentQ.options[lIdx].trim())) {
+            cleanText = currentQ.options[lIdx];
+          }
           return {
             id: l,
             label: `${l})`,
@@ -593,10 +610,19 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
             explanation: existingMap[l].explanation || "",
           };
         }
+        if (currentQ.options && currentQ.options[lIdx] && !/^Phương án/i.test(currentQ.options[lIdx].trim())) {
+          return {
+            id: l,
+            label: `${l})`,
+            text: currentQ.options[lIdx],
+            correctValue: lIdx === (currentQ.correctIndex || 0),
+            explanation: "",
+          };
+        }
         return {
           id: l,
           label: `${l})`,
-          text: `Khẳng định ý ${l}`,
+          text: `Mệnh đề ${l}`,
           correctValue: true,
           explanation: "",
         };

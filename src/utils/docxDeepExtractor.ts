@@ -617,13 +617,13 @@ export async function extractDocxDeep(
           if (stmtMatch) statementLetters.add((stmtMatch[1] || stmtMatch[2] || stmtMatch[3]).toLowerCase());
         });
 
-        // A table is strictly an options layout table ONLY if:
+        // A table is an options/statements layout table if:
         // - It has 3+ distinct option letters (A, B, C, D) or statement letters (a, b, c, d)
-        // - Total rows is small (<= 2) and total cells is <= 6
+        // - Total rows is <= 6 and total cells is <= 16
         const isPureOptionsLayout =
           (optionLetters.size >= 3 || statementLetters.size >= 3) &&
-          rows.length <= 2 &&
-          flatCells.length <= 6;
+          rows.length <= 6 &&
+          flatCells.length <= 16;
 
         if (isPureOptionsLayout) {
           // Output each cell on a new line so options/statements are cleanly parsed

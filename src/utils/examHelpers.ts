@@ -656,17 +656,17 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
     let part: ExamPart = 1;
     if (q.part === 1 || q.part === 2 || q.part === 3) {
       part = q.part;
+    } else if (q.questionType === "true_false" || (q.statements && q.statements.length >= 2)) {
+      part = 2;
+    } else if (q.questionType === "short_answer" || (q.shortAnswer && (!q.options || q.options.length === 0))) {
+      part = 3;
     } else if (q.options && q.options.length >= 2) {
       part = 1;
-    } else if (q.statements && q.statements.length >= 2) {
-      part = 2;
-    } else if (q.shortAnswer && (!q.options || q.options.length === 0)) {
-      part = 3;
-    } else if (total === 28) {
+    } else if (total === 28 && !rawQuestions.some((rq) => rq.part !== undefined)) {
       if (idx < 18) part = 1;
       else if (idx < 22) part = 2;
       else part = 3;
-    } else if (total === 22) {
+    } else if (total === 22 && !rawQuestions.some((rq) => rq.part !== undefined)) {
       if (idx < 12) part = 1;
       else if (idx < 16) part = 2;
       else part = 3;
@@ -733,7 +733,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
           (s) =>
             !s.text ||
             !s.text.trim() ||
-            /^Khẳng định ý [a-d]$/i.test(s.text.trim()) ||
+            /^Khẳng định/i.test(s.text.trim()) ||
             /^Ý [a-d]$/i.test(s.text.trim()) ||
             /^Mệnh đề [a-d]$/i.test(s.text.trim())
         );
@@ -745,6 +745,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         const candidatePool = [
           cleanContent,
           mergedStatementTexts,
+          (q.options || []).join("\n"),
           q.passageContent || "",
           q.explanation || "",
           q.groupTitle || "",
@@ -772,6 +773,14 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
               cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
             }
           }
+        } else if (q.options && q.options.length >= 2 && !q.options.every((o) => /^Phương án/i.test(o.trim()))) {
+          // If options exist, map them to statements
+          statements = q.options.slice(0, 4).map((opt, oIdx) => ({
+            id: ["a", "b", "c", "d"][oIdx] || "a",
+            label: `${["a", "b", "c", "d"][oIdx] || "a"})`,
+            text: opt.replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim(),
+            correctValue: oIdx === (q.correctIndex || 0),
+          }));
         }
       }
 
@@ -781,16 +790,17 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
           (s) =>
             !s.text ||
             !s.text.trim() ||
-            /^Khẳng định ý [a-d]$/i.test(s.text.trim()) ||
+            /^Khẳng định/i.test(s.text.trim()) ||
             /^Ý [a-d]$/i.test(s.text.trim()) ||
             /^Mệnh đề [a-d]$/i.test(s.text.trim())
         );
         if (hasSomeEmptyOrPlaceholder) {
           const fromContent = splitRawTextIntoStatements(cleanContent);
           const fromMerged = splitRawTextIntoStatements((statements || []).map((s) => s.text || "").join("\n"));
+          const fromOptions = q.options ? splitRawTextIntoStatements(q.options.join("\n")) : [];
           const fromPassage = q.passageContent ? splitRawTextIntoStatements(q.passageContent) : [];
           const fromExplanation = q.explanation ? splitRawTextIntoStatements(q.explanation) : [];
-          const recoveredList = fromContent.length >= 2 ? fromContent : fromMerged.length >= 2 ? fromMerged : fromPassage.length >= 2 ? fromPassage : fromExplanation;
+          const recoveredList = fromContent.length >= 2 ? fromContent : fromMerged.length >= 2 ? fromMerged : fromOptions.length >= 2 ? fromOptions : fromPassage.length >= 2 ? fromPassage : fromExplanation;
 
           if (recoveredList.length >= 2) {
             const contentMap: Record<string, { text: string; correctValue?: boolean }> = {};
@@ -799,7 +809,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
               const isPl =
                 !st.text ||
                 !st.text.trim() ||
-                /^Khẳng định ý [a-d]$/i.test(st.text.trim()) ||
+                /^Khẳng định/i.test(st.text.trim()) ||
                 /^Ý [a-d]$/i.test(st.text.trim()) ||
                 /^Mệnh đề [a-d]$/i.test(st.text.trim());
               if (isPl && contentMap[st.id]) {
@@ -828,11 +838,14 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         existingMap[key] = st;
       });
 
-      statements = requiredLetters.map((l) => {
+      statements = requiredLetters.map((l, lIdx) => {
         if (existingMap[l]) {
           let cleanText = (existingMap[l].text || "").trim();
           // Làm sạch tiền tố redundant a), a., Ý a:, (a) ở đầu nội dung nếu bị thừa
           cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
+          if (/^Khẳng định/i.test(cleanText) && q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
+            cleanText = q.options[lIdx].replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim();
+          }
           return {
             id: l,
             label: `${l})`,
@@ -841,10 +854,19 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
             explanation: existingMap[l].explanation || "",
           };
         }
+        if (q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
+          return {
+            id: l,
+            label: `${l})`,
+            text: q.options[lIdx].replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim(),
+            correctValue: lIdx === (q.correctIndex || 0),
+            explanation: "",
+          };
+        }
         return {
           id: l,
           label: `${l})`,
-          text: `Khẳng định ý ${l}`,
+          text: `Mệnh đề ${l}`,
           correctValue: true,
           explanation: "",
         };
