@@ -1667,6 +1667,7 @@ ${sanitizedText.substring(0, 150000)}
           }
         }
 
+        // Final: ensure 4 statements with real content (not placeholder)
         if (!Array.isArray(statements) || statements.length === 0) {
           statements = [];
         }
@@ -1677,7 +1678,6 @@ ${sanitizedText.substring(0, 150000)}
           existingMap[letter] = st;
         });
 
-        // Ensure 4 statements
         statements = requiredIds.map((letter) => {
           if (existingMap[letter]) {
             let cleanText = (existingMap[letter].text || "").trim();

@@ -835,24 +835,9 @@ ${rawText.slice(0, 50000)}
         }
       }
 
-      let statements: TrueFalseStatement[] | undefined = item.statements;
-      if (part === 2) {
-        const requiredIds = ["a", "b", "c", "d"];
-        const existingMap: Record<string, any> = {};
-        if (Array.isArray(statements)) {
-          statements.forEach((st: any) => {
-            const letter = (st.id || st.label?.replace(/[^a-d]/gi, "") || "a").toLowerCase();
-            existingMap[letter] = st;
-          });
-        }
-        statements = requiredIds.map((letter) => ({
-          id: letter,
-          label: `${letter})`,
-          text: existingMap[letter]?.text || `Khẳng định ý ${letter}`,
-          correctValue: typeof existingMap[letter]?.correctValue === "boolean" ? existingMap[letter].correctValue : true,
-          explanation: existingMap[letter]?.explanation || "",
-        }));
-      }
+      let statements: TrueFalseStatement[] | undefined = Array.isArray(item.statements) && item.statements.length > 0
+        ? item.statements
+        : undefined;
 
       return {
         id: `parsed_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
