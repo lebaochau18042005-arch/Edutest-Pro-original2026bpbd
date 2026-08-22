@@ -424,6 +424,14 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
         const end = i < finalMatches.length - 1 ? finalMatches[i + 1].index : tokenized.length;
         let rawTextVal = tokenized.substring(start, end).trim();
 
+        // If this is the last statement, ensure it doesn't swallow the next Question header
+        if (i === finalMatches.length - 1) {
+          const nextQIdx = rawTextVal.search(/(?:^|[\n\r]+)(?:\*{0,2}(?:Câu|Bài|Question)\s*\d+|\*{0,2}\d+[.)/:]|\[Câu\s*\d+\]|PHẦN\s*(?:I|II|III|1|2|3)\b)/i);
+          if (nextQIdx !== -1) {
+            rawTextVal = rawTextVal.substring(0, nextQIdx).trim();
+          }
+        }
+
         // Restore math tokens
         mathTokens.forEach((tok, tokIdx) => {
           rawTextVal = rawTextVal.replace(`__MATH_STMT_TOK_${tokIdx}__`, tok);
@@ -438,7 +446,7 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
           : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
 
         let cleanText = rawTextVal
-          .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
+          .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b|\(Đúng\s*[\/\-–]\s*Sai\)|\(Sai\s*[\/\-–]\s*Đúng\)|\[Đúng\s*[\/\-–]\s*Sai\]|\[Sai\s*[\/\-–]\s*Đúng\]/gi, "")
           .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
           .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
           .replace(/^(?:vì|do|bởi vì)\s+/i, "")
@@ -1010,40 +1018,66 @@ ${rawText.slice(0, 50000)}
     // --- RAWTEXT RECOVERY: For Part II questions where AI returned placeholder statements ---
     // Search the original rawText directly for a/b/c/d markers near each question's content.
     // This is the most reliable fallback since rawText contains 100% of the original document.
-    const enriched = formatted.map(q => {
+    const enriched = formatted.map((q) => {
       if (q.part !== 2 || !rawText) return q;
 
-      const isAllPlaceholder = (q.statements || []).length === 0 || (q.statements || []).every(s =>
-        !s.text || !s.text.trim() ||
-        /^(Khẳng định ý|Ý|Mệnh đề) [a-d]$/i.test(s.text.trim())
-      );
-      if (!isAllPlaceholder) return q;
+      const hasInvalidStatements =
+        !q.statements ||
+        q.statements.length < 4 ||
+        q.statements.some(
+          (s) =>
+            !s.text ||
+            !s.text.trim() ||
+            s.text.trim().length < 15 ||
+            /^(?:Khẳng định|Ý|Mệnh đề|Phương án|Câu)/i.test(s.text.trim())
+        );
+
+      if (!hasInvalidStatements) return q;
 
       // Find where this question's content starts in rawText
-      const contentSnippet = (q.content || '').trim().substring(0, 50).toLowerCase();
-      if (contentSnippet.length < 15) return q;
+      const contentSnippet = (q.content || "").trim().substring(0, 50).toLowerCase();
+      let idx = -1;
+      if (contentSnippet.length >= 15) {
+        idx = rawText.toLowerCase().indexOf(contentSnippet.substring(0, 30));
+      }
 
-      const idx = rawText.toLowerCase().indexOf(contentSnippet.substring(0, 30));
-      if (idx === -1) return q;
+      // If snippet search failed, try searching for the first 20 chars of content
+      if (idx === -1 && contentSnippet.length >= 10) {
+        idx = rawText.toLowerCase().indexOf(contentSnippet.substring(0, 20));
+      }
 
-      // Search a window of rawText starting from the question content position
-      const searchWindow = rawText.substring(idx, Math.min(rawText.length, idx + 6000));
+      let searchWindow = "";
+      if (idx !== -1) {
+        searchWindow = rawText.substring(idx, Math.min(rawText.length, idx + 8000));
+      } else {
+        searchWindow = q.content || "";
+      }
+
       const recovered = splitRawTextIntoStatements(searchWindow);
 
       if (recovered.length >= 2) {
-        // Preserve correctValue from AI if it was explicitly set (non-default)
         const aiCorrectValues: Record<string, boolean> = {};
         (q.statements || []).forEach((s: any) => {
-          if (s.id && typeof s.correctValue === 'boolean') {
+          if (s.id && typeof s.correctValue === "boolean") {
             aiCorrectValues[s.id] = s.correctValue;
           }
         });
+
+        const finalStmts = recovered.map((s) => ({
+          ...s,
+          correctValue: aiCorrectValues[s.id] !== undefined ? aiCorrectValues[s.id] : s.correctValue,
+        }));
+
+        let cleanContent = q.content;
+        const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+        if (firstLetterMatch !== -1) {
+          cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
+        }
+
         return {
           ...q,
-          statements: recovered.map(s => ({
-            ...s,
-            correctValue: aiCorrectValues[s.id] !== undefined ? aiCorrectValues[s.id] : s.correctValue,
-          })),
+          content: cleanContent,
+          statements: finalStmts,
         };
       }
       return q;

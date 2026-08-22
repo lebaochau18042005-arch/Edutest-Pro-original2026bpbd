@@ -602,6 +602,14 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
         const end = i < finalMatches.length - 1 ? finalMatches[i + 1].index : tokenized.length;
         let rawTextVal = tokenized.substring(start, end).trim();
 
+        // If this is the last statement, ensure it doesn't swallow the next Question header
+        if (i === finalMatches.length - 1) {
+          const nextQIdx = rawTextVal.search(/(?:^|[\n\r]+)(?:\*{0,2}(?:Câu|Bài|Question)\s*\d+|\*{0,2}\d+[.)/:]|\[Câu\s*\d+\]|PHẦN\s*(?:I|II|III|1|2|3)\b)/i);
+          if (nextQIdx !== -1) {
+            rawTextVal = rawTextVal.substring(0, nextQIdx).trim();
+          }
+        }
+
         // Restore math tokens
         mathTokens.forEach((tok, tokIdx) => {
           rawTextVal = rawTextVal.replace(`__MATH_STMT_TOK_${tokIdx}__`, tok);
@@ -616,7 +624,7 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
           : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
 
         let cleanText = rawTextVal
-          .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
+          .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b|\(Đúng\s*[\/\-–]\s*Sai\)|\(Sai\s*[\/\-–]\s*Đúng\)|\[Đúng\s*[\/\-–]\s*Sai\]|\[Sai\s*[\/\-–]\s*Đúng\]/gi, "")
           .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
           .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
           .replace(/^(?:vì|do|bởi vì)\s+/i, "")
@@ -725,26 +733,23 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
     // XỬ LÝ VÀ BÓC TÁCH 4 MỆNH ĐỀ PHẦN II (ĐÚNG/SAI) BẢO ĐẢM KHÔNG BỎ SÓT NỘI DUNG
     let statements = q.statements ? [...q.statements] : undefined;
     if (part === 2) {
-      // 1. Kiểm tra nếu statements rỗng, bị gộp hoặc chỉ là placeholder "Khẳng định ý a"
-      const isPlaceholderStatements =
+      // 1. Kiểm tra nếu statements rỗng, bị gộp hoặc có placeholder
+      const hasInvalidStatements =
         !statements ||
-        statements.length < 2 ||
-        statements.every(
+        statements.length < 4 ||
+        statements.some(
           (s) =>
             !s.text ||
             !s.text.trim() ||
-            /^Khẳng định/i.test(s.text.trim()) ||
-            /^Ý [a-d]$/i.test(s.text.trim()) ||
-            /^Mệnh đề [a-d]$/i.test(s.text.trim())
+            s.text.trim().length < 15 ||
+            /^(?:Khẳng định|Ý|Mệnh đề|Phương án|Câu)/i.test(s.text.trim()) ||
+            /(?:[\n\r\t]|\s{2,})(?:\*{0,2}(?:\[?[b-d]\]?|\([b-d]\)|[b-d])[.):/\-–—\s]\*{0,2})\s+/i.test(s.text)
         );
 
-      const mergedStatementTexts = (statements || []).map((s) => s.text || "").join("\n");
-      const hasMergedSubLetters = /(?:[\n\r\t]|\s{2,})(?:\*{0,2}(?:\[?[b-d]\]?|\([b-d]\)|[b-d])[.):/\-–—\s]\*{0,2})\s+/i.test(mergedStatementTexts);
-
-      if (isPlaceholderStatements || hasMergedSubLetters) {
+      if (hasInvalidStatements) {
         const candidatePool = [
           cleanContent,
-          mergedStatementTexts,
+          (statements || []).map((s) => s.text || "").join("\n"),
           (q.options || []).join("\n"),
           q.passageContent || "",
           q.explanation || "",
@@ -784,53 +789,6 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         }
       }
 
-      // 2. Nếu statements đã có một số phần tử nhưng bị thiếu text hoặc là placeholder, hãy bổ sung
-      if (statements && statements.length > 0) {
-        const hasSomeEmptyOrPlaceholder = statements.some(
-          (s) =>
-            !s.text ||
-            !s.text.trim() ||
-            /^Khẳng định/i.test(s.text.trim()) ||
-            /^Ý [a-d]$/i.test(s.text.trim()) ||
-            /^Mệnh đề [a-d]$/i.test(s.text.trim())
-        );
-        if (hasSomeEmptyOrPlaceholder) {
-          const fromContent = splitRawTextIntoStatements(cleanContent);
-          const fromMerged = splitRawTextIntoStatements((statements || []).map((s) => s.text || "").join("\n"));
-          const fromOptions = q.options ? splitRawTextIntoStatements(q.options.join("\n")) : [];
-          const fromPassage = q.passageContent ? splitRawTextIntoStatements(q.passageContent) : [];
-          const fromExplanation = q.explanation ? splitRawTextIntoStatements(q.explanation) : [];
-          const recoveredList = fromContent.length >= 2 ? fromContent : fromMerged.length >= 2 ? fromMerged : fromOptions.length >= 2 ? fromOptions : fromPassage.length >= 2 ? fromPassage : fromExplanation;
-
-          if (recoveredList.length >= 2) {
-            const contentMap: Record<string, { text: string; correctValue?: boolean }> = {};
-            recoveredList.forEach((st) => { contentMap[st.id] = { text: st.text, correctValue: st.correctValue }; });
-            statements = statements.map((st) => {
-              const isPl =
-                !st.text ||
-                !st.text.trim() ||
-                /^Khẳng định/i.test(st.text.trim()) ||
-                /^Ý [a-d]$/i.test(st.text.trim()) ||
-                /^Mệnh đề [a-d]$/i.test(st.text.trim());
-              if (isPl && contentMap[st.id]) {
-                return {
-                  ...st,
-                  text: contentMap[st.id].text,
-                  correctValue: contentMap[st.id].correctValue !== undefined ? contentMap[st.id].correctValue : st.correctValue,
-                };
-              }
-              return st;
-            });
-            if (recoveredList === fromContent) {
-              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
-              if (firstLetterMatch !== -1) {
-                cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
-              }
-            }
-          }
-        }
-      }
-
       const requiredLetters = ["a", "b", "c", "d"];
       const existingMap: Record<string, any> = {};
       (statements || []).forEach((st) => {
@@ -843,13 +801,13 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
           let cleanText = (existingMap[l].text || "").trim();
           // Làm sạch tiền tố redundant a), a., Ý a:, (a) ở đầu nội dung nếu bị thừa
           cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
-          if (/^Khẳng định/i.test(cleanText) && q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
+          if ((!cleanText || /^(?:Khẳng định|Ý|Mệnh đề|Phương án)/i.test(cleanText)) && q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
             cleanText = q.options[lIdx].replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim();
           }
           return {
             id: l,
             label: `${l})`,
-            text: cleanText || `Ý ${l}`,
+            text: cleanText || `Mệnh đề ${l}`,
             correctValue: Boolean(existingMap[l].correctValue),
             explanation: existingMap[l].explanation || "",
           };
