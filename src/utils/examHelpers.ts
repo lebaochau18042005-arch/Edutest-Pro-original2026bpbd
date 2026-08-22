@@ -473,12 +473,12 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
     const lines = clean.split("\n");
     const tableStmts: { id: string; label: string; text: string; correctValue: boolean }[] = [];
     for (const line of lines) {
-      if (!line.includes("|") || /^\|[\s-:]+\|$/.test(line.trim())) continue;
-      const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
+      if (!line.includes("|") || /^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(line.trim())) continue;
+      const cells = line.split("|").map((c) => c.trim()).filter((c) => c.length > 0);
 
-      // Case 1: Row structure | a) | Nội dung mệnh đề | Đúng |
+      // Structure: | a | Nội dung mệnh đề | Đúng | hoặc | a) | Nội dung | [Đúng] |
       if (cells.length >= 2) {
-        const firstCellMatch = cells[0].match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*$/i);
+        const firstCellMatch = cells[0].match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.):/\-–—\s]*\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*$/i);
         if (firstCellMatch) {
           const l = (firstCellMatch[1] || firstCellMatch[2] || firstCellMatch[3] || firstCellMatch[4] || firstCellMatch[5] || "a").toLowerCase();
           const stmtText = cells[1] || "";
@@ -495,13 +495,15 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
         }
       }
 
-      // Case 2: Each cell contains full statement e.g. | a) Nội dung | b) Nội dung |
-      for (const cell of cells) {
-        const sm = cell.match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i);
+      // Structure: | a) Nội dung mệnh đề | Đúng | hoặc | a. Nội dung | b. Nội dung |
+      for (let cIdx = 0; cIdx < cells.length; cIdx++) {
+        const cell = cells[cIdx];
+        const sm = cell.match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.):/\-–—\s]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i);
         if (sm) {
           const l = (sm[1] || sm[2] || sm[3] || sm[4] || sm[5] || "a").toLowerCase();
           const rawVal = sm[6] || "";
-          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawVal) || /\bĐúng\b/i.test(cell);
+          const restCells = cells.slice(cIdx + 1).join(" ");
+          const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawVal) || /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(restCells);
           const cleanText = rawVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "").trim();
           tableStmts.push({
             id: l,
@@ -515,26 +517,49 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
     if (tableStmts.length >= 2) {
       const uniqueMap: Record<string, { id: string; label: string; text: string; correctValue: boolean }> = {};
       tableStmts.forEach((st) => { uniqueMap[st.id] = st; });
-      return Object.values(uniqueMap);
+      const required = ["a", "b", "c", "d"];
+      const result: { id: string; label: string; text: string; correctValue: boolean }[] = [];
+      required.forEach((r) => {
+        if (uniqueMap[r]) result.push(uniqueMap[r]);
+      });
+      if (result.length >= 2) return result;
     }
   }
 
-  // 2. Position-based splitting for non-table text (preserves 100% of text without truncation)
-  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*/gi;
+  // 2. Protect LaTeX math formulas ($...$ or $$...$$) to prevent matching math variables like $f(a)$, $(a, b)$
+  const mathTokens: string[] = [];
+  let tokenized = clean.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g, (m) => {
+    const placeholder = `__MATH_STMT_TOK_${mathTokens.length}__`;
+    mathTokens.push(m);
+    return placeholder;
+  });
+
+  // 3. Position-based splitting for non-table text
+  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|\b([a-d]))[.):/\-–—\s]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*/gi;
   const matches: { letter: string; index: number; matchLength: number }[] = [];
   let m;
 
-  while ((m = markerRegex.exec(clean)) !== null) {
+  while ((m = markerRegex.exec(tokenized)) !== null) {
     const matchIdx = m.index;
-    const beforeStr = clean.substring(0, matchIdx);
+    const beforeStr = tokenized.substring(0, matchIdx);
 
-    // Skip if inside markdown link/image like [alt](url)
+    // Skip if inside markdown link/image
     const lastUrlOpen = beforeStr.lastIndexOf("](");
     const lastUrlClose = beforeStr.lastIndexOf(")");
     if (lastUrlOpen !== -1 && (lastUrlClose === -1 || lastUrlClose < lastUrlOpen)) continue;
 
+    const lastAltOpen = beforeStr.lastIndexOf("![");
+    const lastAltClose = beforeStr.lastIndexOf("]");
+    if (lastAltOpen !== -1 && (lastAltClose === -1 || lastAltClose < lastAltOpen)) continue;
+
     const letter = (m[1] || m[2] || m[3] || m[4] || m[5] || "").toLowerCase();
     if (!letter || !["a", "b", "c", "d"].includes(letter)) continue;
+
+    // Avoid false positives: (a) preceded by function names like f(a), g(a), sin(a)
+    const prevChar = beforeStr.trim().slice(-1);
+    if (/^[a-zA-Z0-9_]$/.test(prevChar) && (m[0].trim().startsWith("(") || m[0].trim().startsWith("["))) {
+      continue;
+    }
 
     matches.push({
       letter,
@@ -543,43 +568,75 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
     });
   }
 
+  // Filter to keep only sequential matches
   if (matches.length >= 2) {
-    const stmts: { id: string; label: string; text: string; correctValue: boolean }[] = [];
-    for (let i = 0; i < matches.length; i++) {
-      const current = matches[i];
-      const start = current.index + current.matchLength;
-      const end = i < matches.length - 1 ? matches[i + 1].index : clean.length;
-      const rawTextVal = clean.substring(start, end).trim();
+    const firstAIdx = matches.findIndex((match) => match.letter === "a");
+    const candidateMatches = firstAIdx !== -1 ? matches.slice(firstAIdx) : matches;
 
-      const startsWithSai = /^(?:\(Sai\)|\[Sai\]|\(S\)|Sai\b|False\b)/i.test(rawTextVal);
-      const startsWithDung = /^(?:\(Đúng\)|\[Đúng\]|\(Đ\)|Đúng\b|True\b)/i.test(rawTextVal);
-      const isCorrect = startsWithDung
-        ? true
-        : startsWithSai
-        ? false
-        : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+    const filtered: typeof matches = [];
+    const seenLetters = new Set<string>();
 
-      let cleanText = rawTextVal
-        .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
-        .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
-        .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
-        .replace(/^(?:vì|do|bởi vì)\s+/i, "")
-        .trim();
-
-      if (cleanText) {
-        cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
+    for (const match of candidateMatches) {
+      if (!seenLetters.has(match.letter)) {
+        if (filtered.length === 0 && match.letter === "a") {
+          filtered.push(match);
+          seenLetters.add(match.letter);
+        } else if (filtered.length > 0) {
+          const lastLetterCode = filtered[filtered.length - 1].letter.charCodeAt(0);
+          const currentLetterCode = match.letter.charCodeAt(0);
+          if (currentLetterCode > lastLetterCode) {
+            filtered.push(match);
+            seenLetters.add(match.letter);
+          }
+        }
       }
-
-      stmts.push({
-        id: current.letter,
-        label: `${current.letter})`,
-        text: cleanText || `Ý ${current.letter}`,
-        correctValue: isCorrect,
-      });
     }
 
-    if (stmts.length >= 2) {
-      return stmts;
+    const finalMatches = filtered.length >= 2 ? filtered : matches;
+
+    if (finalMatches.length >= 2) {
+      const stmts: { id: string; label: string; text: string; correctValue: boolean }[] = [];
+      for (let i = 0; i < finalMatches.length; i++) {
+        const current = finalMatches[i];
+        const start = current.index + current.matchLength;
+        const end = i < finalMatches.length - 1 ? finalMatches[i + 1].index : tokenized.length;
+        let rawTextVal = tokenized.substring(start, end).trim();
+
+        // Restore math tokens
+        mathTokens.forEach((tok, tokIdx) => {
+          rawTextVal = rawTextVal.replace(`__MATH_STMT_TOK_${tokIdx}__`, tok);
+        });
+
+        const startsWithSai = /^(?:\(Sai\)|\[Sai\]|\(S\)|Sai\b|False\b)/i.test(rawTextVal);
+        const startsWithDung = /^(?:\(Đúng\)|\[Đúng\]|\(Đ\)|Đúng\b|True\b)/i.test(rawTextVal);
+        const isCorrect = startsWithDung
+          ? true
+          : startsWithSai
+          ? false
+          : /\(Đúng\)|\[Đúng\]|(?::\s*|\s+-\s*|\s*->\s*)Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawTextVal);
+
+        let cleanText = rawTextVal
+          .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
+          .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+          .replace(/^(?:Đúng|Sai)[,.:\-–—\s]+/i, "")
+          .replace(/^(?:vì|do|bởi vì)\s+/i, "")
+          .trim();
+
+        if (cleanText) {
+          cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
+        }
+
+        stmts.push({
+          id: current.letter,
+          label: `${current.letter})`,
+          text: cleanText || `Ý ${current.letter}`,
+          correctValue: isCorrect,
+        });
+      }
+
+      if (stmts.length >= 2) {
+        return stmts;
+      }
     }
   }
 
@@ -681,26 +738,36 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
             /^Mệnh đề [a-d]$/i.test(s.text.trim())
         );
 
-      if (isPlaceholderStatements) {
-        let splittedStmts = splitRawTextIntoStatements(cleanContent);
-        let foundSource: "content" | "passage" | "explanation" = "content";
+      const mergedStatementTexts = (statements || []).map((s) => s.text || "").join("\n");
+      const hasMergedSubLetters = /(?:[\n\r\t]|\s{2,})(?:\*{0,2}(?:\[?[b-d]\]?|\([b-d]\)|[b-d])[.):/\-–—\s]\*{0,2})\s+/i.test(mergedStatementTexts);
 
-        if (splittedStmts.length < 2 && q.passageContent) {
-          splittedStmts = splitRawTextIntoStatements(q.passageContent);
-          foundSource = "passage";
-        }
-        if (splittedStmts.length < 2 && q.explanation) {
-          splittedStmts = splitRawTextIntoStatements(q.explanation);
-          foundSource = "explanation";
-        }
-        if (splittedStmts.length < 2 && q.groupTitle) {
-          splittedStmts = splitRawTextIntoStatements(q.groupTitle);
+      if (isPlaceholderStatements || hasMergedSubLetters) {
+        const candidatePool = [
+          cleanContent,
+          mergedStatementTexts,
+          q.passageContent || "",
+          q.explanation || "",
+          q.groupTitle || "",
+        ];
+
+        let recovered: { id: string; label: string; text: string; correctValue: boolean }[] = [];
+        let sourceUsed = "";
+
+        for (const cand of candidatePool) {
+          if (cand && cand.trim()) {
+            const spl = splitRawTextIntoStatements(cand);
+            if (spl.length >= 2) {
+              recovered = spl;
+              sourceUsed = cand;
+              break;
+            }
+          }
         }
 
-        if (splittedStmts.length >= 2) {
-          statements = splittedStmts;
-          if (foundSource === "content") {
-            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+        if (recovered.length >= 2) {
+          statements = recovered;
+          if (sourceUsed === cleanContent) {
+            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
             if (firstLetterMatch !== -1) {
               cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
             }
@@ -708,7 +775,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         }
       }
 
-      // 2. Nếu statements đã có một số phần tử nhưng bị thiếu text hoặc là placeholder, hãy bổ sung từ content/passage/explanation
+      // 2. Nếu statements đã có một số phần tử nhưng bị thiếu text hoặc là placeholder, hãy bổ sung
       if (statements && statements.length > 0) {
         const hasSomeEmptyOrPlaceholder = statements.some(
           (s) =>
@@ -720,9 +787,10 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         );
         if (hasSomeEmptyOrPlaceholder) {
           const fromContent = splitRawTextIntoStatements(cleanContent);
+          const fromMerged = splitRawTextIntoStatements((statements || []).map((s) => s.text || "").join("\n"));
           const fromPassage = q.passageContent ? splitRawTextIntoStatements(q.passageContent) : [];
           const fromExplanation = q.explanation ? splitRawTextIntoStatements(q.explanation) : [];
-          const recoveredList = fromContent.length >= 2 ? fromContent : fromPassage.length >= 2 ? fromPassage : fromExplanation;
+          const recoveredList = fromContent.length >= 2 ? fromContent : fromMerged.length >= 2 ? fromMerged : fromPassage.length >= 2 ? fromPassage : fromExplanation;
 
           if (recoveredList.length >= 2) {
             const contentMap: Record<string, { text: string; correctValue?: boolean }> = {};
@@ -744,7 +812,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
               return st;
             });
             if (recoveredList === fromContent) {
-              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.)/:]\*{0,2}|\(a\)|\ba\))\s*/i);
+              const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
               if (firstLetterMatch !== -1) {
                 cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
               }
@@ -764,12 +832,12 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         if (existingMap[l]) {
           let cleanText = (existingMap[l].text || "").trim();
           // Làm sạch tiền tố redundant a), a., Ý a:, (a) ở đầu nội dung nếu bị thừa
-          cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.)/:]\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
+          cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
           return {
             id: l,
             label: `${l})`,
-            text: cleanText || `Khẳng định ý ${l}`,
-            correctValue: typeof existingMap[l].correctValue === "boolean" ? existingMap[l].correctValue : true,
+            text: cleanText || `Ý ${l}`,
+            correctValue: Boolean(existingMap[l].correctValue),
             explanation: existingMap[l].explanation || "",
           };
         }
@@ -1606,25 +1674,113 @@ export const SAMPLE_EXAM_TEXT = SAMPLE_28Q_BGD_EXAM_TEXT;
  * Helper: Convert Markdown content (Tables, Diagrams, Images, Math) to rich Word/PDF HTML
  */
 
+function formatExportMathAndInline(str: string): string {
+  if (!str) return "";
+  let res = str;
+  // Convert basic LaTeX math inside cells / text
+  res = res.replace(/\$([^\$]+)\$/g, (_, math) => {
+    let m = math.trim();
+    m = m.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1)/($2)");
+    m = m.replace(/\\sqrt\{([^}]+)\}/g, "√($1)");
+    m = m.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, "^{$1}√($2)");
+    m = m.replace(/\\vec\{([^}]+)\}/g, "→$1");
+    m = m.replace(/\\overrightarrow\{([^}]+)\}/g, "→$1");
+    m = m.replace(/\\in\b/g, "∈");
+    m = m.replace(/\\notin\b/g, "∉");
+    m = m.replace(/\\Delta\b/g, "Δ");
+    m = m.replace(/\\alpha\b/g, "α");
+    m = m.replace(/\\beta\b/g, "β");
+    m = m.replace(/\\pi\b/g, "π");
+    m = m.replace(/\\infty\b/g, "∞");
+    m = m.replace(/\\le\b/g, "≤");
+    m = m.replace(/\\ge\b/g, "≥");
+    m = m.replace(/\\ne\b/g, "≠");
+    m = m.replace(/\\times\b/g, "×");
+    m = m.replace(/\\div\b/g, "÷");
+    m = m.replace(/\\pm\b/g, "±");
+    m = m.replace(/\^{([^}]+)}/g, "<sup>$1</sup>");
+    m = m.replace(/\^([0-9a-zA-Z+-]+)/g, "<sup>$1</sup>");
+    m = m.replace(/_{([^}]+)}/g, "<sub>$1</sub>");
+    m = m.replace(/_([0-9a-zA-Z+-]+)/g, "<sub>$1</sub>");
+    return `<span style="font-family: 'Cambria Math', 'Times New Roman', serif; font-style: italic;">${m}</span>`;
+  });
+
+  // Superscript & Subscript without $
+  res = res.replace(/\^{([^}]+)}/g, "<sup>$1</sup>");
+  res = res.replace(/\^([0-9a-zA-Z+-]+)/g, "<sup>$1</sup>");
+  res = res.replace(/_{([^}]+)}/g, "<sub>$1</sub>");
+  res = res.replace(/_([0-9a-zA-Z+-]+)/g, "<sub>$1</sub>");
+
+  // Bold & Italic
+  res = res.replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>");
+  res = res.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  res = res.replace(/\*(.*?)\*/g, "<em>$1</em>");
+
+  return res;
+}
+
 function convertMarkdownToExportHtml(rawText: string, diagramUrl?: string): string {
   if (!rawText && !diagramUrl) return "";
 
   let text = (rawText || "").trim();
 
-  // 1. Process Markdown Tables: | Col 1 | Col 2 | \n |---|---| \n | D1 | D2 |
+  // 1. Process Markdown / Tabular Tables
   const lines = text.split("\n");
   const parsedLines: string[] = [];
   let inTable = false;
   let tableRows: string[][] = [];
 
+  const buildTableHtml = (rows: string[][]) => {
+    if (rows.length === 0) return "";
+    const header = rows[0];
+    const body = rows.slice(1);
+    let tableHtml = `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin: 12px auto; width: 95%; max-width: 600px; font-size: 11pt; border: 1.5px solid #334155; text-align: center;">`;
+    if (header && header.length > 0) {
+      tableHtml += `<thead style="background-color: #f1f5f9; font-weight: bold; border-bottom: 1.5px solid #334155;"><tr>`;
+      header.forEach((c) => {
+        tableHtml += `<th style="padding: 6px 10px; border: 1px solid #64748b; font-weight: bold; text-align: center;">${formatExportMathAndInline(c)}</th>`;
+      });
+      tableHtml += `</tr></thead>`;
+    }
+    tableHtml += `<tbody>`;
+    body.forEach((r, rIdx) => {
+      tableHtml += `<tr style="background-color: ${rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'};">`;
+      r.forEach((c) => {
+        tableHtml += `<td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">${formatExportMathAndInline(c)}</td>`;
+      });
+      tableHtml += `</tr>`;
+    });
+    tableHtml += `</tbody></table>`;
+    return tableHtml;
+  };
+
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.startsWith("|") && line.endsWith("|")) {
-      if (/^\|[\s-:]+\|$/.test(line)) {
-        // Table divider row
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+
+    const isPipeTableLine =
+      (line.startsWith("|") && line.endsWith("|")) ||
+      (line.includes("|") && line.split("|").length >= 3);
+
+    const isTabTableLine = line.includes("\t") && line.split("\t").filter((c) => c.trim().length > 0).length >= 2;
+
+    if (isPipeTableLine) {
+      if (!/^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(line)) {
+        let cleanLine = line;
+        if (cleanLine.startsWith("|")) cleanLine = cleanLine.slice(1);
+        if (cleanLine.endsWith("|")) cleanLine = cleanLine.slice(0, -1);
+        const cells = cleanLine.split("|").map((c) => c.trim());
+        if (cells.length > 0 && cells.some((c) => c.length > 0)) {
+          inTable = true;
+          tableRows.push(cells);
+          continue;
+        }
+      } else {
+        // Divider row
         continue;
       }
-      const cells = line.split("|").map((c) => c.trim()).slice(1, -1);
+    } else if (isTabTableLine) {
+      const cells = line.split("\t").map((c) => c.trim()).filter((c) => c.length > 0);
       if (cells.length > 0) {
         inTable = true;
         tableRows.push(cells);
@@ -1634,55 +1790,17 @@ function convertMarkdownToExportHtml(rawText: string, diagramUrl?: string): stri
 
     if (inTable) {
       if (tableRows.length > 0) {
-        const header = tableRows[0];
-        const body = tableRows.slice(1);
-        let tableHtml = `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin: 10px auto; width: 90%; font-size: 11pt; border: 1px solid #334155; text-align: center;">`;
-        if (header && header.length > 0) {
-          tableHtml += `<thead style="background-color: #f1f5f9; font-weight: bold;"><tr>`;
-          header.forEach((c) => {
-            tableHtml += `<th style="padding: 6px 10px; border: 1px solid #334155;">${c}</th>`;
-          });
-          tableHtml += `</tr></thead>`;
-        }
-        tableHtml += `<tbody>`;
-        body.forEach((r, rIdx) => {
-          tableHtml += `<tr style="background-color: ${rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'};">`;
-          r.forEach((c) => {
-            tableHtml += `<td style="padding: 6px 10px; border: 1px solid #334155;">${c}</td>`;
-          });
-          tableHtml += `</tr>`;
-        });
-        tableHtml += `</tbody></table>`;
-        parsedLines.push(tableHtml);
+        parsedLines.push(buildTableHtml(tableRows));
       }
       inTable = false;
       tableRows = [];
     }
 
-    parsedLines.push(line);
+    parsedLines.push(formatExportMathAndInline(rawLine));
   }
 
   if (inTable && tableRows.length > 0) {
-    const header = tableRows[0];
-    const body = tableRows.slice(1);
-    let tableHtml = `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; margin: 10px auto; width: 90%; font-size: 11pt; border: 1px solid #334155; text-align: center;">`;
-    if (header && header.length > 0) {
-      tableHtml += `<thead style="background-color: #f1f5f9; font-weight: bold;"><tr>`;
-      header.forEach((c) => {
-        tableHtml += `<th style="padding: 6px 10px; border: 1px solid #334155;">${c}</th>`;
-      });
-      tableHtml += `</tr></thead>`;
-    }
-    tableHtml += `<tbody>`;
-    body.forEach((r, rIdx) => {
-      tableHtml += `<tr style="background-color: ${rIdx % 2 === 0 ? '#ffffff' : '#f8fafc'};">`;
-      r.forEach((c) => {
-        tableHtml += `<td style="padding: 6px 10px; border: 1px solid #334155;">${c}</td>`;
-      });
-      tableHtml += `</tr>`;
-    });
-    tableHtml += `</tbody></table>`;
-    parsedLines.push(tableHtml);
+    parsedLines.push(buildTableHtml(tableRows));
   }
 
   let formatted = parsedLines.join("<br/>");
@@ -1700,10 +1818,6 @@ function convertMarkdownToExportHtml(rawText: string, diagramUrl?: string): stri
   if (diagramUrl && !formatted.includes(diagramUrl)) {
     formatted += `<div style="text-align: center; margin: 10px 0;"><img src="${diagramUrl}" alt="Hình vẽ minh họa" style="max-width: 450px; max-height: 300px; display: block; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 6px;" /><div style="font-size: 10pt; color: #64748b; font-style: italic; margin-top: 4px;">Hình vẽ / Bảng số liệu đính kèm</div></div>`;
   }
-
-  // 4. Bold and Italic formatting
-  formatted = formatted.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-  formatted = formatted.replace(/\*(.*?)\*/g, "<em>$1</em>");
 
   return formatted;
 }

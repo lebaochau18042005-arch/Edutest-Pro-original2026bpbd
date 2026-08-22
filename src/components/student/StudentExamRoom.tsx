@@ -38,6 +38,7 @@ import {
 import {
   ExamPackage,
   ExamVariant,
+  ExamQuestionVariant,
   StudentSubmission,
   ViolationLog,
   QuestionTimeRecord,
@@ -74,7 +75,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
     if (!rawVariant) return { examCode: "101", questions: [], answerKey: {} };
     return {
       ...rawVariant,
-      questions: normalizeExamQuestions3Parts(rawVariant.questions || []),
+      questions: normalizeExamQuestions3Parts((rawVariant.questions || []) as any) as unknown as ExamQuestionVariant[],
     };
   }, [rawVariant, selectedVariantCode]);
 
@@ -1028,6 +1029,16 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Question Passage / Common Group Content if any */}
+              {currentQuestion.passageContent && (
+                <div className="p-3.5 mb-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm font-normal">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-700 mb-1.5 flex items-center gap-1">
+                    <span>📌 Dữ liệu / Ngữ cảnh câu hỏi:</span>
+                  </div>
+                  <FormattedQuestionContent content={currentQuestion.passageContent} />
+                </div>
+              )}
 
               {/* Question Content (With KaTeX Formula Renderer) */}
               <div className="text-slate-900 text-sm sm:text-base leading-relaxed font-medium">

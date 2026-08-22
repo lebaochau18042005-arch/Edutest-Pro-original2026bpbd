@@ -606,10 +606,26 @@ export async function extractDocxDeep(
 
         // Check if this table is an option table (e.g. cells like A. ..., B. ..., C. ..., D. ...)
         const flatCells = rows.flat().filter(Boolean);
-        const hasOptionsInTable = flatCells.some((c) => /^\*{0,2}(?:\[?[A-D]\]?|\([A-D]\))[.)/:]/i.test(c.trim()));
-        const hasStatementsInTable = flatCells.some((c) => /^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?[a-d]\]?|\([a-d]\)|[a-d])[.)/:]/i.test(c.trim()) || /^\([a-d]\)\s+/i.test(c.trim()));
+        const optionLetters = new Set<string>();
+        const statementLetters = new Set<string>();
 
-        if (hasOptionsInTable || hasStatementsInTable) {
+        flatCells.forEach((c) => {
+          const optMatch = c.trim().match(/^\*{0,2}(?:\[?([A-D])\]?|\(([A-D])\)|([A-D]))[.)/:]/i);
+          if (optMatch) optionLetters.add((optMatch[1] || optMatch[2] || optMatch[3]).toUpperCase());
+
+          const stmtMatch = c.trim().match(/^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]/i);
+          if (stmtMatch) statementLetters.add((stmtMatch[1] || stmtMatch[2] || stmtMatch[3]).toLowerCase());
+        });
+
+        // A table is strictly an options layout table ONLY if:
+        // - It has 3+ distinct option letters (A, B, C, D) or statement letters (a, b, c, d)
+        // - Total rows is small (<= 2) and total cells is <= 6
+        const isPureOptionsLayout =
+          (optionLetters.size >= 3 || statementLetters.size >= 3) &&
+          rows.length <= 2 &&
+          flatCells.length <= 6;
+
+        if (isPureOptionsLayout) {
           // Output each cell on a new line so options/statements are cleanly parsed
           return "\n" + flatCells.join("\n") + "\n";
         }

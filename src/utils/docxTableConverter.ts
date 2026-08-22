@@ -56,10 +56,27 @@ export function convertDocxHtmlToMarkdown(
       if (rows.length === 0) return "";
 
       const flatCells = rows.flat().filter(Boolean);
-      const hasOptions = flatCells.some((c) => /^\*{0,2}(?:\[?[A-D]\]?|\([A-D]\))[.)/:]/i.test(c.trim()));
-      const hasStatements = flatCells.some((c) => /^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?[a-d]\]?|\([a-d]\)|[a-d])[.)/:]/i.test(c.trim()) || /^\([a-d]\)\s+/i.test(c.trim()));
+      const optionLetters = new Set<string>();
+      const statementLetters = new Set<string>();
 
-      if (hasOptions || hasStatements) {
+      flatCells.forEach((c) => {
+        const optMatch = c.trim().match(/^\*{0,2}(?:\[?([A-D])\]?|\(([A-D])\)|([A-D]))[.)/:]/i);
+        if (optMatch) optionLetters.add((optMatch[1] || optMatch[2] || optMatch[3]).toUpperCase());
+
+        const stmtMatch = c.trim().match(/^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]/i);
+        if (stmtMatch) statementLetters.add((stmtMatch[1] || stmtMatch[2] || stmtMatch[3]).toLowerCase());
+      });
+
+      // A table is strictly an options layout table ONLY if:
+      // - It has 3+ distinct option letters (A, B, C, D) or statement letters (a, b, c, d)
+      // - Total rows is small (<= 2) and total cells is <= 6
+      // - Doesn't have data table header names (e.g. Tần số, Số lượng, Khoảng, Nhóm, etc.)
+      const isPureOptionsLayout =
+        (optionLetters.size >= 3 || statementLetters.size >= 3) &&
+        rows.length <= 2 &&
+        flatCells.length <= 6;
+
+      if (isPureOptionsLayout) {
         return "\n" + flatCells.join("\n") + "\n";
       }
 

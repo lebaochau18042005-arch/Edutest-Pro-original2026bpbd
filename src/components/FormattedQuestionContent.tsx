@@ -279,14 +279,52 @@ export const FormattedQuestionContent: React.FC<FormattedQuestionContentProps> =
 }) => {
   const [activeModalImage, setActiveModalImage] = useState<{ src: string; alt: string } | null>(null);
 
-  // Parse markdown tables from text segment
+  // Parse markdown tables, HTML tables, and tab-delimited tables from text segment
   const parseTextAndTables = (
     textChunk: string,
     outputList: Array<{ type: "text" | "table" | "image" | "diagram"; data: any; alt?: string }>
   ) => {
     if (!textChunk) return;
 
-    // Check if contains Markdown table (| ... | ... |)
+    // 1. Check if contains HTML <table> ... </table>
+    if (/<table[\s\S]*?<\/table>/i.test(textChunk)) {
+      const tableTagRegex = /([\s\S]*?)(<table[\s\S]*?<\/table>)([\s\S]*)/i;
+      const match = textChunk.match(tableTagRegex);
+      if (match) {
+        const before = match[1];
+        const tableHtml = match[2];
+        const after = match[3];
+
+        if (before.trim()) parseTextAndTables(before, outputList);
+
+        // Parse HTML table using DOMParser
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(tableHtml, "text/html");
+          const trs = Array.from(doc.querySelectorAll("tr"));
+          const tableRows: string[][] = [];
+
+          trs.forEach((tr) => {
+            const cells = Array.from(tr.querySelectorAll("th, td"));
+            const rowData = cells.map((c) => (c.textContent || "").replace(/\u00A0/g, " ").trim());
+            if (rowData.length > 0 && rowData.some((c) => c.length > 0)) {
+              tableRows.push(rowData);
+            }
+          });
+
+          if (tableRows.length > 0) {
+            outputList.push({ type: "table", data: tableRows });
+          }
+        } catch (e) {
+          outputList.push({ type: "text", data: tableHtml });
+        }
+
+        if (after.trim()) parseTextAndTables(after, outputList);
+        return;
+      }
+    }
+
+    // 2. Parse Markdown and Tabular tables line-by-line
     const lines = textChunk.split("\n");
     let currentTableRows: string[][] = [];
     let currentTextLines: string[] = [];
@@ -315,22 +353,38 @@ export const FormattedQuestionContent: React.FC<FormattedQuestionContentProps> =
     };
 
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      const isPipeTableLine = line.startsWith("|") && line.endsWith("|");
+      const rawLine = lines[i];
+      const line = rawLine.trim();
+
+      // Check for Markdown pipe table row (e.g. | col1 | col2 | or col1 | col2)
+      const isPipeTableLine =
+        (line.startsWith("|") && line.endsWith("|")) ||
+        (line.includes("|") && line.split("|").length >= 3);
+
+      // Check for tab-delimited table row (at least 2 tabs on non-empty line)
+      const isTabTableLine = line.includes("\t") && line.split("\t").filter((c) => c.trim().length > 0).length >= 2;
 
       if (isPipeTableLine) {
         flushText();
-        // Ignore markdown divider line |---|---|
-        if (!/^\|[\s-:]+\|$/.test(line)) {
-          const cells = line
-            .slice(1, -1)
-            .split("|")
-            .map((c) => c.trim());
+        // Ignore markdown divider line |---|---| or :---|---:
+        if (!/^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(line)) {
+          let cleanLine = line;
+          if (cleanLine.startsWith("|")) cleanLine = cleanLine.slice(1);
+          if (cleanLine.endsWith("|")) cleanLine = cleanLine.slice(0, -1);
+          const cells = cleanLine.split("|").map((c) => c.trim());
+          if (cells.length > 0 && cells.some((c) => c.length > 0)) {
+            currentTableRows.push(cells);
+          }
+        }
+      } else if (isTabTableLine) {
+        flushText();
+        const cells = line.split("\t").map((c) => c.trim()).filter((c) => c.length > 0);
+        if (cells.length > 0) {
           currentTableRows.push(cells);
         }
       } else {
         flushTable();
-        currentTextLines.push(lines[i]);
+        currentTextLines.push(rawLine);
       }
     }
 
