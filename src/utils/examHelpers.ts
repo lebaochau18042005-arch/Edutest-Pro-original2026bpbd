@@ -253,12 +253,7 @@ export function gradeSubmission(
       };
     } else if (part === 2 || q.questionType === "true_false") {
       // PHẦN II: Trắc nghiệm Đúng / Sai (4 ý a, b, c, d)
-      const stmts = q.statements || [
-        { id: "a", label: "a)", text: "Ý a", correctValue: true },
-        { id: "b", label: "b)", text: "Ý b", correctValue: false },
-        { id: "c", label: "c)", text: "Ý c", correctValue: true },
-        { id: "d", label: "d)", text: "Ý d", correctValue: false },
-      ];
+      const stmts = q.statements || [];
 
       const studentAnsObj = (typeof studentAns === "object" && studentAns !== null) ? studentAns : {};
       let subCorrectCount = 0;
@@ -682,11 +677,14 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
 
     const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
     let cleanContent = q.content || "";
+    let hasMissingSourceData = false;
 
     // XỬ LÝ VÀ BÓC TÁCH TOÀN BỘ PHƯƠNG ÁN PHẦN I ĐẢM BẢO 100% NGUYÊN FILE GỐC
     let finalOptions: string[] = [];
     if (part === 1) {
-      let rawOpts = Array.isArray(q.options) ? q.options.map((o) => String(o || "").trim()).filter(Boolean) : [];
+      let rawOpts = Array.isArray(q.options)
+        ? q.options.map((o) => String(o || "").trim()).filter((o) => Boolean(o) && !/^Phương án\s*[A-F]?$/i.test(o))
+        : [];
 
       // Kiểm tra nếu các phương án bị gộp vào bên trong 1 phần tử (VD: options[0] chứa "B. ... C. ... D. ...")
       const isMergedInOption = rawOpts.some((opt) =>
@@ -724,10 +722,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
           .trim();
       });
 
-      // Nếu còn thiếu thì bổ sung đủ 4 phương án
-      while (finalOptions.length < 4) {
-        finalOptions.push(`Phương án ${["A", "B", "C", "D"][finalOptions.length]}`);
-      }
+      hasMissingSourceData = finalOptions.length !== 4;
     }
 
     // XỬ LÝ VÀ BÓC TÁCH 4 MỆNH ĐỀ PHẦN II (ĐÚNG/SAI) BẢO ĐẢM KHÔNG BỎ SÓT NỘI DUNG
@@ -796,39 +791,45 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         existingMap[key] = st;
       });
 
-      statements = requiredLetters.map((l, lIdx) => {
-        if (existingMap[l]) {
-          let cleanText = (existingMap[l].text || "").trim();
-          // Làm sạch tiền tố redundant a), a., Ý a:, (a) ở đầu nội dung nếu bị thừa
-          cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
-          if ((!cleanText || /^(?:Khẳng định|Ý|Mệnh đề|Phương án)/i.test(cleanText)) && q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
-            cleanText = q.options[lIdx].replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim();
-          }
-          return {
-            id: l,
-            label: `${l})`,
-            text: cleanText || `Mệnh đề ${l}`,
-            correctValue: Boolean(existingMap[l].correctValue),
-            explanation: existingMap[l].explanation || "",
-          };
+      const normalizedStatements: NonNullable<Question["statements"]> = [];
+      requiredLetters.forEach((l, lIdx) => {
+        const existing = existingMap[l];
+        let cleanText = String(existing?.text || "").trim();
+
+        if (cleanText) {
+          cleanText = cleanText
+            .replace(
+              new RegExp(
+                `^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`,
+                "i"
+              ),
+              ""
+            )
+            .trim();
         }
-        if (q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
-          return {
-            id: l,
-            label: `${l})`,
-            text: q.options[lIdx].replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim(),
-            correctValue: lIdx === (q.correctIndex || 0),
-            explanation: "",
-          };
+
+        const isPlaceholder = /^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(cleanText);
+        if ((!cleanText || isPlaceholder) && q.options?.[lIdx] && !/^Phương án\s*[A-D]?$/i.test(q.options[lIdx].trim())) {
+          cleanText = q.options[lIdx]
+            .replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "")
+            .trim();
         }
-        return {
+
+        if (!cleanText || /^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(cleanText)) {
+          hasMissingSourceData = true;
+          return;
+        }
+
+        normalizedStatements.push({
           id: l,
           label: `${l})`,
-          text: `Mệnh đề ${l}`,
-          correctValue: true,
-          explanation: "",
-        };
+          text: cleanText,
+          correctValue: Boolean(existing?.correctValue),
+          explanation: existing?.explanation || "",
+        });
       });
+      statements = normalizedStatements;
+      hasMissingSourceData ||= normalizedStatements.length !== 4;
     }
 
     // XỬ LÝ PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
@@ -848,6 +849,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       questionType,
       options: part === 1 ? finalOptions.slice(0, 4) : [],
       statements: part === 2 ? statements : undefined,
+      needsReview: Boolean(q.needsReview || hasMissingSourceData),
       shortAnswer: part === 3 ? (q.shortAnswer || finalShortAnswer || "") : undefined,
     };
   });
@@ -929,7 +931,7 @@ export function generateVariantsFromQuestions(
         answerKey[q.questionIndex] = LETTERS[q.correctIndex] || "A";
       } else if (q.part === 2 || q.questionType === "true_false") {
         const tf = (q.statements || []).map((s) => `${s.label.replace(")", "")}:${s.correctValue ? "Đ" : "S"}`).join(",");
-        answerKey[q.questionIndex] = tf || "a:Đ,b:S,c:Đ,d:S";
+        answerKey[q.questionIndex] = tf;
       } else {
         answerKey[q.questionIndex] = q.shortAnswer || "";
       }
@@ -1045,7 +1047,7 @@ export function generateVariantsFromQuestions(
         answerKey[q.questionIndex] = LETTERS[q.correctIndex] || "A";
       } else if (q.part === 2 || q.questionType === "true_false") {
         const tf = (q.statements || []).map((s) => `${s.label.replace(")", "")}:${s.correctValue ? "Đ" : "S"}`).join(",");
-        answerKey[q.questionIndex] = tf || "a:Đ,b:S,c:Đ,d:S";
+        answerKey[q.questionIndex] = tf;
       } else {
         answerKey[q.questionIndex] = q.shortAnswer || "";
       }

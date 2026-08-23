@@ -480,7 +480,19 @@ export async function extractDocxDeep(
         return "";
       }
 
-      // Drawing / Image / Shape / Object elements
+      // Compatibility markup contains a modern Choice and a legacy Fallback.
+      // Process only one branch or text/images will be duplicated.
+      if (tag === "alternatecontent") {
+        const preferredBranch =
+          Array.from(el.children).find((child) => getNodeTag(child) === "choice") ||
+          Array.from(el.children).find((child) => getNodeTag(child) === "fallback");
+        return preferredBranch ? processDocxElement(preferredBranch) : "";
+      }
+
+      // Drawing / Image / Shape / Object elements.
+      // Word also stores text boxes inside <w:pict>/<v:shape>. Only return an
+      // image when the container really has an image relationship; otherwise
+      // recurse below so question text inside shapes is not silently dropped.
       if (
         tag === "drawing" ||
         tag === "pict" ||
@@ -504,7 +516,12 @@ export async function extractDocxDeep(
             return ` ![Hình vẽ ${imageCount}](${token}) `;
           }
         }
-        return "";
+        const hasTextBoxContent = Array.from(el.getElementsByTagName("*")).some(
+          (child) => getNodeTag(child) === "txbxcontent"
+        );
+        if ((tag === "drawing" || tag === "imagedata") && !hasTextBoxContent) {
+          return "";
+        }
       }
 
       // Symbol run: <w:sym w:font="Symbol" w:char="F0CE"/>
@@ -529,7 +546,7 @@ export async function extractDocxDeep(
           if (child.nodeType === Node.ELEMENT_NODE) {
             const childEl = child as Element;
             const cTag = getNodeTag(childEl);
-            if (cTag === "t") {
+            if (cTag === "t" || cTag === "instrtext" || cTag === "deltext") {
               text += childEl.textContent || "";
             } else if (cTag === "br") {
               text += "\n";
@@ -539,6 +556,7 @@ export async function extractDocxDeep(
               cTag === "drawing" ||
               cTag === "pict" ||
               cTag === "object" ||
+              cTag === "alternatecontent" ||
               cTag === "omath" ||
               cTag === "omathpara"
             ) {
@@ -579,12 +597,10 @@ export async function extractDocxDeep(
       // Table element <w:tbl>
       if (tag === "tbl") {
         const rows: string[][] = [];
-        const trElements = Array.from(el.getElementsByTagName("w:tr"));
-        const actualTrs = trElements.length > 0 ? trElements : Array.from(el.children).filter((c) => getNodeTag(c) === "tr");
+        const actualTrs = Array.from(el.children).filter((child) => getNodeTag(child) === "tr");
 
         actualTrs.forEach((tr) => {
-          const tcElements = Array.from(tr.getElementsByTagName("w:tc"));
-          const actualTcs = tcElements.length > 0 ? tcElements : Array.from(tr.children).filter((c) => getNodeTag(c) === "tc");
+          const actualTcs = Array.from(tr.children).filter((child) => getNodeTag(child) === "tc");
 
           const rowData = actualTcs.map((cell) => {
             let cellText = "";
@@ -656,8 +672,6 @@ export async function extractDocxDeep(
         const child = el.childNodes[i];
         if (child.nodeType === Node.ELEMENT_NODE) {
           innerText += processDocxElement(child as Element);
-        } else if (child.nodeType === Node.TEXT_NODE) {
-          innerText += child.textContent || "";
         }
       }
       return innerText;

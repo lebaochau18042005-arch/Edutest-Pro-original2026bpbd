@@ -38,11 +38,14 @@ export function convertDocxHtmlToMarkdown(
     // Tables: preserve child images, formulas, and text inside cells
     if (tagName === "table") {
       const rows: string[][] = [];
-      const trElements = Array.from(el.querySelectorAll("tr"));
+      const trElements = Array.from(el.querySelectorAll("tr")).filter(
+        (row) => row.closest("table") === el
+      );
 
       trElements.forEach((tr) => {
-        const cells = Array.from(tr.querySelectorAll(":scope > th, :scope > td, tr > th, tr > td"));
-        const targetCells = cells.length > 0 ? cells : Array.from(tr.children);
+        const targetCells = Array.from(tr.children).filter((cell) =>
+          ["th", "td"].includes(cell.tagName.toLowerCase())
+        );
 
         const rowData = targetCells.map((cell) => {
           const inner = Array.from(cell.childNodes).map(processNode).join("");

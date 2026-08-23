@@ -844,6 +844,104 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
   finalizeCurrentQ();
   return normalizeExamQuestions3Parts(questions);
 }
+function isSyntheticPlaceholder(value: unknown): boolean {
+  const text = String(value || "").trim();
+  return !text || /^(?:Phương án|Mệnh đề|Ý|Khẳng định(?: ý)?)\s*[A-Da-d]?$/i.test(text);
+}
+
+/**
+ * Keep text extracted directly from the source document authoritative. AI is
+ * still useful for classification and answer metadata, but it must not replace
+ * exact stems/options/statements with shortened text or placeholders.
+ */
+export function mergeParsedQuestionsWithSource(
+  parsedQuestions: Question[],
+  sourceQuestions: Question[]
+): Question[] {
+  const sourceByPart: Record<1 | 2 | 3, Question[]> = {
+    1: sourceQuestions.filter((q) => q.part === 1),
+    2: sourceQuestions.filter((q) => q.part === 2),
+    3: sourceQuestions.filter((q) => q.part === 3),
+  };
+  const partOffsets: Record<1 | 2 | 3, number> = { 1: 0, 2: 0, 3: 0 };
+
+  return parsedQuestions.map((question) => {
+    const part = question.part === 2 ? 2 : question.part === 3 ? 3 : 1;
+    const source = sourceByPart[part][partOffsets[part]++];
+    if (!source) {
+      return {
+        ...question,
+        needsReview: Boolean(
+          question.needsReview ||
+            (part === 1 && question.options.filter((o) => !isSyntheticPlaceholder(o)).length !== 4) ||
+            (part === 2 && (question.statements || []).filter((s) => !isSyntheticPlaceholder(s.text)).length !== 4)
+        ),
+      };
+    }
+
+    const sourceContent = String(source.content || "").trim();
+    const parsedOptions = (question.options || []).filter((option) => !isSyntheticPlaceholder(option));
+    const sourceOptions = (source.options || []).filter((option) => !isSyntheticPlaceholder(option));
+    const options = part === 1
+      ? (sourceOptions.length >= 2 ? sourceOptions : parsedOptions).slice(0, 4)
+      : [];
+
+    let statements: Question["statements"] = undefined;
+    if (part === 2) {
+      const sourceMap = new Map(
+        (source.statements || [])
+          .filter((statement) => !isSyntheticPlaceholder(statement.text))
+          .map((statement) => [String(statement.id || "").toLowerCase(), statement])
+      );
+      const parsedMap = new Map(
+        (question.statements || [])
+          .map((statement) => [String(statement.id || "").toLowerCase(), statement])
+      );
+
+      statements = ["a", "b", "c", "d"].flatMap((id) => {
+        const sourceStatement = sourceMap.get(id);
+        const parsedStatement = parsedMap.get(id);
+        const parsedText = isSyntheticPlaceholder(parsedStatement?.text) ? "" : parsedStatement?.text;
+        const text = String(sourceStatement?.text || parsedText || "").trim();
+        if (!text || isSyntheticPlaceholder(text)) return [];
+
+        return [{
+          id,
+          label: `${id})`,
+          text,
+          correctValue:
+            typeof parsedStatement?.correctValue === "boolean"
+              ? parsedStatement.correctValue
+              : Boolean(sourceStatement?.correctValue),
+          explanation: parsedStatement?.explanation || sourceStatement?.explanation,
+        }];
+      });
+    }
+
+    const content = sourceContent || String(question.content || "").trim();
+    const isIncomplete =
+      !content ||
+      (part === 1 && options.length !== 4) ||
+      (part === 2 && (statements?.length || 0) !== 4);
+
+    return {
+      ...question,
+      content,
+      options,
+      statements,
+      shortAnswer: part === 3 ? (question.shortAnswer || source.shortAnswer || "") : undefined,
+      passageContent: source.passageContent || question.passageContent,
+      hasTableOrDiagram: Boolean(
+        question.hasTableOrDiagram ||
+          source.hasTableOrDiagram ||
+          content.includes("![") ||
+          content.includes("|")
+      ),
+      needsReview: Boolean(question.needsReview || isIncomplete),
+    };
+  });
+}
+
 
 // ──────────────────────────────────────────────
 // 1. AI Parse Exam Text (ExamShuffler)
@@ -1018,7 +1116,8 @@ ${rawText.slice(0, 50000)}
     // --- RAWTEXT RECOVERY: For Part II questions where AI returned placeholder statements ---
     // Search the original rawText directly for a/b/c/d markers near each question's content.
     // This is the most reliable fallback since rawText contains 100% of the original document.
-    const enriched = formatted.map((q) => {
+    const sourceMerged = mergeParsedQuestionsWithSource(formatted, fallbackParseExam(rawText, subject, grade));
+    const enriched = sourceMerged.map((q) => {
       if (q.part !== 2 || !rawText) return q;
 
       const hasInvalidStatements =

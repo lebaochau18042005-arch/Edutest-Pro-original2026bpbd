@@ -55,6 +55,7 @@ import {
   SAMPLE_EXAM_TEXT,
   SAMPLE_ENGLISH_THPT_TEXT,
   LETTERS,
+  splitRawTextIntoStatements,
 } from "../../utils/examHelpers";
 import { convertDocxHtmlToMarkdown } from "../../utils/docxTableConverter";
 import { extractDocxDeep } from "../../utils/docxDeepExtractor";
@@ -662,18 +663,31 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           } catch (e) {}
 
           const docxHtmlResult = htmlResult ? convertDocxHtmlToMarkdown(htmlResult.value) : { markdown: "", imageMap: {} };
-          const finalImageMap = {
-            ...(docxHtmlResult.imageMap || {}),
-            ...(deepResult?.imageMap || {}),
-          };
+          const deepMarkdown = String(deepResult?.markdown || "").trim();
+          const mammothMarkdown = String(docxHtmlResult.markdown || "").trim();
+          const comparableLength = (value: string) =>
+            value
+              .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+              .replace(/\*\*|\||:?-{3,}:?/g, "")
+              .replace(/\s+/g, " ")
+              .trim().length;
+
+          // Prefer the deep XML result for OMML and exact image positions, but
+          // fall back to Mammoth when it recovered materially more real text
+          // (notably Word text boxes and compatibility-mode documents).
+          const useDeepExtraction =
+            comparableLength(deepMarkdown) >= 30 &&
+            (comparableLength(mammothMarkdown) < 30 ||
+              comparableLength(deepMarkdown) >= comparableLength(mammothMarkdown) * 0.85);
+
+          let textToUse = useDeepExtraction ? deepMarkdown : mammothMarkdown;
+          const finalImageMap = useDeepExtraction
+            ? { ...(docxHtmlResult.imageMap || {}), ...(deepResult?.imageMap || {}) }
+            : { ...(deepResult?.imageMap || {}), ...(docxHtmlResult.imageMap || {}) };
+
           combinedImageMap = { ...combinedImageMap, ...finalImageMap };
 
-          let textToUse = "";
-          if (deepResult && deepResult.markdown && deepResult.markdown.trim().length > 30) {
-            textToUse = deepResult.markdown;
-          } else if (docxHtmlResult.markdown && docxHtmlResult.markdown.trim().length > 0) {
-            textToUse = docxHtmlResult.markdown;
-          } else {
+          if (!textToUse) {
             const raw = await mammoth.extractRawText({ arrayBuffer });
             textToUse = raw.value;
           }
@@ -2278,12 +2292,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                               </div>
                               {(currentQ.statements && currentQ.statements.length > 0
                                 ? currentQ.statements
-                                : [
-                                    { id: "a", label: "a)", text: "Ý a", correctValue: true },
-                                    { id: "b", label: "b)", text: "Ý b", correctValue: false },
-                                    { id: "c", label: "c)", text: "Ý c", correctValue: true },
-                                    { id: "d", label: "d)", text: "Ý d", correctValue: false },
-                                  ]
+                                : []
                               ).map((st) => (
                                 <div
                                   key={st.id}
@@ -2629,14 +2638,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                                 <div className="text-[11px] font-bold text-purple-900 mb-1">
                                   Chọn Đúng hoặc Sai cho cả 4 ý a), b), c), d):
                                 </div>
+                                {(!q.statements || q.statements.length !== 4) && (
+                                  <div className="rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] font-medium text-amber-800">
+                                    Chưa khôi phục đủ 4 mệnh đề nguyên văn từ file gốc. Câu này cần rà soát trước khi phát hành.
+                                  </div>
+                                )}
                                 {(q.statements && q.statements.length > 0
                                   ? q.statements
-                                  : [
-                                      { id: "a", label: "a)", text: "Ý a", correctValue: true },
-                                      { id: "b", label: "b)", text: "Ý b", correctValue: false },
-                                      { id: "c", label: "c)", text: "Ý c", correctValue: true },
-                                      { id: "d", label: "d)", text: "Ý d", correctValue: false },
-                                    ]
+                                  : []
                                 ).map((st) => (
                                   <div
                                     key={st.id}
@@ -3067,12 +3076,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                               </div>
                               {(currentQ.statements && currentQ.statements.length > 0
                                 ? currentQ.statements
-                                : [
-                                    { id: "a", label: "a)", text: "Ý a", correctValue: true },
-                                    { id: "b", label: "b)", text: "Ý b", correctValue: false },
-                                    { id: "c", label: "c)", text: "Ý c", correctValue: true },
-                                    { id: "d", label: "d)", text: "Ý d", correctValue: false },
-                                  ]
+                                : []
                               ).map((st) => {
                                 const currentSimVal = simAnswers[previewStudentQIndex]?.[st.id];
 
@@ -3430,12 +3434,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                                 <div className="space-y-1 pl-3 text-slate-700 pt-1">
                                   {(q.statements && q.statements.length > 0
                                     ? q.statements
-                                    : [
-                                        { id: "a", label: "a)", text: "Ý a", correctValue: true },
-                                        { id: "b", label: "b)", text: "Ý b", correctValue: false },
-                                        { id: "c", label: "c)", text: "Ý c", correctValue: true },
-                                        { id: "d", label: "d)", text: "Ý d", correctValue: false },
-                                      ]
+                                    : []
                                   ).map((st) => (
                                     <div key={st.id} className="flex items-start gap-1.5">
                                       <span className="font-bold">{st.label || `${st.id})`}</span>
@@ -4143,12 +4142,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                           </div>
                           {(q.statements && q.statements.length > 0
                             ? q.statements
-                            : [
-                                { id: "a", label: "a)", text: "Ý a", correctValue: true },
-                                { id: "b", label: "b)", text: "Ý b", correctValue: false },
-                                { id: "c", label: "c)", text: "Ý c", correctValue: true },
-                                { id: "d", label: "d)", text: "Ý d", correctValue: false },
-                              ]
+                            : []
                           ).map((st) => (
                             <div
                               key={st.id}

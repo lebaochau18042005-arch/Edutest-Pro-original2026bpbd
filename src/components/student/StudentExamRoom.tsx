@@ -1086,13 +1086,13 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
                     <span className="text-[11px] text-purple-700 font-mono">1 ý: 0.1đ | 2 ý: 0.25đ | 3 ý: 0.5đ | 4 ý: 1.0đ</span>
                   </div>
 
+                  {(!currentQuestion.statements || currentQuestion.statements.length !== 4) && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                      Câu hỏi này chưa có đủ 4 mệnh đề từ đề gốc. Vui lòng báo giáo viên để kiểm tra lại đề.
+                    </div>
+                  )}
                   <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
-                    {(currentQuestion.statements || [
-                      { id: "a", label: "a)", text: "Mệnh đề a" },
-                      { id: "b", label: "b)", text: "Mệnh đề b" },
-                      { id: "c", label: "c)", text: "Mệnh đề c" },
-                      { id: "d", label: "d)", text: "Mệnh đề d" },
-                    ]).map((stmt: any) => {
+                    {(currentQuestion.statements || []).map((stmt: any) => {
                       const stmtAns = answers[currentQIndex]?.[stmt.id];
                       return (
                         <div key={stmt.id} className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white transition-colors">
