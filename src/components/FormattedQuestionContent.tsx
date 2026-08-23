@@ -9,6 +9,36 @@ interface FormattedQuestionContentProps {
   diagramUrl?: string;
 }
 
+/** Render the small Markdown subset emitted by the DOCX importers safely. */
+const InlineTextMarkup: React.FC<{ value: string }> = ({ value }) => {
+  if (!value) return null;
+  const pattern = /(\*\*\*([^*\n]+)\*\*\*|\*\*([^*\n]+)\*\*|(?<!\*)\*([^*\n]+)\*(?!\*)|`([^`\n]+)`)/g;
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > cursor) nodes.push(value.slice(cursor, match.index));
+    if (match[2] !== undefined) {
+      nodes.push(<strong key={`bold-italic-${match.index}`}><em>{match[2]}</em></strong>);
+    } else if (match[3] !== undefined) {
+      nodes.push(<strong key={`bold-${match.index}`}>{match[3]}</strong>);
+    } else if (match[4] !== undefined) {
+      nodes.push(<em key={`italic-${match.index}`}>{match[4]}</em>);
+    } else if (match[5] !== undefined) {
+      nodes.push(
+        <code key={`code-${match.index}`} className="rounded bg-slate-100 px-1 font-mono text-[0.95em]">
+          {match[5]}
+        </code>
+      );
+    }
+    cursor = pattern.lastIndex;
+  }
+
+  if (cursor < value.length) nodes.push(value.slice(cursor));
+  return <>{nodes}</>;
+};
+
 /**
  * Robust Image component that automatically renders PNG/JPEG/SVG or converts WMF/EMF data URIs on the fly
  */
@@ -177,10 +207,10 @@ export const MathTextRenderer: React.FC<{ text: string }> = ({ text }) => {
 
   return (
     <>
-      <span className="whitespace-pre-line inline-flex flex-wrap items-center gap-1.5 align-middle">
+      <span className="whitespace-pre-line inline-flex flex-wrap items-baseline gap-0 align-middle">
         {renderedSegments.map((part, pIdx) => {
           if (part.type === "text") {
-            return <span key={pIdx}>{part.value}</span>;
+            return <span key={pIdx}><InlineTextMarkup value={part.value} /></span>;
           }
 
           if (part.type === "image") {

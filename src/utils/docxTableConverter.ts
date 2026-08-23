@@ -10,6 +10,10 @@ export interface DocxConversionResult {
   imageMap: Record<string, string>;
 }
 
+function escapeLatexScript(text: string): string {
+  return text.replace(/\\/g, "\\backslash ").replace(/([{}_%&#])/g, "\\$1");
+}
+
 export function convertDocxHtmlToMarkdown(
   html: string,
   existingImageMap?: Record<string, string>
@@ -119,14 +123,14 @@ export function convertDocxHtmlToMarkdown(
     if (tagName === "sup") {
       const inner = Array.from(el.childNodes).map(processNode).join("").trim();
       if (!inner) return "";
-      return inner.length === 1 ? `^${inner}` : `^{${inner}}`;
+      return "$" + "{}^{" + escapeLatexScript(inner) + "}$";
     }
 
     // Subscripts (Math indices, e.g. x_1, u_n, log_2)
     if (tagName === "sub") {
       const inner = Array.from(el.childNodes).map(processNode).join("").trim();
       if (!inner) return "";
-      return inner.length === 1 ? `_${inner}` : `_{${inner}}`;
+      return "$" + "{}_{" + escapeLatexScript(inner) + "}$";
     }
 
     // MathML or math tags

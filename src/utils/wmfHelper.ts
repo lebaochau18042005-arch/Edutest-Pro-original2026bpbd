@@ -52,9 +52,8 @@ function cropCanvasToVisibleContent(canvas: HTMLCanvasElement): string | null {
       }
     }
 
-    if (maxX < minX || maxY < minY) {
-      return canvas.toDataURL("image/png");
-    }
+    // A valid PNG can still be completely blank. Let another renderer try.
+    if (maxX < minX || maxY < minY) return null;
 
     const margin = Math.max(4, Math.round(Math.min(canvas.width, canvas.height) * 0.01));
     const sourceX = Math.max(0, minX - margin);
@@ -80,7 +79,7 @@ function cropCanvasToVisibleContent(canvas: HTMLCanvasElement): string | null {
   }
 }
 
-async function trimConvertedPng(dataUrl: string): Promise<string> {
+async function trimConvertedPng(dataUrl: string): Promise<string | null> {
   if (typeof document === "undefined" || typeof Image === "undefined") return dataUrl;
   return new Promise((resolve) => {
     const image = new Image();
@@ -90,18 +89,75 @@ async function trimConvertedPng(dataUrl: string): Promise<string> {
         canvas.width = image.naturalWidth || image.width;
         canvas.height = image.naturalHeight || image.height;
         const ctx = canvas.getContext("2d");
-        if (!ctx) return resolve(dataUrl);
+        if (!ctx) return resolve(null);
         ctx.drawImage(image, 0, 0);
-        resolve(cropCanvasToVisibleContent(canvas) || dataUrl);
+        resolve(cropCanvasToVisibleContent(canvas));
       } catch {
-        resolve(dataUrl);
+        resolve(null);
       }
     };
-    image.onerror = () => resolve(dataUrl);
+    image.onerror = () => resolve(null);
     image.src = dataUrl;
   });
 }
 
+type MetafileKind = "wmf" | "emf" | "unknown";
+
+/** Detect the actual binary format instead of trying WMF and EMF blindly. */
+export function detectMetafileKind(data: Uint8Array | ArrayBuffer): MetafileKind {
+  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+  if (u8.length >= 44) {
+    const isEmf =
+      u8[0] === 0x01 && u8[1] === 0x00 && u8[2] === 0x00 && u8[3] === 0x00 &&
+      u8[40] === 0x20 && u8[41] === 0x45 && u8[42] === 0x4d && u8[43] === 0x46;
+    if (isEmf) return "emf";
+  }
+
+  if (
+    u8.length >= 22 &&
+    u8[0] === 0xd7 && u8[1] === 0xcd && u8[2] === 0xc6 && u8[3] === 0x9a
+  ) {
+    return "wmf";
+  }
+
+  // Standard (non-placeable) WMF: type 1/2, 9-word header, version 0x0100/0x0300.
+  if (u8.length >= 18) {
+    const type = u8[0] | (u8[1] << 8);
+    const headerWords = u8[2] | (u8[3] << 8);
+    const version = u8[4] | (u8[5] << 8);
+    if ((type === 1 || type === 2) && headerWords === 9 && (version === 0x0100 || version === 0x0300)) {
+      return "wmf";
+    }
+  }
+
+  return "unknown";
+}
+
+/**
+ * The SheetJS-derived renderer handles MathType's legacy WMF coordinate
+ * records more reliably. A fresh canvas is required for each header variant.
+ */
+function renderLegacyWmfToPng(u8: Uint8Array): string | null {
+  if (typeof document === "undefined") return null;
+
+  const stripped = stripAldusHeader(u8);
+  const attempts = stripped.byteLength === u8.byteLength ? [u8] : [stripped, u8];
+  for (const candidate of attempts) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 600;
+    try {
+      WMF.draw_canvas(candidate, canvas);
+      if (canvas.width > 0 && canvas.height > 0) {
+        const png = cropCanvasToVisibleContent(canvas);
+        if (png && png.length > 200) return png;
+      }
+    } catch {
+      // Try the next header variant.
+    }
+  }
+  return null;
+}
 
 /**
  * Asynchronously converts a WMF or EMF ArrayBuffer / Uint8Array to a high-definition PNG Data URI.
@@ -119,72 +175,50 @@ export async function convertMetafileBufferToPng(
     if (!u8 || u8.length === 0) return null;
 
     const buffer = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+    const kind = detectMetafileKind(u8);
 
-    // 1. Try emf-converter as WMF with bounded size
-    try {
-      const pngUrl = await convertWmfToDataUrl(buffer, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
-      if (pngUrl && pngUrl.startsWith("data:image/png") && pngUrl.length > 200) {
-        return await trimConvertedPng(pngUrl);
-      }
-    } catch (err1) {
-      // Continue to next attempts
+    // MathType and Equation Editor usually store a legacy WMF preview. This
+    // renderer honors their coordinate records and avoids clipped glyph arcs.
+    if (kind !== "emf") {
+      const legacyPng = renderLegacyWmfToPng(u8);
+      if (legacyPng) return legacyPng;
     }
 
-    // 1b. Try stripped buffer with emf-converter
-    try {
-      const stripped = stripAldusHeader(u8);
-      const strippedBuf = stripped.buffer.slice(stripped.byteOffset, stripped.byteOffset + stripped.byteLength);
-      const pngUrl = await convertWmfToDataUrl(strippedBuf, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
-      if (pngUrl && pngUrl.startsWith("data:image/png") && pngUrl.length > 200) {
-        return await trimConvertedPng(pngUrl);
-      }
-    } catch (err1b) {
-      // Continue
-    }
-
-    // 2. Try emf-converter as EMF with bounded size
-    try {
-      const emfUrl = await convertEmfToDataUrl(buffer, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
-      if (emfUrl && emfUrl.startsWith("data:image/png") && emfUrl.length > 200) {
-        return await trimConvertedPng(emfUrl);
-      }
-    } catch (err2) {
-      // Continue
-    }
-
-    // 2b. Try stripped buffer as EMF
-    try {
-      const stripped = stripAldusHeader(u8);
-      const strippedBuf = stripped.buffer.slice(stripped.byteOffset, stripped.byteOffset + stripped.byteLength);
-      const emfUrl = await convertEmfToDataUrl(strippedBuf, { maxWidth: 1200, maxHeight: 1000, dpiScale: 2 });
-      if (emfUrl && emfUrl.startsWith("data:image/png") && emfUrl.length > 200) {
-        return await trimConvertedPng(emfUrl);
-      }
-    } catch (err2b) {
-      // Continue
-    }
-
-    // 3. Fallback: SheetJS WMF with Aldus header stripping
     const stripped = stripAldusHeader(u8);
-    const canvas = document.createElement("canvas");
-    canvas.width = 800;
-    canvas.height = 600;
-    try {
-      WMF.draw_canvas(stripped, canvas);
-      if (canvas.width > 0 && canvas.height > 0) {
-        const url = cropCanvasToVisibleContent(canvas) || canvas.toDataURL("image/png");
-        if (url && url.length > 200) return url;
-      }
-    } catch (wmfErr) {
-      // Try raw buffer without stripping
-      try {
-        WMF.draw_canvas(u8, canvas);
-        if (canvas.width > 0 && canvas.height > 0) {
-          const url = cropCanvasToVisibleContent(canvas) || canvas.toDataURL("image/png");
-          if (url && url.length > 200) return url;
+    const variants = stripped.byteLength === u8.byteLength ? [u8] : [u8, stripped];
+
+    if (kind !== "emf") {
+      for (const candidate of variants) {
+        try {
+          const candidateBuffer = candidate.buffer.slice(candidate.byteOffset, candidate.byteOffset + candidate.byteLength);
+          const pngUrl = await convertWmfToDataUrl(candidateBuffer, {
+            maxWidth: 1200,
+            maxHeight: 1000,
+            dpiScale: 2,
+          });
+          if (pngUrl?.startsWith("data:image/png") && pngUrl.length > 200) {
+            const trimmed = await trimConvertedPng(pngUrl);
+            if (trimmed) return trimmed;
+          }
+        } catch {
+          // Continue with the next header variant.
         }
-      } catch (e3) {
-        // Fallback failed
+      }
+    }
+
+    if (kind !== "wmf") {
+      try {
+        const emfUrl = await convertEmfToDataUrl(buffer, {
+          maxWidth: 1200,
+          maxHeight: 1000,
+          dpiScale: 2,
+        });
+        if (emfUrl?.startsWith("data:image/png") && emfUrl.length > 200) {
+          const trimmed = await trimConvertedPng(emfUrl);
+          if (trimmed) return trimmed;
+        }
+      } catch {
+        // Invalid/unsupported EMF.
       }
     }
   } catch (e) {
@@ -202,29 +236,8 @@ export function convertWmfBufferToPng(wmfData: Uint8Array | ArrayBuffer): string
     if (typeof document === "undefined") return null;
     const u8 = wmfData instanceof Uint8Array ? wmfData : new Uint8Array(wmfData);
     if (!u8 || u8.length === 0) return null;
-
-    const stripped = stripAldusHeader(u8);
-    const canvas = document.createElement("canvas");
-    canvas.width = 800;
-    canvas.height = 600;
-
-    try {
-      WMF.draw_canvas(stripped, canvas);
-      if (canvas.width > 0 && canvas.height > 0) {
-        const url = cropCanvasToVisibleContent(canvas) || canvas.toDataURL("image/png");
-        if (url && url.length > 200) return url;
-      }
-    } catch (e1) {
-      try {
-        WMF.draw_canvas(u8, canvas);
-        if (canvas.width > 0 && canvas.height > 0) {
-          const url = cropCanvasToVisibleContent(canvas) || canvas.toDataURL("image/png");
-          if (url && url.length > 200) return url;
-        }
-      } catch (e2) {
-        // Fallback failed
-      }
-    }
+    if (detectMetafileKind(u8) === "emf") return null;
+    return renderLegacyWmfToPng(u8);
   } catch (e) {
     console.warn("WMF to Canvas conversion note:", e);
   }

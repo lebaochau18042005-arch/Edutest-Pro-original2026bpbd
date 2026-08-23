@@ -452,10 +452,6 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
           .replace(/^(?:vì|do|bởi vì)\s+/i, "")
           .trim();
 
-        if (cleanText) {
-          cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
-        }
-
         stmts.push({
           id: current.letter,
           label: `${current.letter})`,
@@ -976,7 +972,11 @@ export async function clientParseExam(payload: {
 Hãy đọc kỹ toàn bộ văn bản đề thi dưới đây và trích xuất TOÀN BỘ CÁC CÂU HỎI VÀ ĐỦ 100% CÁC LỆNH HỎI, KHÔNG ĐƯỢC BỎ SÓT NỘI DUNG NÀO!
 
 QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, ĐỒ THỊ & BẢNG SỐ LIỆU:
-1. CÔNG THỨC TOÁN HỌC & KHOA HỌC: Tất cả công thức toán, phân số, căn thức, tích phân, đạo hàm, véc-tơ PHẢI ĐƯỢC BIỂU DIỄN BẰNG LATEX kẹp giữa $...$ hoặc $$...$$.
+1. CÔNG THỨC TOÁN HỌC, VẬT LÝ, HÓA HỌC & SINH HỌC:
+   - Giữ NGUYÊN từng chuỗi LaTeX đã có, kể cả cặp dấu $...$ hoặc $$...$$; không đổi thành ảnh hoặc văn bản thường.
+   - Công thức mới phải dùng LaTeX: phân số, căn, tích phân, đạo hàm, véc-tơ, chỉ số/đơn vị vật lý, công thức phân tử, điện tích ion, đồng vị và mũi tên phản ứng.
+   - Bảo toàn chính xác chữ hoa/thường khoa học như f(x), pH, DNA, mRNA và tên gene/protein.
+   - Ví dụ định dạng: $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$, $A \\rightleftharpoons B$.
 2. HÌNH VẼ, BIỂU ĐỒ: Giữ nguyên các token hình ảnh Markdown dạng ![Alt](url) hoặc __IMG_TOKEN_X__ trong "content".
 3. BẢNG SỐ LIỆU / BẢNG BIẾN THIÊN / BẢNG THỐNG KÊ / BẢNG PHÂN BỐ TẦN SỐ (BẮT BUỘC):
    - BẢNG SỐ LIỆU PHẢI ĐƯỢC GIỮ NGUYÊN 100% Ở ĐỊNH DẠNG BẢNG MARKDOWN CHUẨN:
@@ -1359,7 +1359,10 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC:
    | Giá trị 1 | Giá trị 2 | Giá trị 3 |
    TUYỆT ĐỐI KHÔNG viết bảng thành dạng đoạn văn xuôi!
 5. HÌNH VẼ / BIỂU ĐỒ / ĐỒ THỊ: Nếu câu hỏi có hình vẽ, đồ thị hàm số, biểu đồ cột/tròn, hình khối không gian, hãy đặt "hasTableOrDiagram": true.
-6. CÔNG THỨC: Giữ nguyên LaTeX chuẩn ($...$ hoặc $$...$$).`;
+6. CÔNG THỨC TOÁN/LÝ/HÓA/SINH: Dùng LaTeX kẹp trong $...$ hoặc $$...$$ cho phân số, véc-tơ, chỉ số, đơn vị, công thức phân tử, ion, đồng vị và phản ứng hóa học.
+   - Không làm mất chỉ số trên/dưới; ví dụ $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$.
+   - Bảo toàn chính xác chữ hoa/thường như f(x), pH, DNA, mRNA, tên gene và protein.
+   - Không thay công thức bằng ký tự đại diện hoặc ảnh trắng.`;
 
     const contents = [
       {

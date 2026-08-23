@@ -98,6 +98,41 @@ function findChildByTag(node: Element, tagName: string): Element | null {
   return null;
 }
 
+const OMML_SYMBOL_MAP: Record<string, string> = {
+  "−": "-",
+  "×": "\\times ",
+  "÷": "\\div ",
+  "·": "\\cdot ",
+  "±": "\\pm ",
+  "∓": "\\mp ",
+  "≤": "\\le ",
+  "≥": "\\ge ",
+  "≠": "\\ne ",
+  "≈": "\\approx ",
+  "∞": "\\infty ",
+  "∈": "\\in ",
+  "∉": "\\notin ",
+  "∪": "\\cup ",
+  "∩": "\\cap ",
+  "∅": "\\varnothing ",
+  "→": "\\to ",
+  "←": "\\leftarrow ",
+  "↔": "\\leftrightarrow ",
+  "⇒": "\\Rightarrow ",
+  "⇔": "\\Leftrightarrow ",
+  "⇌": "\\rightleftharpoons ",
+  "°": "^{\\circ}",
+  "℃": "^{\\circ}\\mathrm{C}",
+};
+
+function normalizeOmmlText(text: string): string {
+  return text.replace(/[−×÷·±∓≤≥≠≈∞∈∉∪∩∅→←↔⇒⇔⇌°℃]/g, (char) => OMML_SYMBOL_MAP[char] || char);
+}
+
+function escapeLatexScript(text: string): string {
+  return text.replace(/\\/g, "\\backslash ").replace(/([{}_%&#])/g, "\\$1");
+}
+
 /**
  * Convert OMML (Office Math Markup Language) XML node to LaTeX
  */
@@ -106,7 +141,7 @@ function ommlNodeToLatex(node: Element): string {
 
   // Text run inside math
   if (tag === "t") {
-    return node.textContent || "";
+    return normalizeOmmlText(node.textContent || "");
   }
 
   // Fraction: <m:f> <m:num>...</m:num> <m:den>...</m:den> </m:f>
@@ -275,10 +310,11 @@ function ommlNodeToLatex(node: Element): string {
     const eStr = e ? ommlChildrenToLatex(e).trim() : "";
 
     const standardFuncs = ["sin", "cos", "tan", "cot", "ln", "log", "exp", "lim", "max", "min", "arcsin", "arccos", "arctan"];
-    if (standardFuncs.includes(nameStr.toLowerCase())) {
-      return `\\${nameStr.toLowerCase()}(${eStr})`;
+    const normalizedName = nameStr.toLowerCase();
+    if (standardFuncs.includes(normalizedName)) {
+      return `\\${normalizedName} ${eStr}`;
     }
-    return `${nameStr}(${eStr})`;
+    return `${nameStr} ${eStr}`;
   }
 
   // Limit Lower / Limit Upper: <m:limLow>, <m:limUpp>
@@ -287,7 +323,9 @@ function ommlNodeToLatex(node: Element): string {
     const lim = findChildByTag(node, "lim");
     const eStr = e ? ommlChildrenToLatex(e).trim() : "";
     const limStr = lim ? ommlChildrenToLatex(lim).trim() : "";
-    return `\\lim_{${limStr}} ${eStr}`;
+    const base = /^(lim|max|min)$/i.test(eStr) ? `\\${eStr.toLowerCase()}` : `{${eStr}}`;
+    const script = tag === "limlow" ? "_" : "^";
+    return `${base}${script}{${limStr}}`;
   }
 
   // Equation Array / System of Equations: <m:eqArr>
@@ -295,7 +333,7 @@ function ommlNodeToLatex(node: Element): string {
     const eChildren = Array.from(node.children).filter((c) => getNodeTag(c) === "e");
     const equations = eChildren.map((e) => ommlChildrenToLatex(e).trim()).filter(Boolean);
     if (equations.length > 0) {
-      return `\\begin{cases} ${equations.join(" \\\\ ")} \\end{cases}`;
+      return `\\begin{aligned} ${equations.join(" \\\\ ")} \\end{aligned}`;
     }
     return "";
   }
@@ -311,6 +349,12 @@ function ommlNodeToLatex(node: Element): string {
       return `\\begin{pmatrix} ${matrixData.join(" \\\\ ")} \\end{pmatrix}`;
     }
     return "";
+  }
+
+  // Phantom is used for spacing/alignment; retain its semantic contents.
+  if (tag === "phant") {
+    const e = findChildByTag(node, "e");
+    return e ? ommlChildrenToLatex(e).trim() : "";
   }
 
   // Box / BorderBox: <m:box>, <m:borderBox>
@@ -569,10 +613,10 @@ export async function extractDocxDeep(
 
         // Handle superscripts and subscripts
         if (vertAlign === "superscript") {
-          return text.length === 1 ? `^${text}` : `^{${text}}`;
+          return "$" + "{}^{" + escapeLatexScript(text) + "}$";
         }
         if (vertAlign === "subscript") {
-          return text.length === 1 ? `_${text}` : `_{${text}}`;
+          return "$" + "{}_{" + escapeLatexScript(text) + "}$";
         }
         if (isBold && isItalic) return `***${text}***`;
         if (isBold) return `**${text}**`;

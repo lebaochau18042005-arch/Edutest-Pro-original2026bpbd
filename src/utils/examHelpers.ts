@@ -625,10 +625,6 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
           .replace(/^(?:vì|do|bởi vì)\s+/i, "")
           .trim();
 
-        if (cleanText) {
-          cleanText = cleanText.charAt(0).toUpperCase() + cleanText.slice(1);
-        }
-
         stmts.push({
           id: current.letter,
           label: `${current.letter})`,
