@@ -73,7 +73,9 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
       const port = typeof window !== "undefined" ? window.location.port || 3000 : 3000;
       targetOrigin = `http://${lanIp}:${port}`;
     } else {
-      targetOrigin = "https://edutest-pro-original2026bpbd.vercel.app";
+      targetOrigin = typeof window !== "undefined" && window.location.origin && !window.location.origin.includes("localhost")
+        ? window.location.origin
+        : "https://edutest-pro-original2026bpbd.vercel.app";
     }
 
     buildExamShareLinks(exam, targetOrigin).then((res) => {
@@ -88,7 +90,47 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
     };
   }, [isOpen, exam, networkMode, lanIp]);
 
-  if (!isOpen || !exam) return null;
+  if (!isOpen) return null;
+
+  if (!exam) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+        <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl border border-slate-200">
+          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto text-xl font-bold">
+            ⚠️
+          </div>
+          <h3 className="text-base font-bold text-slate-900">Chưa có đề thi được xuất bản</h3>
+          <p className="text-xs text-slate-600">
+            Vui lòng tải câu hỏi hoặc bấm nút <strong>"Trộn Đề & Xuất Bản Ngay"</strong> để hệ thống tạo các mã đề trước khi tạo mã QR phát cho học sinh.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+          >
+            Đã Hiểu & Quay Lại
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleOpenExamInNewTab = () => {
+    const linkToOpen = links.directLink || links.simpleCodeLink;
+    if (linkToOpen) {
+      window.open(linkToOpen, "_blank");
+    } else if (onOpenAsStudent && exam) {
+      onOpenAsStudent(exam.id, exam.accessCode);
+      onClose();
+    }
+  };
+
+  const handleOpenInThisTab = () => {
+    if (onOpenAsStudent && exam) {
+      onOpenAsStudent(exam.id, exam.accessCode);
+      onClose();
+    }
+  };
 
   const handleCopyLink = () => {
     const linkToCopy = links.directLink || links.simpleCodeLink;
@@ -165,20 +207,42 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
           {/* Big QR Code Card */}
           <div className="bg-white p-6 rounded-3xl shadow-2xl border-4 border-emerald-500/30 flex flex-col items-center">
             {links.qrCodeUrl ? (
-              <img
-                src={links.qrCodeUrl}
-                alt="Mã QR phòng thi"
-                className="w-72 h-72 sm:w-96 sm:h-96 object-contain rounded-xl"
-              />
+              <div
+                onClick={handleOpenExamInNewTab}
+                className="relative group cursor-pointer overflow-hidden rounded-2xl border-2 border-emerald-300 hover:border-emerald-500 transition-all hover:shadow-xl active:scale-95"
+                title="Bấm trực tiếp vào mã QR để mở bài thi thử nghiệm trong tab mới"
+              >
+                <img
+                  src={links.qrCodeUrl}
+                  alt="Mã QR phòng thi"
+                  className="w-72 h-72 sm:w-96 sm:h-96 object-contain rounded-xl transition-transform group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-0 bg-emerald-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white p-4 text-center">
+                  <ExternalLink className="w-10 h-10 text-emerald-300 mb-2 animate-bounce" />
+                  <span className="font-black text-lg">BẤM VÀO ĐÂY ĐỂ VÀO THI</span>
+                  <span className="text-xs text-emerald-200 mt-1">Mở bài thi trực tiếp trong tab mới</span>
+                </div>
+              </div>
             ) : (
               <div className="w-72 h-72 sm:w-96 sm:h-96 flex items-center justify-center text-slate-400">
                 Đang tạo mã QR...
               </div>
             )}
-            <div className="mt-4 text-center space-y-1">
-              <span className="text-xs font-mono font-bold bg-slate-100 text-slate-900 px-3 py-1 rounded-full border border-slate-300 inline-block">
-                Mã Phòng: <strong className="text-emerald-700">{exam.accessCode}</strong>
-              </span>
+            <div className="mt-4 text-center space-y-2.5 w-full">
+              <button
+                type="button"
+                onClick={handleOpenExamInNewTab}
+                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all active:scale-95"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>👆 Bấm Vào Mã QR Hoặc Nút Này Để Mở Bài Thi (Tab Mới)</span>
+              </button>
+
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-xs font-mono font-bold bg-slate-100 text-slate-900 px-3 py-1 rounded-full border border-slate-300 inline-block">
+                  Mã Phòng: <strong className="text-emerald-700">{exam.accessCode}</strong>
+                </span>
+              </div>
               <p className="text-[11px] text-slate-500">
                 {networkMode === "wifi" ? `Mạng nội bộ Wi-Fi (IP: ${lanIp})` : "Web trực tuyến Vercel"}
               </p>
@@ -359,49 +423,86 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
 
         {/* QR Code Presentation Area */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-5 p-4 rounded-2xl bg-gradient-to-b from-slate-50 to-emerald-50/40 border border-emerald-100">
-          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm shrink-0">
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm shrink-0 flex flex-col items-center">
             {isLoadingLinks ? (
               <div className="w-48 h-48 flex items-center justify-center text-xs text-slate-400">
                 Đang chuẩn bị mã QR...
               </div>
             ) : (
-              <img
-                src={links.qrCodeUrl}
-                alt="Mã QR phòng thi"
-                className="w-48 h-48 object-contain rounded-lg"
-              />
+              <div
+                onClick={handleOpenExamInNewTab}
+                className="relative group cursor-pointer overflow-hidden rounded-xl border-2 border-emerald-300 hover:border-emerald-500 transition-all hover:shadow-xl active:scale-95"
+                title="Bấm vào mã QR để mở bài thi thử nghiệm ngay (Tab mới)"
+              >
+                <img
+                  src={links.qrCodeUrl}
+                  alt="Mã QR phòng thi"
+                  className="w-48 h-48 object-contain rounded-lg transition-transform group-hover:scale-[1.03]"
+                />
+                <div className="absolute inset-0 bg-emerald-950/75 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex flex-col items-center justify-center text-white p-2 text-center">
+                  <ExternalLink className="w-7 h-7 text-emerald-300 mb-1 animate-bounce" />
+                  <span className="font-extrabold text-xs text-white">BẤM VÀO ĐÂY</span>
+                  <span className="text-[10px] text-emerald-200">Mở thi tab mới</span>
+                </div>
+              </div>
             )}
+            <span className="mt-2 text-[10px] font-bold text-emerald-700 flex items-center gap-1">
+              👆 Bấm vào mã QR để mở thi
+            </span>
           </div>
 
           <div className="space-y-3 text-center sm:text-left flex-1">
             <div>
               <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                Mã QR Quét Vào Thi Ngay
+                Mã QR Quét & Bấm Vào Thi Ngay
               </h4>
               <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                Chiếu lên máy chiếu lớp học hoặc in ra giấy. Học sinh mở Camera/Zalo quét là làm bài luôn.
+                Thầy/Cô có thể <strong>bấm trực tiếp vào ảnh mã QR</strong> hoặc bấm nút màu xanh dưới đây để mở bài thi kiểm tra ngay.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+            <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => setIsFullscreenProjector(true)}
-                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                onClick={handleOpenExamInNewTab}
+                className="w-full px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer active:scale-95"
               >
-                <Maximize2 className="w-3.5 h-3.5" />
-                <span>Chiếu Máy Chiếu (Toàn Màn Hình)</span>
+                <ExternalLink className="w-4 h-4" />
+                <span>🚀 Bấm Để Mở Bài Thi Ngay (Tab Mới)</span>
               </button>
 
-              <button
-                type="button"
-                onClick={handleDownloadQr}
-                className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-                title="Tải ảnh mã QR về máy"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Tải Ảnh QR</span>
-              </button>
+              <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                {onOpenAsStudent && (
+                  <button
+                    type="button"
+                    onClick={handleOpenInThisTab}
+                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Mở bài thi trực tiếp trên trang này với vai trò học sinh"
+                  >
+                    <Smartphone className="w-3.5 h-3.5" />
+                    <span>Mở Trên Tab Này</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreenProjector(true)}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>Chiếu Máy Chiếu</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadQr}
+                  className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Tải ảnh mã QR về máy"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Tải Ảnh QR</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -480,9 +480,13 @@ export default function App() {
     };
 
     handleUrlExamEntry();
+    window.addEventListener("popstate", handleUrlExamEntry);
     window.addEventListener("hashchange", handleUrlExamEntry);
-    return () => window.removeEventListener("hashchange", handleUrlExamEntry);
-  }, [activeExams.length]);
+    return () => {
+      window.removeEventListener("popstate", handleUrlExamEntry);
+      window.removeEventListener("hashchange", handleUrlExamEntry);
+    };
+  }, []);
 
   // Load from backend on start
   const refreshData = async () => {

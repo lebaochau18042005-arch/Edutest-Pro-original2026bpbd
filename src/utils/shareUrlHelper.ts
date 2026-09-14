@@ -17,7 +17,8 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
     // Strip redundant large data if present to keep URL ultra lightweight
     const sanitizedQuestions = pkg.originalQuestions.map((q) => {
       const copy = { ...q };
-      // Keep essential question fields
+      // Keep essential question fields, omit heavy base64 data to guarantee fast QR scanning
+      const isShortUrl = copy.diagramUrl && (copy.diagramUrl.startsWith("http://") || copy.diagramUrl.startsWith("https://") || copy.diagramUrl.length < 500);
       return {
         id: copy.id,
         content: copy.content,
@@ -27,14 +28,14 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
         questionType: copy.questionType || "multiple_choice",
         statements: copy.statements,
         shortAnswer: copy.shortAnswer,
-        explanation: copy.explanation,
+        explanation: copy.explanation && copy.explanation.length > 300 ? copy.explanation.slice(0, 300) : copy.explanation,
         level: copy.level,
         chapter: copy.chapter,
         subject: copy.subject,
         grade: copy.grade,
         passageContent: copy.passageContent,
         groupId: copy.groupId,
-        diagramUrl: copy.diagramUrl && copy.diagramUrl.length < 5000 ? copy.diagramUrl : undefined,
+        diagramUrl: isShortUrl ? copy.diagramUrl : undefined,
       };
     });
 
@@ -187,13 +188,13 @@ export async function buildExamShareLinks(
   let isSelfContained = false;
 
   // Use query param ?exam=... which QR scanners & Zalo open 100% reliably
-  if (compressed && compressed.length < 3500) {
+  if (compressed && compressed.length < 3800) {
     directLink = `${origin}/?exam=${compressed}`;
     isSelfContained = true;
   }
 
   // Use qrserver API for crisp 400x400 QR code
-  const targetForQr = directLink.length < 1800 ? directLink : simpleCodeLink;
+  const targetForQr = directLink.length < 2800 ? directLink : simpleCodeLink;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=15&format=png&data=${encodeURIComponent(targetForQr)}`;
 
   return {
