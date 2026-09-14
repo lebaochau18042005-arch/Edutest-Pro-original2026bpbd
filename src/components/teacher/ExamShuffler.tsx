@@ -42,6 +42,7 @@ import {
   Gamepad2,
   FileDown,
   FilePlus,
+  QrCode,
 } from "lucide-react";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
@@ -66,6 +67,7 @@ import { exportToMoodleXMLFile, exportToGIFTFile } from "../../utils/moodleGiftE
 import { openPresentationInNewTab, exportPresentationHTMLFile } from "../../utils/pptxPresentationExporter";
 import { openPrintableOMRSheet } from "../../utils/omrSheetGenerator";
 import { LiveQuizModal } from "../game/LiveQuizModal";
+import { InstantShareModal } from "./InstantShareModal";
 
 // Helper: Extract huge Base64 strings from Markdown text to prevent payload bloat or AI token truncation
 function sanitizeMarkdownImages(
@@ -261,6 +263,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   const [showMissingAnswersPrompt, setShowMissingAnswersPrompt] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [isLiveQuizModalOpen, setIsLiveQuizModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   // View modes: list or student simulation
   const [extractedViewMode, setExtractedViewMode] = useState<"list" | "student">("list");
@@ -1007,6 +1010,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
     setPublishedExam(pkg);
     onPublishExam(pkg);
+    setIsShareModalOpen(true);
+
+    setTimeout(() => {
+      const el = document.getElementById("generated-variants-section");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 150);
   };
 
   // Print single exam variant
@@ -1445,6 +1456,18 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                   className="w-16 text-xs px-2 py-1 border border-slate-300 rounded font-bold text-center"
                 />
               </div>
+            </div>
+
+            {/* Direct CTA button to execute shuffle */}
+            <div className="pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleExecuteShuffle}
+                className="w-full py-3 px-4 text-xs font-black text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-700 hover:to-purple-800 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 active:scale-95 transition-all cursor-pointer"
+              >
+                {config.isOriginalKept ? <FileText className="w-4 h-4" /> : <Shuffle className="w-4 h-4" />}
+                <span>{config.isOriginalKept ? "Tạo Đề Gốc Cho Học Sinh" : "Trộn Đề & Xuất Bản Cho Học Sinh Làm Bài"}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1950,6 +1973,17 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                       <span>Xem Như Học Sinh</span>
                     </button>
                   </div>
+
+                  {/* Primary CTA: Trộn Đề & Phát Cho Học Sinh Ngay */}
+                  <button
+                    type="button"
+                    onClick={handleExecuteShuffle}
+                    className="px-4 py-1.5 text-xs font-black text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-700 hover:to-purple-800 rounded-lg flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/25 active:scale-95 cursor-pointer ring-2 ring-indigo-400/30"
+                    title="Bấm vào đây để trộn mã đề và đưa vào phòng thi cho học sinh làm bài ngay"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>{config.isOriginalKept ? "Tạo Đề Gốc Cho Học Sinh" : "Trộn Đề & Phát Cho Học Sinh"}</span>
+                  </button>
 
                   {/* Save All to Question Bank Button */}
                   <button
@@ -2716,7 +2750,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
           {/* Generated Variants & Student Room Live View (After Creation) */}
           {generatedVariants.length > 0 && (
-            <div className="bg-white rounded-2xl border border-indigo-200 p-5 shadow-sm space-y-4">
+            <div id="generated-variants-section" className="bg-white rounded-2xl border border-indigo-200 p-5 shadow-sm space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-100 pb-4">
                 <div>
                   <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -2730,6 +2764,17 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  {/* Instant 1-Click Share & QR Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsShareModalOpen(true)}
+                    className="px-3.5 py-1.5 text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 rounded-lg flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer ring-2 ring-emerald-400/30"
+                    title="Mở Mã QR và Link 1-Chạm cho học sinh quét vào thi ngay"
+                  >
+                    <QrCode className="w-3.5 h-3.5 text-emerald-200" />
+                    <span>📱 Mã QR & Link 1-Chạm</span>
+                  </button>
+
                   {/* Live Quiz Arena */}
                   <button
                     type="button"
@@ -4237,6 +4282,18 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         onClose={() => setIsLiveQuizModalOpen(false)}
         questions={selectedQuestions.length > 0 ? selectedQuestions : []}
         config={config}
+      />
+
+      {/* 1-Click Instant Share & QR Code Modal */}
+      <InstantShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        exam={publishedExam}
+        onOpenAsStudent={(examId, code) => {
+          if (onOpenStudentExam && publishedExam) {
+            onOpenStudentExam(publishedExam.id, code);
+          }
+        }}
       />
     </div>
   );

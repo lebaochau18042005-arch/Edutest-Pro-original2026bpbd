@@ -103,6 +103,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
   }, [currentStudentTab]);
 
+  // Sync prefillExamId when changed (from 1-Click Link / QR Code)
+  useEffect(() => {
+    if (prefillExamId) {
+      setAccessCodeInput(prefillExamId);
+      const matched = exams.find(
+        (e) => e.accessCode === prefillExamId || e.id === prefillExamId
+      );
+      if (matched) {
+        setActiveExam(matched);
+      }
+    }
+  }, [prefillExamId, exams]);
+
+  // Sync prefillExamCode when changed
+  useEffect(() => {
+    if (prefillExamCode) {
+      setSelectedVariantCode(prefillExamCode);
+    }
+  }, [prefillExamCode]);
+
   // Network listener & LocalStorage auto-save for profile
   useEffect(() => {
     const handleOnline = () => {
@@ -618,6 +638,39 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </span>
               </div>
 
+              {/* Direct Exam Access Banner (from QR / 1-Click Link) */}
+              {(() => {
+                const targetExam = exams.find(
+                  (e) => e.accessCode === accessCodeInput || e.id === accessCodeInput
+                );
+                if (!targetExam) return null;
+                return (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-300/60 flex items-start gap-3 animate-fade-in">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-700 text-white flex items-center justify-center shrink-0 shadow-md">
+                      <Sparkles className="w-5 h-5 text-amber-300" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          🎯 ĐÃ NHẬN ĐỀ THI TRỰC TUYẾN
+                        </span>
+                        <span className="text-[11px] font-mono font-bold text-slate-500">
+                          MÃ PHÒNG: {targetExam.accessCode}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-sm text-slate-900 mt-1 truncate">
+                        {targetExam.title}
+                      </h4>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Thời gian: <strong>{targetExam.config.duration} phút</strong> •{" "}
+                        {targetExam.originalQuestions.length} câu hỏi • Tự động gán{" "}
+                        <strong className="text-emerald-700 font-mono font-bold">Mã đề {selectedVariantCode}</strong> (Chống nhìn bài)
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {entryError && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-semibold">
                   {entryError}
@@ -700,17 +753,24 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Mã đề trắc nghiệm (101 - 104)
+                    Mã đề trắc nghiệm
                   </label>
                   <select
                     value={selectedVariantCode}
                     onChange={(e) => setSelectedVariantCode(e.target.value)}
                     className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-medium bg-white"
                   >
-                    <option value="101">Mã đề 101</option>
-                    <option value="102">Mã đề 102</option>
-                    <option value="103">Mã đề 103</option>
-                    <option value="104">Mã đề 104</option>
+                    {(() => {
+                      const matched = exams.find(
+                        (e) => e.accessCode === accessCodeInput || e.id === accessCodeInput
+                      );
+                      const codes = matched?.variants?.map((v) => v.examCode) || ["101", "102", "103", "104"];
+                      return codes.map((c) => (
+                        <option key={c} value={c}>
+                          Mã đề {c} {c === selectedVariantCode ? "(Tự động chia ngẫu nhiên)" : ""}
+                        </option>
+                      ));
+                    })()}
                   </select>
                 </div>
               </div>

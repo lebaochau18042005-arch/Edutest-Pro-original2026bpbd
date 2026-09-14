@@ -17,6 +17,7 @@ import {
 } from "./types";
 import { generateVariantsFromQuestions } from "./utils/examHelpers";
 import { exportAppDataBackupFile, importAppDataBackupFile } from "./utils/cloudSyncManager";
+import { decompressExamFromSharing } from "./utils/shareUrlHelper";
 import { Sparkles, Send, GraduationCap, UserCheck, Menu, X, ShieldAlert, Layers, Key, Settings2, Gamepad2, Cloud, Download, Upload } from "lucide-react";
 
 // Initial seed bank
@@ -359,10 +360,57 @@ export default function App() {
   const [teacherTab, setTeacherTab] = useState<TeacherTab>("shuffler");
   const [studentTab, setStudentTab] = useState<StudentTab>("online_test");
 
-  const [questionBank, setQuestionBank] = useState<Question[]>(DEFAULT_INITIAL_QUESTIONS);
-  const [activeExams, setActiveExams] = useState<ExamPackage[]>(DEFAULT_INITIAL_EXAMS);
-  const [submissions, setSubmissions] =
-    useState<StudentSubmission[]>(DEFAULT_INITIAL_SUBMISSIONS);
+  const [questionBank, setQuestionBank] = useState<Question[]>(() => {
+    try {
+      const saved = localStorage.getItem("edutest_question_bank");
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p) && p.length > 0) return p;
+      }
+    } catch (e) {}
+    return DEFAULT_INITIAL_QUESTIONS;
+  });
+
+  const [activeExams, setActiveExams] = useState<ExamPackage[]>(() => {
+    try {
+      const saved = localStorage.getItem("edutest_active_exams");
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p) && p.length > 0) return p;
+      }
+    } catch (e) {}
+    return DEFAULT_INITIAL_EXAMS;
+  });
+
+  const [submissions, setSubmissions] = useState<StudentSubmission[]>(() => {
+    try {
+      const saved = localStorage.getItem("edutest_submissions");
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p) && p.length > 0) return p;
+      }
+    } catch (e) {}
+    return DEFAULT_INITIAL_SUBMISSIONS;
+  });
+
+  // Sync to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("edutest_active_exams", JSON.stringify(activeExams));
+    } catch (e) {}
+  }, [activeExams]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("edutest_question_bank", JSON.stringify(questionBank));
+    } catch (e) {}
+  }, [questionBank]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("edutest_submissions", JSON.stringify(submissions));
+    } catch (e) {}
+  }, [submissions]);
 
   const [prefillExamId, setPrefillExamId] = useState<string>("TOAN12");
   const [prefillExamCode, setPrefillExamCode] = useState<string>("101");
@@ -375,6 +423,66 @@ export default function App() {
   useEffect(() => {
     setHasApiKey(Boolean(getStoredApiKey()));
   }, []);
+
+  // Listen to 1-Click Link / QR Code URL parameters or Hash (#exam=... or ?code=...)
+  useEffect(() => {
+    const handleUrlExamEntry = async () => {
+      try {
+        const search = new URLSearchParams(window.location.search);
+        const examParam = search.get("exam");
+        const hash = window.location.hash;
+        const base64url = (hash && hash.startsWith("#exam="))
+          ? hash.replace(/^#exam=/, "")
+          : (examParam || "");
+
+        if (base64url) {
+          const decompressedPkg = await decompressExamFromSharing(base64url);
+          if (decompressedPkg) {
+            setActiveExams((prev) => {
+              const filtered = prev.filter((e) => e.accessCode !== decompressedPkg.accessCode && e.id !== decompressedPkg.id);
+              return [decompressedPkg, ...filtered];
+            });
+            setPrefillExamId(decompressedPkg.accessCode);
+
+            // Randomly assign one of the variants (101, 102, 103, 104) to this student device
+            if (decompressedPkg.variants.length > 0) {
+              const randIdx = Math.floor(Math.random() * decompressedPkg.variants.length);
+              setPrefillExamCode(decompressedPkg.variants[randIdx].examCode);
+            }
+            setCurrentRole("student");
+            setStudentTab("online_test");
+            return;
+          }
+        }
+
+        // Check query params ?code=...
+        const code = search.get("code") || search.get("examId");
+        if (code) {
+          const upperCode = code.trim().toUpperCase();
+          setPrefillExamId(upperCode);
+
+          // Pick a random variant
+          const found = activeExams.find((e) => e.accessCode === upperCode || e.id === code);
+          if (found && found.variants.length > 0) {
+            const randIdx = Math.floor(Math.random() * found.variants.length);
+            setPrefillExamCode(found.variants[randIdx].examCode);
+          } else {
+            const defaultCodes = ["101", "102", "103", "104"];
+            setPrefillExamCode(defaultCodes[Math.floor(Math.random() * defaultCodes.length)]);
+          }
+
+          setCurrentRole("student");
+          setStudentTab("online_test");
+        }
+      } catch (err) {
+        console.warn("Error parsing 1-Click exam URL:", err);
+      }
+    };
+
+    handleUrlExamEntry();
+    window.addEventListener("hashchange", handleUrlExamEntry);
+    return () => window.removeEventListener("hashchange", handleUrlExamEntry);
+  }, [activeExams.length]);
 
   // Load from backend on start
   const refreshData = async () => {

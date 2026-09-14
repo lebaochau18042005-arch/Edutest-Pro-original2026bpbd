@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import os from "os";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -11,6 +12,24 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// Discovers machine's LAN IPv4 for mobile phone Wi-Fi testing
+app.get("/api/network-ip", (req, res) => {
+  const interfaces = os.networkInterfaces();
+  let lanIp = "10.10.10.164";
+  for (const devName in interfaces) {
+    const list = interfaces[devName];
+    if (list) {
+      for (const alias of list) {
+        if (alias.family === "IPv4" && alias.address !== "127.0.0.1" && !alias.internal && !alias.address.startsWith("26.")) {
+          lanIp = alias.address;
+          break;
+        }
+      }
+    }
+  }
+  res.json({ lanIp, port: PORT });
+});
 
 // Google GenAI Client Factory supporting custom API keys per request
 function getGenAI(customApiKey?: string): GoogleGenAI | null {

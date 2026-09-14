@@ -1,0 +1,481 @@
+import React, { useState, useEffect } from "react";
+import {
+  QrCode,
+  Copy,
+  Check,
+  Smartphone,
+  ExternalLink,
+  Download,
+  Maximize2,
+  Minimize2,
+  X,
+  Sparkles,
+  ShieldCheck,
+  Clock,
+  BookOpen,
+  Share2,
+  Wifi,
+  Globe,
+} from "lucide-react";
+import { ExamPackage } from "../../types";
+import { buildExamShareLinks } from "../../utils/shareUrlHelper";
+
+interface InstantShareModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  exam: ExamPackage | null;
+  onOpenAsStudent?: (examId: string, code: string) => void;
+}
+
+export const InstantShareModal: React.FC<InstantShareModalProps> = ({
+  isOpen,
+  onClose,
+  exam,
+  onOpenAsStudent,
+}) => {
+  const [copied, setCopied] = useState(false);
+  const [isFullscreenProjector, setIsFullscreenProjector] = useState(false);
+  const [lanIp, setLanIp] = useState<string>("10.10.10.164");
+  const isLocalHost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const [networkMode, setNetworkMode] = useState<"wifi" | "online">(isLocalHost ? "wifi" : "online");
+
+  const [links, setLinks] = useState<{
+    directLink: string;
+    simpleCodeLink: string;
+    qrCodeUrl: string;
+    isSelfContained: boolean;
+  }>({
+    directLink: "",
+    simpleCodeLink: "",
+    qrCodeUrl: "",
+    isSelfContained: false,
+  });
+  const [isLoadingLinks, setIsLoadingLinks] = useState(false);
+
+  // Discover actual LAN IP from server
+  useEffect(() => {
+    fetch("/api/network-ip")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.lanIp) setLanIp(data.lanIp);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || !exam) return;
+
+    let isMounted = true;
+    setIsLoadingLinks(true);
+
+    let targetOrigin: string | undefined = undefined;
+    if (networkMode === "wifi") {
+      const port = typeof window !== "undefined" ? window.location.port || 3000 : 3000;
+      targetOrigin = `http://${lanIp}:${port}`;
+    } else {
+      targetOrigin = "https://edutest-pro-original2026bpbd.vercel.app";
+    }
+
+    buildExamShareLinks(exam, targetOrigin).then((res) => {
+      if (isMounted) {
+        setLinks(res);
+        setIsLoadingLinks(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, exam, networkMode, lanIp]);
+
+  if (!isOpen || !exam) return null;
+
+  const handleCopyLink = () => {
+    const linkToCopy = links.directLink || links.simpleCodeLink;
+    navigator.clipboard.writeText(linkToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+  };
+
+  const handleDownloadQr = () => {
+    if (!links.qrCodeUrl) return;
+    const a = document.createElement("a");
+    a.href = links.qrCodeUrl;
+    a.download = `Ma_QR_Thi_${exam.accessCode || "THPT"}.png`;
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  // FULLSCREEN PROJECTOR MODE FOR CLASSROOM
+  if (isFullscreenProjector) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950 text-white flex flex-col items-center justify-between p-6 sm:p-10 animate-fade-in overflow-y-auto">
+        {/* Top Header */}
+        <div className="w-full max-w-5xl flex items-center justify-between border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center text-2xl shadow-lg">
+              📱
+            </div>
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Màn Hình Máy Chiếu Lớp Học • Quét Mã Vào Thi Ngay
+              </span>
+              <h1 className="text-xl sm:text-2xl font-black text-white">{exam.title}</h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Mode Switcher in Projector */}
+            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setNetworkMode("wifi")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  networkMode === "wifi" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Wi-Fi: {lanIp}
+              </button>
+              <button
+                type="button"
+                onClick={() => setNetworkMode("online")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  networkMode === "online" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Web Vercel
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsFullscreenProjector(false)}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 border border-slate-700 transition-all cursor-pointer"
+            >
+              <Minimize2 className="w-4 h-4" />
+              <span>Thu Nhỏ</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Center Giant QR Code + Guidance */}
+        <div className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-16 my-auto py-6">
+          {/* Big QR Code Card */}
+          <div className="bg-white p-6 rounded-3xl shadow-2xl border-4 border-emerald-500/30 flex flex-col items-center">
+            {links.qrCodeUrl ? (
+              <img
+                src={links.qrCodeUrl}
+                alt="Mã QR phòng thi"
+                className="w-72 h-72 sm:w-96 sm:h-96 object-contain rounded-xl"
+              />
+            ) : (
+              <div className="w-72 h-72 sm:w-96 sm:h-96 flex items-center justify-center text-slate-400">
+                Đang tạo mã QR...
+              </div>
+            )}
+            <div className="mt-4 text-center space-y-1">
+              <span className="text-xs font-mono font-bold bg-slate-100 text-slate-900 px-3 py-1 rounded-full border border-slate-300 inline-block">
+                Mã Phòng: <strong className="text-emerald-700">{exam.accessCode}</strong>
+              </span>
+              <p className="text-[11px] text-slate-500">
+                {networkMode === "wifi" ? `Mạng nội bộ Wi-Fi (IP: ${lanIp})` : "Web trực tuyến Vercel"}
+              </p>
+            </div>
+          </div>
+
+          {/* 3 Step Student Guidance */}
+          <div className="max-w-md space-y-6">
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                HƯỚNG DẪN HỌC SINH VÀO THI
+              </span>
+              <h2 className="text-2xl font-extrabold text-white">3 Bước Đơn Giản:</h2>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-start gap-4 p-4 rounded-2xl bg-slate-900 border border-slate-800">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0">
+                  1
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-white">Mở Camera hoặc Zalo trên điện thoại</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Hướng camera vào mã QR to trên bảng máy chiếu
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4 p-4 rounded-2xl bg-slate-900 border border-slate-800">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0">
+                  2
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-white">Điền Họ Tên & Lớp của em</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Hệ thống tự động xáo trộn và bốc ngẫu nhiên mã đề (101 - 104) để chống nhìn bài
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4 p-4 rounded-2xl bg-slate-900 border border-slate-800">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0">
+                  3
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-white">Bấm 'Bắt Đầu Làm Bài'</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Thời gian: {exam.config.duration} phút • Giám sát chống chuyển tab
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Bar */}
+        <div className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800 text-xs text-slate-400">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Phòng thi đang mở • Sẵn sàng đón nhận toàn bộ học sinh trong lớp</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyLink}
+            className="text-emerald-400 hover:text-emerald-300 underline font-semibold cursor-pointer"
+          >
+            {copied ? "✓ Đã sao chép link 1-chạm" : "Sao chép link gửi qua Zalo nếu không quét được QR"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // STANDARD MODAL DIALOG
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+      <div className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-5 max-h-[92vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-white flex items-center justify-center text-xl shadow-md">
+              <QrCode className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                Phát Đề 1-Chạm & Mã QR Cho Học Sinh
+              </h3>
+              <p className="text-xs text-slate-500">
+                Học sinh quét mã QR hoặc bấm link là vào thi ngay, không sợ quên mã!
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Environment Switcher: Wi-Fi vs Online Vercel */}
+        <div className="p-1.5 bg-slate-100 rounded-2xl flex gap-1.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setNetworkMode("wifi")}
+            className={`flex-1 py-2.5 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              networkMode === "wifi"
+                ? "bg-white text-emerald-800 shadow-sm border border-emerald-200 ring-2 ring-emerald-500/10"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Wifi className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Thử Trên Điện Thoại (Wi-Fi: {lanIp})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setNetworkMode("online")}
+            className={`flex-1 py-2.5 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              networkMode === "online"
+                ? "bg-white text-emerald-800 shadow-sm border border-emerald-200 ring-2 ring-emerald-500/10"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-blue-600" />
+            <span>Dành Cho Cả Lớp (Web Online Vercel)</span>
+          </button>
+        </div>
+
+        {/* Mode Explanatory Notice */}
+        {networkMode === "wifi" ? (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5">
+            <span className="text-base leading-none mt-0.5">📱</span>
+            <div>
+              <p className="font-bold">Đang phát đề qua mạng Wi-Fi cục bộ (Đang chạy thử trên máy tính):</p>
+              <p className="text-[11px] text-emerald-800 mt-0.5">
+                Điện thoại chỉ cần kết nối cùng mạng Wi-Fi với máy tính là quét mã QR vào làm bài ngay lập tức (không cần gõ mã).
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-950 flex items-start gap-2.5">
+            <span className="text-base leading-none mt-0.5">🌐</span>
+            <div>
+              <p className="font-bold">Đang phát đề qua trang web trực tuyến (Vercel):</p>
+              <p className="text-[11px] text-blue-800 mt-0.5">
+                Sau khi Thầy/Cô bấm push lên GitHub, toàn bộ học sinh ở nhà hay trên lớp dùng 4G/Wi-Fi đều có thể quét mã này để thi.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Exam Quick Specs Card */}
+        <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+          <div className="space-y-0.5">
+            <span className="font-bold text-slate-900 block line-clamp-1">{exam.title}</span>
+            <div className="flex items-center gap-2 text-slate-500 text-[11px]">
+              <span className="flex items-center gap-1 font-semibold text-emerald-700">
+                <Clock className="w-3 h-3" />
+                {exam.config.duration} phút
+              </span>
+              <span>•</span>
+              <span>{exam.originalQuestions.length} câu hỏi</span>
+              <span>•</span>
+              <span className="font-mono font-bold text-indigo-700">
+                Mã: {exam.accessCode}
+              </span>
+            </div>
+          </div>
+
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+            <ShieldCheck className="w-3 h-3" />
+            Tự chia 4 mã đề ngẫu nhiên
+          </span>
+        </div>
+
+        {/* QR Code Presentation Area */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-5 p-4 rounded-2xl bg-gradient-to-b from-slate-50 to-emerald-50/40 border border-emerald-100">
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm shrink-0">
+            {isLoadingLinks ? (
+              <div className="w-48 h-48 flex items-center justify-center text-xs text-slate-400">
+                Đang chuẩn bị mã QR...
+              </div>
+            ) : (
+              <img
+                src={links.qrCodeUrl}
+                alt="Mã QR phòng thi"
+                className="w-48 h-48 object-contain rounded-lg"
+              />
+            )}
+          </div>
+
+          <div className="space-y-3 text-center sm:text-left flex-1">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                Mã QR Quét Vào Thi Ngay
+              </h4>
+              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                Chiếu lên máy chiếu lớp học hoặc in ra giấy. Học sinh mở Camera/Zalo quét là làm bài luôn.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+              <button
+                type="button"
+                onClick={() => setIsFullscreenProjector(true)}
+                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>Chiếu Máy Chiếu (Toàn Màn Hình)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadQr}
+                className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Tải ảnh mã QR về máy"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Tải Ảnh QR</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 1-Click Shareable Link Section */}
+        <div className="space-y-2">
+          <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
+            <span>Link 1-Chạm Gửi Zalo / Messenger Nhóm Lớp:</span>
+            {copied && (
+              <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 animate-fade-in">
+                <Check className="w-3.5 h-3.5" />
+                Đã sao chép vào bộ nhớ tạm!
+              </span>
+            )}
+          </label>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={links.directLink || links.simpleCodeLink}
+              className="flex-1 text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-700 select-all"
+            />
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0 cursor-pointer ${
+                copied
+                  ? "bg-emerald-600 text-white"
+                  : "bg-emerald-600 hover:bg-emerald-700 text-white"
+              }`}
+            >
+              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{copied ? "Đã Sao Chép" : "Sao Chép Link"}</span>
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            💡 Học sinh bấm vào link này trên điện thoại sẽ tự động mở thẳng bài thi, không cần nhập mã.
+          </p>
+        </div>
+
+        {/* Smart Anti-Cheat Notice */}
+        <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-start gap-2.5 text-xs text-indigo-950">
+          <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            <strong>Chống nhìn bài tự động:</strong> Mỗi học sinh khi quét mã QR hoặc bấm link sẽ được hệ thống phân ngẫu nhiên 1 trong 4 mã đề (101, 102, 103, 104) với thứ tự câu hỏi và đáp án đảo nhau.
+          </p>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 cursor-pointer"
+          >
+            Đóng
+          </button>
+
+          {onOpenAsStudent && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenAsStudent(exam.id, exam.variants[0]?.examCode || "101");
+              }}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-slate-700" />
+              <span>Thi Thử Ngay (Giao Diện Học Sinh)</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
