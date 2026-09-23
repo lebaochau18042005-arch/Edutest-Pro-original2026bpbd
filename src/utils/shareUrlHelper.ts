@@ -73,19 +73,35 @@ function base64UrlToUint8Array(base64url: string): Uint8Array {
  */
 export async function compressExamForSharing(pkg: ExamPackage): Promise<string> {
   try {
-    const minifiedQuestions = pkg.originalQuestions.map((q) => {
-      const part = q.part || 1;
+    if (!pkg) return "";
+
+    const rawQuestions: any[] =
+      pkg.originalQuestions && Array.isArray(pkg.originalQuestions) && pkg.originalQuestions.length > 0
+        ? pkg.originalQuestions
+        : (pkg as any).questions && Array.isArray((pkg as any).questions) && (pkg as any).questions.length > 0
+        ? (pkg as any).questions
+        : pkg.variants && pkg.variants[0]?.questions && Array.isArray(pkg.variants[0].questions)
+        ? pkg.variants[0].questions
+        : [];
+
+    if (rawQuestions.length === 0) {
+      console.warn("No questions found in exam package to compress");
+      return "";
+    }
+
+    const minifiedQuestions = rawQuestions.map((q: any) => {
+      const part = Number(q.part) || 1;
       const item: any = {
         p: part,
-        c: q.content,
+        c: q.content || "",
       };
 
       if (part === 1 || q.questionType === "multiple_choice") {
-        item.o = q.options || [];
-        item.a = q.correctIndex ?? 0;
+        item.o = Array.isArray(q.options) ? q.options : [];
+        item.a = q.correctIndex ?? q.originalCorrectIndex ?? 0;
       } else if (part === 2 || q.questionType === "true_false") {
         if (q.statements && Array.isArray(q.statements)) {
-          item.s = q.statements.map((st) => [st.text, Boolean(st.correctValue)]);
+          item.s = q.statements.map((st: any) => [st.text || "", Boolean(st.correctValue)]);
         }
       } else if (part === 3 || q.questionType === "short_answer") {
         item.k = q.shortAnswer || (q.acceptableAnswers && q.acceptableAnswers[0]) || "";
@@ -94,7 +110,7 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
       if (q.passageContent) {
         item.g = q.passageContent;
       }
-      // Include diagramUrl only if it is short or hosted (omitting giant raw base64 data to keep QR ultra-scannable)
+      // Include diagramUrl only if it is short or hosted
       if (
         q.diagramUrl &&
         (q.diagramUrl.startsWith("http://") ||
@@ -109,14 +125,14 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
 
     const payload: MinifiedExamPayloadV2 = {
       v: 2,
-      t: pkg.title,
+      t: pkg.title || "Đề thi trực tuyến",
       c: (pkg.accessCode || "THPT2026").toUpperCase(),
       cfg: {
         s: pkg.config?.subject || "Khảo thí",
         g: pkg.config?.grade || "Khối 12",
-        d: pkg.config?.duration || 45,
-        m: pkg.config?.maxScore || 10,
-        v: pkg.config?.maxTabViolations || 3,
+        d: Number(pkg.config?.duration) || 45,
+        m: Number(pkg.config?.maxScore) || 10,
+        v: Number(pkg.config?.maxTabViolations) || 3,
         k: pkg.config?.examCodes || ["101", "102", "103", "104"],
       },
       q: minifiedQuestions,
@@ -211,7 +227,7 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
 
       const config: ExamConfig = {
         department: "BỘ GIÁO DỤC VÀ ĐÀO TẠO",
-        school: "TRƯỜNG THPT CHUYÊN LÊ HỒNG PHONG",
+        school: "TRƯỜNG THPT BÌNH PHÚ",
         examPeriod: "Kiểm tra định kỳ",
         subject: payload.cfg?.s || "Khảo thí",
         grade: payload.cfg?.g || "Khối 12",
@@ -247,7 +263,7 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
     if (payload.questions && Array.isArray(payload.questions)) {
       const config: ExamConfig = {
         department: payload.config?.department || "BỘ GIÁO DỤC VÀ ĐÀO TẠO",
-        school: payload.config?.school || "TRƯỜNG THPT CHUYÊN LÊ HỒNG PHONG",
+        school: payload.config?.school || "TRƯỜNG THPT BÌNH PHÚ",
         examPeriod: payload.config?.examPeriod || "Kiểm tra định kỳ",
         subject: payload.config?.subject || "Khảo thí",
         grade: payload.config?.grade || "Khối 12",
@@ -286,7 +302,7 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
 
 /**
  * Builds the complete shareable URL and QR code for an exam package.
- * Optimized with Cloud Database integration so QR code is ultra-clean, short, and 100% scannable.
+ * Automatically bundles role=student so student device opens directly into clean Student Room.
  */
 export async function buildExamShareLinks(
   pkg: ExamPackage,
@@ -310,21 +326,20 @@ export async function buildExamShareLinks(
   origin = origin.replace(/\/+$/, "");
 
   const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
-  const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&auto=1`;
+  const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&role=student&auto=1`;
 
   // Compress exam package (v2 schema)
   const compressed = await compressExamForSharing(pkg);
   let directLink = simpleCodeLink;
   let isSelfContained = false;
 
-  // Ultra-compact v2 payload: if compressed string is under 3200 chars, it is 100% self-contained
-  if (compressed && compressed.length < 3200) {
-    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&exam=${compressed}&auto=1`;
+  if (compressed && compressed.length > 0) {
+    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&exam=${compressed}&role=student&auto=1`;
     isSelfContained = true;
   }
 
-  // For the QR code: Use self-contained directLink so every phone camera / Zalo instantly opens the exam
-  const targetForQr = isSelfContained ? directLink : simpleCodeLink;
+  // Target for QR: Use self-contained directLink so every phone camera / Zalo instantly opens the exam
+  const targetForQr = directLink;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=450x450&margin=10&ecc=L&format=png&data=${encodeURIComponent(targetForQr)}`;
 
   return {

@@ -35,6 +35,7 @@ import { StudentResultView } from "./StudentResultView";
 import { clientGradePaper } from "../../utils/clientAI";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
 import { fetchExamFromCloud, submitExamToCloud } from "../../utils/cloudExamDatabase";
+import { decompressExamFromSharing } from "../../utils/shareUrlHelper";
 
 interface StudentPortalProps {
   exams: ExamPackage[];
@@ -107,58 +108,105 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
   }, [currentStudentTab]);
 
-  // Sync prefillExamId when changed (from 1-Click Link / QR Code)
+  // Parse 1-Click Link / QR Code parameters (?exam=..., #exam=..., ?code=...) on mount
   useEffect(() => {
-    if (prefillExamId) {
-      const upperCode = prefillExamId.trim().toUpperCase();
-      setAccessCodeInput(upperCode);
-      const matched = exams.find(
-        (e) => e.accessCode?.toUpperCase() === upperCode || e.id === prefillExamId
-      );
-      if (matched) {
-        setActiveExam(matched);
-      } else {
-        // Asynchronously check Cloud Database, localStorage, and backend API
-        (async () => {
-          setIsLoadingCloudExam(true);
-          try {
-            // Check Cloud Database first
-            const cloudExam = await fetchExamFromCloud(upperCode);
-            if (cloudExam) {
-              setActiveExam(cloudExam);
-              if (onAddExam) onAddExam(cloudExam);
-              setIsLoadingCloudExam(false);
-              return;
-            }
+    const parseUrlAndPrefill = async () => {
+      try {
+        const search = new URLSearchParams(window.location.search);
+        const examParam = search.get("exam");
+        const hash = window.location.hash;
+        const base64url =
+          hash && hash.startsWith("#exam=")
+            ? hash.replace(/^#exam=/, "")
+            : examParam || "";
 
-            // Fallback localStorage
-            const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
-            const localMatch = saved.find(
-              (e: any) => e.accessCode?.toUpperCase() === upperCode || e.id === prefillExamId
-            );
-            if (localMatch) {
-              setActiveExam(localMatch);
-              if (onAddExam) onAddExam(localMatch);
-              setIsLoadingCloudExam(false);
-              return;
+        if (base64url) {
+          const decompressed = await decompressExamFromSharing(base64url);
+          if (decompressed) {
+            setActiveExam(decompressed);
+            setAccessCodeInput(decompressed.accessCode);
+            if (decompressed.variants && decompressed.variants.length > 0) {
+              const randIdx = Math.floor(Math.random() * decompressed.variants.length);
+              setSelectedVariantCode(decompressed.variants[randIdx].examCode);
             }
-
-            // Fallback local backend API
-            const res = await fetch(`/api/exams/${encodeURIComponent(upperCode)}`);
-            if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
-              const json = await res.json();
-              if (json.success && json.data) {
-                setActiveExam(json.data);
-                if (onAddExam) onAddExam(json.data);
-              }
+            if (onAddExam) {
+              onAddExam(decompressed);
             }
-          } catch (e) {
-          } finally {
-            setIsLoadingCloudExam(false);
+            return;
           }
-        })();
+        }
+
+        const codeFromUrl = search.get("code") || search.get("examId");
+        const codeToLookup = (codeFromUrl || prefillExamId || "").trim().toUpperCase();
+
+        if (codeToLookup) {
+          setAccessCodeInput(codeToLookup);
+          const matched = exams.find(
+            (e) => e.accessCode?.toUpperCase() === codeToLookup || e.id === codeToLookup
+          );
+          if (matched) {
+            setActiveExam(matched);
+            if (matched.variants && matched.variants.length > 0) {
+              const randIdx = Math.floor(Math.random() * matched.variants.length);
+              setSelectedVariantCode(matched.variants[randIdx].examCode);
+            }
+          } else {
+            setIsLoadingCloudExam(true);
+            try {
+              // Check Cloud Database
+              const cloudExam = await fetchExamFromCloud(codeToLookup);
+              if (cloudExam) {
+                setActiveExam(cloudExam);
+                if (onAddExam) onAddExam(cloudExam);
+                if (cloudExam.variants && cloudExam.variants.length > 0) {
+                  const randIdx = Math.floor(Math.random() * cloudExam.variants.length);
+                  setSelectedVariantCode(cloudExam.variants[randIdx].examCode);
+                }
+                setIsLoadingCloudExam(false);
+                return;
+              }
+
+              // Fallback localStorage
+              const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+              const localMatch = saved.find(
+                (e: any) => e.accessCode?.toUpperCase() === codeToLookup || e.id === codeToLookup
+              );
+              if (localMatch) {
+                setActiveExam(localMatch);
+                if (onAddExam) onAddExam(localMatch);
+                if (localMatch.variants && localMatch.variants.length > 0) {
+                  const randIdx = Math.floor(Math.random() * localMatch.variants.length);
+                  setSelectedVariantCode(localMatch.variants[randIdx].examCode);
+                }
+                setIsLoadingCloudExam(false);
+                return;
+              }
+
+              // Fallback local backend API
+              const res = await fetch(`/api/exams/${encodeURIComponent(codeToLookup)}`);
+              if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+                const json = await res.json();
+                if (json.success && json.data) {
+                  setActiveExam(json.data);
+                  if (onAddExam) onAddExam(json.data);
+                  if (json.data.variants && json.data.variants.length > 0) {
+                    const randIdx = Math.floor(Math.random() * json.data.variants.length);
+                    setSelectedVariantCode(json.data.variants[randIdx].examCode);
+                  }
+                }
+              }
+            } catch (e) {
+            } finally {
+              setIsLoadingCloudExam(false);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Error parsing exam URL in StudentPortal:", err);
       }
-    }
+    };
+
+    parseUrlAndPrefill();
   }, [prefillExamId, exams]);
 
   // Sync prefillExamCode when changed
@@ -255,12 +303,49 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
 
     const code = accessCodeInput.trim().toUpperCase();
-    let foundExam = exams.find(
-      (ex) =>
-        ex.id === accessCodeInput ||
-        ex.accessCode?.toUpperCase() === code ||
-        ex.title.toUpperCase().includes(code)
-    );
+    let foundExam: ExamPackage | null = null;
+
+    // Priority 1: Check if activeExam state is already loaded and matches
+    if (
+      activeExam &&
+      (activeExam.accessCode?.toUpperCase() === code ||
+        activeExam.id === accessCodeInput ||
+        !code ||
+        activeExam.title.toUpperCase().includes(code))
+    ) {
+      foundExam = activeExam;
+    }
+
+    // Priority 2: Check exams props
+    if (!foundExam) {
+      foundExam =
+        exams.find(
+          (ex) =>
+            ex.id === accessCodeInput ||
+            ex.accessCode?.toUpperCase() === code ||
+            ex.title.toUpperCase().includes(code)
+        ) || null;
+    }
+
+    // Priority 3: Decompress directly from URL parameter if present
+    if (!foundExam) {
+      try {
+        const search = new URLSearchParams(window.location.search);
+        const examParam = search.get("exam");
+        const hash = window.location.hash;
+        const base64url =
+          hash && hash.startsWith("#exam=")
+            ? hash.replace(/^#exam=/, "")
+            : examParam || "";
+        if (base64url) {
+          const decompressed = await decompressExamFromSharing(base64url);
+          if (decompressed) {
+            foundExam = decompressed;
+            if (onAddExam) onAddExam(decompressed);
+          }
+        }
+      } catch (e) {}
+    }
 
     // Fallback 1: Fetch from Cloud Database (Firebase / Cloud DB)
     if (!foundExam) {
@@ -279,12 +364,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     if (!foundExam) {
       try {
         const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
-        foundExam = saved.find(
-          (ex: any) =>
-            ex.id === accessCodeInput ||
-            ex.accessCode?.toUpperCase() === code ||
-            ex.title?.toUpperCase().includes(code)
-        );
+        foundExam =
+          saved.find(
+            (ex: any) =>
+              ex.id === accessCodeInput ||
+              ex.accessCode?.toUpperCase() === code ||
+              ex.title?.toUpperCase().includes(code)
+          ) || null;
         if (foundExam && onAddExam) {
           onAddExam(foundExam);
         }
@@ -888,9 +974,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-medium bg-white"
                   >
                     {(() => {
-                      const matched = exams.find(
-                        (e) => e.accessCode === accessCodeInput || e.id === accessCodeInput
-                      );
+                      const matched =
+                        activeExam ||
+                        exams.find(
+                          (e) =>
+                            e.accessCode?.toUpperCase() === accessCodeInput.toUpperCase() ||
+                            e.id === accessCodeInput
+                        );
                       const codes = matched?.variants?.map((v) => v.examCode) || ["101", "102", "103", "104"];
                       return codes.map((c) => (
                         <option key={c} value={c}>

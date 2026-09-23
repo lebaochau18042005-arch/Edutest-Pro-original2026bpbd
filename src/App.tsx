@@ -363,7 +363,37 @@ const DEFAULT_INITIAL_SUBMISSIONS: StudentSubmission[] = [
 ];
 
 export default function App() {
-  const [currentRole, setCurrentRole] = useState<AppRole>("teacher");
+  const [isDirectStudentAccess, setIsDirectStudentAccess] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const search = new URLSearchParams(window.location.search);
+      const hash = window.location.hash;
+      return Boolean(
+        search.get("role") === "student" ||
+          search.get("exam") ||
+          search.get("code") ||
+          search.get("examId") ||
+          (hash && hash.startsWith("#exam="))
+      );
+    }
+    return false;
+  });
+
+  const [currentRole, setCurrentRole] = useState<AppRole>(() => {
+    if (typeof window !== "undefined") {
+      const search = new URLSearchParams(window.location.search);
+      const hash = window.location.hash;
+      if (
+        search.get("role") === "student" ||
+        search.get("exam") ||
+        search.get("code") ||
+        search.get("examId") ||
+        (hash && hash.startsWith("#exam="))
+      ) {
+        return "student";
+      }
+    }
+    return "teacher";
+  });
   const [teacherTab, setTeacherTab] = useState<TeacherTab>("shuffler");
   const [studentTab, setStudentTab] = useState<StudentTab>("online_test");
 
@@ -725,24 +755,26 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 overflow-x-hidden">
-      {/* Sleek Dark Sidebar (Desktop) with Dual Navigation Sections */}
-      <div className="hidden lg:block shrink-0">
-        <SidebarNav
-          currentRole={currentRole}
-          setCurrentRole={setCurrentRole}
-          teacherTab={teacherTab}
-          setTeacherTab={setTeacherTab}
-          studentTab={studentTab}
-          setStudentTab={setStudentTab}
-          activeExamCount={activeExams.length}
-          submissionCount={submissions.length}
-          lockedViolationCount={lockedCount}
-          onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
-        />
-      </div>
+      {/* Sleek Dark Sidebar (Desktop) - Teacher Only */}
+      {currentRole === "teacher" && (
+        <div className="hidden lg:block shrink-0">
+          <SidebarNav
+            currentRole={currentRole}
+            setCurrentRole={setCurrentRole}
+            teacherTab={teacherTab}
+            setTeacherTab={setTeacherTab}
+            studentTab={studentTab}
+            setStudentTab={setStudentTab}
+            activeExamCount={activeExams.length}
+            submissionCount={submissions.length}
+            lockedViolationCount={lockedCount}
+            onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
+          />
+        </div>
+      )}
 
-      {/* Mobile Drawer */}
-      {mobileMenuOpen && (
+      {/* Mobile Drawer - Teacher Only */}
+      {currentRole === "teacher" && mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
           <div className="fixed inset-0 bg-slate-900/60" onClick={() => setMobileMenuOpen(false)} />
           <div className="relative z-10 w-72 bg-slate-950 text-white flex flex-col p-5 h-full">
@@ -782,13 +814,15 @@ export default function App() {
         {/* Top Header */}
         <header className="h-18 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 shrink-0 sticky top-0 z-30">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+            {currentRole === "teacher" && (
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
 
             <div>
               <div className="flex items-center gap-2">
@@ -830,82 +864,90 @@ export default function App() {
               <span>Google Sheets: Tự động đồng bộ</span>
             </div>
 
-            {/* Prominent Settings & API Key Button with Red CTA per AI_INSTRUCTIONS.md */}
-            <button
-              type="button"
-              id="btn-header-gemini-settings"
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs bg-rose-50 hover:bg-rose-100/80 text-rose-700 border-rose-300 ring-2 ring-rose-500/15"
-              title="Cấu hình Model AI & Google Gemini API Key"
-            >
-              <Key className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
-              <span className="text-rose-700 font-extrabold">Lấy API key để sử dụng app</span>
-              {hasApiKey && (
-                <span className="w-2 h-2 rounded-full bg-emerald-500" title="Đã lưu API Key" />
-              )}
-            </button>
+            {/* Teacher Only Header Controls */}
+            {currentRole === "teacher" && (
+              <>
+                {/* Prominent Settings & API Key Button with Red CTA per AI_INSTRUCTIONS.md */}
+                <button
+                  type="button"
+                  id="btn-header-gemini-settings"
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs bg-rose-50 hover:bg-rose-100/80 text-rose-700 border-rose-300 ring-2 ring-rose-500/15 cursor-pointer"
+                  title="Cấu hình Model AI & Google Gemini API Key"
+                >
+                  <Key className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
+                  <span className="text-rose-700 font-extrabold">Lấy API key để sử dụng app</span>
+                  {hasApiKey && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" title="Đã lưu API Key" />
+                  )}
+                </button>
 
-            {/* Live Quiz Arena Button */}
-            <button
-              type="button"
-              id="btn-header-live-quiz"
-              onClick={() => setIsLiveQuizOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 rounded-xl text-xs font-black transition-all shadow-md shadow-amber-500/25 active:scale-95 cursor-pointer"
-              title="Khởi tạo Đấu trường Live Quiz tương tác trên lớp"
-            >
-              <Gamepad2 className="w-3.5 h-3.5 fill-current" />
-              <span>Đấu Trường Quiz</span>
-            </button>
+                {/* Live Quiz Arena Button */}
+                <button
+                  type="button"
+                  id="btn-header-live-quiz"
+                  onClick={() => setIsLiveQuizOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 rounded-xl text-xs font-black transition-all shadow-md shadow-amber-500/25 active:scale-95 cursor-pointer"
+                  title="Khởi tạo Đấu trường Live Quiz tương tác trên lớp"
+                >
+                  <Gamepad2 className="w-3.5 h-3.5 fill-current" />
+                  <span>Đấu Trường Quiz</span>
+                </button>
 
-            {/* Cloud Backup Button */}
-            <button
-              type="button"
-              id="btn-header-cloud-backup"
-              onClick={() => exportAppDataBackupFile(questionBank, activeExams, submissions)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
-              title="Sao lưu 1-Click toàn bộ Ngân hàng Đề & Lịch sử Bài thi (.edutest)"
-            >
-              <Cloud className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Sao Lưu Đám Mây</span>
-            </button>
+                {/* Cloud Backup Button */}
+                <button
+                  type="button"
+                  id="btn-header-cloud-backup"
+                  onClick={() => exportAppDataBackupFile(questionBank, activeExams, submissions)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                  title="Sao lưu 1-Click toàn bộ Ngân hàng Đề & Lịch sử Bài thi (.edutest)"
+                >
+                  <Cloud className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Sao Lưu Đám Mây</span>
+                </button>
 
-            {/* Quick Switch Role CTA */}
-            {currentRole === "teacher" ? (
-              <button
-                type="button"
-                id="btn-header-publish-test"
-                onClick={handleQuickLaunchStudentTest}
-                className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Xem giao diện học sinh</span>
-              </button>
-            ) : (
+                {/* Quick Switch Role CTA */}
+                <button
+                  type="button"
+                  id="btn-header-publish-test"
+                  onClick={handleQuickLaunchStudentTest}
+                  className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Xem giao diện học sinh</span>
+                </button>
+              </>
+            )}
+
+            {/* If in student view, only show return button if it was an internal preview by teacher */}
+            {currentRole === "student" && !isDirectStudentAccess && (
               <button
                 type="button"
                 onClick={() => setCurrentRole("teacher")}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md shadow-blue-600/20"
+                className="bg-slate-800 hover:bg-slate-900 text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-md shadow-slate-900/20 cursor-pointer"
               >
                 <GraduationCap className="w-3.5 h-3.5" />
-                <span>Về trang Giáo viên</span>
+                <span>Quay lại Quản trị Giáo viên</span>
               </button>
             )}
           </div>
         </header>
 
-        {/* PROMINENT DUAL NAVIGATION BAR (2 THANH ĐIỀU HƯỚNG GIÁO VIÊN & HỌC SINH) */}
-        <DualNavigationBar
-          currentRole={currentRole}
-          setCurrentRole={setCurrentRole}
-          teacherTab={teacherTab}
-          setTeacherTab={setTeacherTab}
-          studentTab={studentTab}
-          setStudentTab={setStudentTab}
-          activeExamCount={activeExams.length}
-          submissionCount={submissions.length}
-          lockedViolationCount={lockedCount}
-          onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
-        />
+        {/* PROMINENT DUAL NAVIGATION BAR (ONLY SHOWN FOR TEACHER) */}
+        {currentRole === "teacher" && (
+          <DualNavigationBar
+            currentRole={currentRole}
+            setCurrentRole={setCurrentRole}
+            teacherTab={teacherTab}
+            setTeacherTab={setTeacherTab}
+            studentTab={studentTab}
+            setStudentTab={setStudentTab}
+            activeExamCount={activeExams.length}
+            submissionCount={submissions.length}
+            lockedViolationCount={lockedCount}
+            onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
+          />
+        )}
 
         {/* Content Body */}
         <main className="flex-1 p-4 sm:p-6 bg-slate-50 overflow-y-auto flex flex-col justify-between">
