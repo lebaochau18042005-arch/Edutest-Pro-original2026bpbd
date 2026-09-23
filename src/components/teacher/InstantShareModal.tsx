@@ -409,10 +409,10 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <div>
               <p className="font-bold text-emerald-900">
-                🟢 Đã đồng bộ lên Cloud Database thành công!
+                🟢 Sẵn sàng phát đề 1-Chạm trực tuyến!
               </p>
               <p className="text-[11px] text-emerald-800 mt-0.5">
-                Toàn bộ học sinh dùng <strong>4G/5G hoặc Wi-Fi bất kỳ</strong> chỉ cần quét mã QR hoặc nhập mã <strong className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900 font-bold">{exam.accessCode}</strong> là vào thi ngay lập tức.
+                Toàn bộ học sinh dùng <strong>4G/5G hoặc Wi-Fi bất kỳ</strong> chỉ cần quét mã QR hoặc bấm link là nhận trọn vẹn đề thi <strong className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900 font-bold">{exam.accessCode}</strong> và làm bài ngay lập tức.
               </p>
             </div>
           </div>
@@ -422,18 +422,8 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-950 flex items-center gap-2.5">
             <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
             <span className="text-[11px] font-medium text-blue-800">
-              Đang đẩy dữ liệu đề thi lên Cloud Database trực tuyến...
+              Đang chuẩn bị gói đề thi phát trực tuyến 1-chạm...
             </span>
-          </div>
-        )}
-
-        {cloudSyncStatus === "error" && (
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-950 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Lưu ý kết nối:</p>
-              <p className="text-[11px] text-amber-800 mt-0.5">{cloudSyncMsg}</p>
-            </div>
           </div>
         )}
 

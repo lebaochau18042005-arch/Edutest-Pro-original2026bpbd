@@ -312,21 +312,20 @@ export async function buildExamShareLinks(
   const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
   const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&auto=1`;
 
-  // Try self-contained compressed link for standalone offline sharing if needed
+  // Compress exam package (v2 schema)
   const compressed = await compressExamForSharing(pkg);
   let directLink = simpleCodeLink;
   let isSelfContained = false;
 
-  // Ultra-compact v2 payload: if compressed string is under 1200 chars, it can be self-contained
-  if (compressed && compressed.length < 1200) {
-    directLink = `${origin}/?exam=${compressed}`;
+  // Ultra-compact v2 payload: if compressed string is under 3200 chars, it is 100% self-contained
+  if (compressed && compressed.length < 3200) {
+    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&exam=${compressed}&auto=1`;
     isSelfContained = true;
   }
 
-  // For the QR code: Simple clean link guarantees 100% phone camera / Zalo scannability
-  // With Cloud Database sync, `simpleCodeLink` immediately retrieves the full exam from Cloud!
-  const targetForQr = simpleCodeLink;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=450x450&margin=12&ecc=M&format=png&data=${encodeURIComponent(targetForQr)}`;
+  // For the QR code: Use self-contained directLink so every phone camera / Zalo instantly opens the exam
+  const targetForQr = isSelfContained ? directLink : simpleCodeLink;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=450x450&margin=10&ecc=L&format=png&data=${encodeURIComponent(targetForQr)}`;
 
   return {
     directLink,
