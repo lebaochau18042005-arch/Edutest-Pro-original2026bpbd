@@ -18,6 +18,13 @@ import {
 import { generateVariantsFromQuestions } from "./utils/examHelpers";
 import { exportAppDataBackupFile, importAppDataBackupFile } from "./utils/cloudSyncManager";
 import { decompressExamFromSharing } from "./utils/shareUrlHelper";
+import {
+  fetchExamFromCloud,
+  publishExamToCloud,
+  submitExamToCloud,
+  fetchSubmissionsFromCloud,
+} from "./utils/cloudExamDatabase";
+import { syncSubmissionToGoogleSheetsWebhook } from "./utils/googleSheetsSync";
 import { Sparkles, Send, GraduationCap, UserCheck, Menu, X, ShieldAlert, Layers, Key, Settings2, Gamepad2, Cloud, Download, Upload } from "lucide-react";
 
 // Initial seed bank
@@ -440,7 +447,11 @@ export default function App() {
           if (decompressedPkg) {
             setActiveExams((prev) => {
               const filtered = prev.filter((e) => e.accessCode !== decompressedPkg.accessCode && e.id !== decompressedPkg.id);
-              return [decompressedPkg, ...filtered];
+              const updated = [decompressedPkg, ...filtered];
+              try {
+                localStorage.setItem("edutest_active_exams", JSON.stringify(updated));
+              } catch (e) {}
+              return updated;
             });
             setPrefillExamId(decompressedPkg.accessCode);
 
@@ -461,9 +472,49 @@ export default function App() {
           const upperCode = code.trim().toUpperCase();
           setPrefillExamId(upperCode);
 
-          // Pick a random variant
-          const found = activeExams.find((e) => e.accessCode === upperCode || e.id === code);
-          if (found && found.variants.length > 0) {
+          let found = activeExams.find((e) => e.accessCode === upperCode || e.id === code);
+
+          // If not in React state yet, check Cloud Database (Firebase / Cloud DB)
+          if (!found) {
+            try {
+              const cloudExam = await fetchExamFromCloud(upperCode);
+              if (cloudExam) {
+                found = cloudExam;
+                setActiveExams((prev) => [cloudExam, ...prev.filter((e) => e.id !== cloudExam.id)]);
+              }
+            } catch (e) {}
+          }
+
+          // If not in React state yet, check localStorage
+          if (!found) {
+            try {
+              const localSaved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+              found = localSaved.find((e: any) => e.accessCode === upperCode || e.id === code);
+              if (found) {
+                setActiveExams((prev) => [found, ...prev.filter((e) => e.id !== found.id)]);
+              }
+            } catch (e) {}
+          }
+
+          // If still not found, fetch asynchronously from backend server
+          if (!found) {
+            try {
+              const res = await fetch(`/api/exams/${encodeURIComponent(upperCode)}`);
+              if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+                const json = await res.json();
+                if (json.success && json.data) {
+                  found = json.data;
+                  setActiveExams((prev) => [json.data, ...prev.filter((e) => e.id !== json.data.id)]);
+                  try {
+                    const localSaved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+                    localStorage.setItem("edutest_active_exams", JSON.stringify([json.data, ...localSaved.filter((e: any) => e.id !== json.data.id)]));
+                  } catch (e) {}
+                }
+              }
+            } catch (e) {}
+          }
+
+          if (found && found.variants && found.variants.length > 0) {
             const randIdx = Math.floor(Math.random() * found.variants.length);
             setPrefillExamCode(found.variants[randIdx].examCode);
           } else {
@@ -488,13 +539,14 @@ export default function App() {
     };
   }, []);
 
-  // Load from backend on start
+  // Load from backend & Cloud DB on start and periodically
   const refreshData = async () => {
     try {
-      const [resQ, resExams, resSubs] = await Promise.all([
+      const [resQ, resExams, resSubs, cloudSubs] = await Promise.all([
         fetch("/api/questions").catch(() => null),
         fetch("/api/exams").catch(() => null),
         fetch("/api/submissions").catch(() => null),
+        fetchSubmissionsFromCloud().catch(() => []),
       ]);
 
       if (resQ && resQ.ok && resQ.headers.get("content-type")?.includes("application/json")) {
@@ -509,8 +561,22 @@ export default function App() {
         const d = await resSubs.json().catch(() => null);
         if (d && d.data) setSubmissions(d.data);
       }
+
+      // Merge realtime Cloud Database submissions for live monitoring
+      if (cloudSubs && Array.isArray(cloudSubs) && cloudSubs.length > 0) {
+        setSubmissions((prev) => {
+          const existingIds = new Set(prev.map((s) => s.id));
+          const newOnes = cloudSubs.filter((s) => !existingIds.has(s.id));
+          if (newOnes.length === 0) return prev;
+          const merged = [...newOnes, ...prev];
+          try {
+            localStorage.setItem("edutest_submissions", JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
     } catch (e) {
-      console.warn("Backend not active, using local state", e);
+      console.warn("Backend refresh issue, using local state", e);
     }
   };
 
@@ -559,21 +625,30 @@ export default function App() {
 
   // Publish Exam
   const handlePublishExam = async (pkg: ExamPackage) => {
-    setActiveExams((prev) => [pkg, ...prev]);
+    setActiveExams((prev) => {
+      const filtered = prev.filter((e) => e.id !== pkg.id && e.accessCode?.toUpperCase() !== pkg.accessCode?.toUpperCase());
+      const updated = [pkg, ...filtered];
+      try {
+        localStorage.setItem("edutest_active_exams", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
     setPrefillExamId(pkg.accessCode);
     if (pkg.variants.length > 0) {
       setPrefillExamCode(pkg.variants[0].examCode);
     }
+
+    // Auto-publish to Cloud Database
+    publishExamToCloud(pkg).catch((err) => {
+      console.warn("Auto cloud publish error:", err);
+    });
+
+    // Save to local backend endpoint if available
     try {
-      await fetch("/api/exams/shuffle-and-create", {
+      await fetch("/api/exams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: pkg.title,
-          config: pkg.config,
-          questions: pkg.originalQuestions,
-          accessCode: pkg.accessCode,
-        }),
+        body: JSON.stringify(pkg),
       });
     } catch (e) {}
   };
@@ -581,12 +656,28 @@ export default function App() {
   // Student Submits Exam
   const handleSubmissionComplete = async (sub: StudentSubmission) => {
     setSubmissions((prev) => [sub, ...prev]);
+
+    // Push to Cloud Database
+    submitExamToCloud(sub).catch((err) => {
+      console.warn("Auto cloud submit error:", err);
+    });
+
     try {
       await fetch("/api/submissions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sub),
       });
+    } catch (e) {}
+
+    // Auto-sync to Google Sheets Webhook if configured by teacher
+    try {
+      const webhookUrl = localStorage.getItem("edutest_google_sheets_webhook");
+      if (webhookUrl && webhookUrl.trim().startsWith("http")) {
+        syncSubmissionToGoogleSheetsWebhook(sub, webhookUrl.trim()).catch((err) => {
+          console.warn("Auto Google Sheets sync error:", err);
+        });
+      }
     } catch (e) {}
   };
 
@@ -853,6 +944,9 @@ export default function App() {
                 currentStudentTab={studentTab}
                 setCurrentStudentTab={setStudentTab}
                 submissions={submissions}
+                onAddExam={(newExam) => {
+                  setActiveExams((prev) => [newExam, ...prev.filter((e) => e.id !== newExam.id && e.accessCode !== newExam.accessCode)]);
+                }}
               />
             )}
           </div>

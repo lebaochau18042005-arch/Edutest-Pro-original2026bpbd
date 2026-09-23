@@ -34,6 +34,7 @@ import { StudentExamRoom } from "./StudentExamRoom";
 import { StudentResultView } from "./StudentResultView";
 import { clientGradePaper } from "../../utils/clientAI";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { fetchExamFromCloud, submitExamToCloud } from "../../utils/cloudExamDatabase";
 
 interface StudentPortalProps {
   exams: ExamPackage[];
@@ -43,6 +44,7 @@ interface StudentPortalProps {
   currentStudentTab?: StudentTab;
   setCurrentStudentTab?: (tab: StudentTab) => void;
   submissions?: StudentSubmission[];
+  onAddExam?: (exam: ExamPackage) => void;
 }
 
 export const StudentPortal: React.FC<StudentPortalProps> = ({
@@ -53,6 +55,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   currentStudentTab = "online_test",
   setCurrentStudentTab,
   submissions = [],
+  onAddExam,
 }) => {
   // Student registration state with LocalStorage persistence
   const [studentName, setStudentName] = useState(() => {
@@ -83,6 +86,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [offlineQueue, setOfflineQueue] = useState<StudentSubmission[]>([]);
   const [isSyncingOfflineQueue, setIsSyncingOfflineQueue] = useState(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState("");
+  const [isLoadingCloudExam, setIsLoadingCloudExam] = useState(false);
 
   const [accessCodeInput, setAccessCodeInput] = useState(
     prefillExamId || exams[0]?.accessCode || "TOAN12"
@@ -106,12 +110,53 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   // Sync prefillExamId when changed (from 1-Click Link / QR Code)
   useEffect(() => {
     if (prefillExamId) {
-      setAccessCodeInput(prefillExamId);
+      const upperCode = prefillExamId.trim().toUpperCase();
+      setAccessCodeInput(upperCode);
       const matched = exams.find(
-        (e) => e.accessCode === prefillExamId || e.id === prefillExamId
+        (e) => e.accessCode?.toUpperCase() === upperCode || e.id === prefillExamId
       );
       if (matched) {
         setActiveExam(matched);
+      } else {
+        // Asynchronously check Cloud Database, localStorage, and backend API
+        (async () => {
+          setIsLoadingCloudExam(true);
+          try {
+            // Check Cloud Database first
+            const cloudExam = await fetchExamFromCloud(upperCode);
+            if (cloudExam) {
+              setActiveExam(cloudExam);
+              if (onAddExam) onAddExam(cloudExam);
+              setIsLoadingCloudExam(false);
+              return;
+            }
+
+            // Fallback localStorage
+            const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+            const localMatch = saved.find(
+              (e: any) => e.accessCode?.toUpperCase() === upperCode || e.id === prefillExamId
+            );
+            if (localMatch) {
+              setActiveExam(localMatch);
+              if (onAddExam) onAddExam(localMatch);
+              setIsLoadingCloudExam(false);
+              return;
+            }
+
+            // Fallback local backend API
+            const res = await fetch(`/api/exams/${encodeURIComponent(upperCode)}`);
+            if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+              const json = await res.json();
+              if (json.success && json.data) {
+                setActiveExam(json.data);
+                if (onAddExam) onAddExam(json.data);
+              }
+            }
+          } catch (e) {
+          } finally {
+            setIsLoadingCloudExam(false);
+          }
+        })();
       }
     }
   }, [prefillExamId, exams]);
@@ -210,16 +255,85 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
 
     const code = accessCodeInput.trim().toUpperCase();
-    const foundExam = exams.find(
+    let foundExam = exams.find(
       (ex) =>
         ex.id === accessCodeInput ||
         ex.accessCode?.toUpperCase() === code ||
         ex.title.toUpperCase().includes(code)
     );
 
+    // Fallback 1: Fetch from Cloud Database (Firebase / Cloud DB)
+    if (!foundExam) {
+      try {
+        const cloudExam = await fetchExamFromCloud(code);
+        if (cloudExam) {
+          foundExam = cloudExam;
+          if (onAddExam) {
+            onAddExam(cloudExam);
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Fallback 2: check localStorage
+    if (!foundExam) {
+      try {
+        const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+        foundExam = saved.find(
+          (ex: any) =>
+            ex.id === accessCodeInput ||
+            ex.accessCode?.toUpperCase() === code ||
+            ex.title?.toUpperCase().includes(code)
+        );
+        if (foundExam && onAddExam) {
+          onAddExam(foundExam);
+        }
+      } catch (e) {}
+    }
+
+    // Fallback 3: fetch from backend /api/exams/:code
+    if (!foundExam) {
+      try {
+        const res = await fetch(`/api/exams/${encodeURIComponent(code)}`);
+        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            foundExam = json.data;
+            if (onAddExam) {
+              onAddExam(json.data);
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Fallback 4: fetch all exams from /api/exams
+    if (!foundExam) {
+      try {
+        const res = await fetch(`/api/exams`);
+        if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            const match = json.data.find(
+              (ex: any) =>
+                ex.id === accessCodeInput ||
+                ex.accessCode?.toUpperCase() === code ||
+                ex.title?.toUpperCase().includes(code)
+            );
+            if (match) {
+              foundExam = match;
+              if (onAddExam) {
+                onAddExam(match);
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
     if (!foundExam) {
       setEntryError(
-        `Không tìm thấy đề thi với mã "${accessCodeInput}". Vui lòng kiểm tra lại mã phòng thi do giáo viên cung cấp.`
+        `Không tìm thấy đề thi với mã "${accessCodeInput}". Vui lòng kiểm tra lại mã phòng thi do giáo viên cung cấp hoặc quét lại mã QR trên bảng.`
       );
       return;
     }
@@ -325,6 +439,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const handleExamSubmitted = (sub: StudentSubmission) => {
     setCurrentSubmission(sub);
     onSubmissionComplete(sub);
+    // Asynchronously push submission to Cloud Database
+    submitExamToCloud(sub).catch(() => {});
     // Refresh offline queue
     try {
       const q = JSON.parse(localStorage.getItem("eduexam_offline_submissions") || "[]");
@@ -638,10 +754,21 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </span>
               </div>
 
-              {/* Direct Exam Access Banner (from QR / 1-Click Link) */}
+              {/* Loading from Cloud Banner */}
+              {isLoadingCloudExam && (
+                <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 flex items-center gap-3 animate-pulse">
+                  <RefreshCw className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-blue-900">Đang kết nối và tải đề thi từ Cloud Database...</p>
+                    <p className="text-[11px] text-blue-700">Đang đồng bộ dữ liệu phòng thi {accessCodeInput}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Direct Exam Access Banner (from QR / 1-Click Link / Cloud) */}
               {(() => {
-                const targetExam = exams.find(
-                  (e) => e.accessCode === accessCodeInput || e.id === accessCodeInput
+                const targetExam = activeExam || exams.find(
+                  (e) => e.accessCode?.toUpperCase() === accessCodeInput.toUpperCase() || e.id === accessCodeInput
                 );
                 if (!targetExam) return null;
                 return (

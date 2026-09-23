@@ -16,19 +16,45 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 // Discovers machine's LAN IPv4 for mobile phone Wi-Fi testing
 app.get("/api/network-ip", (req, res) => {
   const interfaces = os.networkInterfaces();
-  let lanIp = "10.10.10.164";
+  const candidates: { ip: string; name: string; priority: number }[] = [];
+
   for (const devName in interfaces) {
     const list = interfaces[devName];
-    if (list) {
-      for (const alias of list) {
-        if (alias.family === "IPv4" && alias.address !== "127.0.0.1" && !alias.internal && !alias.address.startsWith("26.")) {
-          lanIp = alias.address;
-          break;
+    if (!list) continue;
+    const lowerName = devName.toLowerCase();
+
+    for (const alias of list) {
+      if (alias.family === "IPv4" && !alias.internal && alias.address !== "127.0.0.1") {
+        const ip = alias.address;
+        // Skip VPN and link-local
+        if (ip.startsWith("26.") || ip.startsWith("169.254.") || ip.startsWith("198.18.")) continue;
+
+        let priority = 1;
+        if (lowerName.includes("wi-fi") || lowerName.includes("wireless") || lowerName.includes("wlan")) {
+          priority = 10;
+        } else if (lowerName.includes("ethernet") || lowerName.includes("lan")) {
+          priority = 8;
+        } else if (ip.startsWith("192.168.")) {
+          priority = 7;
+        } else if (ip.startsWith("10.")) {
+          priority = 5;
+        } else if (ip.startsWith("172.")) {
+          priority = 4;
         }
+
+        candidates.push({ ip, name: devName, priority });
       }
     }
   }
-  res.json({ lanIp, port: PORT });
+
+  candidates.sort((a, b) => b.priority - a.priority);
+  const bestIp = candidates.length > 0 ? candidates[0].ip : "127.0.0.1";
+
+  res.json({
+    lanIp: bestIp,
+    allIps: candidates.map((c) => ({ ip: c.ip, name: c.name })),
+    port: PORT,
+  });
 });
 
 // Google GenAI Client Factory supporting custom API keys per request
@@ -581,11 +607,39 @@ app.get("/api/exams", (req, res) => {
 });
 
 app.get("/api/exams/:id", (req, res) => {
-  const exam = activeExams.find((e) => e.id === req.params.id || e.accessCode?.toUpperCase() === req.params.id?.toUpperCase());
+  const searchKey = req.params.id?.trim().toUpperCase();
+  const exam = activeExams.find(
+    (e) =>
+      e.id === req.params.id ||
+      e.id?.toUpperCase() === searchKey ||
+      e.accessCode?.toUpperCase() === searchKey
+  );
   if (!exam) {
-    return res.status(404).json({ error: "Không tìm thấy đề kiểm tra" });
+    return res.status(404).json({ error: "Không tìm thấy đề kiểm tra với mã " + req.params.id });
   }
   res.json({ success: true, data: exam });
+});
+
+// Save direct full ExamPackage created by teacher
+app.post("/api/exams", (req, res) => {
+  try {
+    const pkg = req.body;
+    if (!pkg || !pkg.accessCode || !pkg.originalQuestions) {
+      return res.status(400).json({ error: "Dữ liệu đề kiểm tra không hợp lệ" });
+    }
+    const upperCode = pkg.accessCode.trim().toUpperCase();
+    activeExams = activeExams.filter(
+      (e) => e.id !== pkg.id && e.accessCode?.toUpperCase() !== upperCode
+    );
+    const savedPkg = {
+      ...pkg,
+      accessCode: upperCode,
+    };
+    activeExams.unshift(savedPkg);
+    res.json({ success: true, data: savedPkg });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Lỗi lưu đề thi" });
+  }
 });
 
 app.post("/api/exams/shuffle-and-create", (req, res) => {

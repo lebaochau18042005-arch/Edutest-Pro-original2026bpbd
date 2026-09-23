@@ -120,9 +120,21 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
 
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
             {submission.isLockedDueToCheating
-              ? "Bài Thi Bị Khóa Do Vi Phạm Quy Chế"
+              ? "⛔ THÍ SINH BỊ ĐÌNH CHỈ THI & LOẠI KHỎI PHÒNG THI"
               : "Kết Quả Làm Bài Thi Chuẩn BGD"}
           </h1>
+
+          {submission.isLockedDueToCheating && (
+            <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-2xl text-xs text-rose-800 space-y-1 max-w-xl mx-auto animate-fade-in text-left">
+              <p className="font-extrabold uppercase flex items-center gap-1.5 text-rose-700">
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+                Biên bản xử lý vi phạm quy chế thi trực tuyến:
+              </p>
+              <p className="text-[11px] leading-relaxed text-rose-900">
+                Thí sinh đã vi phạm quy chế chống gian lận (rời khỏi màn hình bài thi {submission.tabSwitchCount} lần). Hệ thống đã tự động đình chỉ làm bài, thu hồi bài thi và đồng bộ nhật ký vi phạm về Google Sheets của Giáo viên.
+              </p>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm text-slate-600 font-medium pt-1">
             <span className="bg-slate-100 px-2.5 py-1 rounded-xl">
               Trường: <strong>{submission.school || "THPT Chuyên Lê Hồng Phong"}</strong>

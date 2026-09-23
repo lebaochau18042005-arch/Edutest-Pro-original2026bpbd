@@ -20,6 +20,9 @@ import {
   Zap,
   HelpCircle,
   TrendingUp,
+  Layers,
+  Save,
+  Check,
 } from "lucide-react";
 import { StudentSubmission, ExamPackage, Question } from "../../types";
 import {
@@ -27,6 +30,12 @@ import {
   generateGoogleSheetsTSV,
   LETTERS,
 } from "../../utils/examHelpers";
+import {
+  exportSubmissionsMultiSheetExcel,
+  generateGoogleSheetsTSVByClass,
+  syncSubmissionToGoogleSheetsWebhook,
+  GOOGLE_APPS_SCRIPT_SAMPLE_CODE,
+} from "../../utils/googleSheetsSync";
 import { ScoreAnalyticsChart } from "./ScoreAnalyticsChart";
 import { ItemAnalysisView } from "./ItemAnalysisView";
 import { AntiCheatLogModal } from "./AntiCheatLogModal";
@@ -55,9 +64,20 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
   const [selectedAntiCheatSub, setSelectedAntiCheatSub] = useState<StudentSubmission | null>(null);
 
   const [copySuccess, setCopySuccess] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookStatus, setWebhookStatus] = useState<string>("");
-  const [showWebhookGuide, setShowWebhookGuide] = useState(false);
+  const [showGoogleSheetsModal, setShowGoogleSheetsModal] = useState(false);
+  const [sheetsModalTab, setSheetsModalTab] = useState<"webhook" | "multisheet_excel" | "tsv_copy">("webhook");
+  const [webhookUrl, setWebhookUrl] = useState(() => {
+    try {
+      return localStorage.getItem("edutest_google_sheets_webhook") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [targetClassForTSV, setTargetClassForTSV] = useState<string>("all");
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+  const [scriptCopied, setScriptCopied] = useState(false);
+  const [tsvClassCopied, setTsvClassCopied] = useState(false);
 
   // Available classes for filter
   const classesList = Array.from(new Set(submissions.map((s) => s.studentClass).filter(Boolean)));
@@ -117,9 +137,67 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
     }
   };
 
-  // Handle Export to Excel
+  // Handle Export to Excel (Single Sheet - Existing)
   const handleExportExcel = () => {
     exportSubmissionsToExcel(filteredSubmissions, "Bang_Diem_EduExam");
+  };
+
+  // Handle Export to Multi-Sheet Excel by Class
+  const handleExportMultiSheetExcel = () => {
+    exportSubmissionsMultiSheetExcel(submissions, "Bang_Diem_EduTest_Phan_Lop");
+  };
+
+  // Handle Save Webhook URL
+  const handleSaveWebhookUrl = () => {
+    try {
+      localStorage.setItem("edutest_google_sheets_webhook", webhookUrl.trim());
+      setSyncStatusMsg("✓ Đã lưu cấu hình Google Sheets Webhook! Bài thi nộp mới sẽ tự động đồng bộ theo lớp.");
+      setTimeout(() => setSyncStatusMsg(null), 5000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Handle Sync All Existing Submissions
+  const handleSyncAllSubmissions = async () => {
+    if (!webhookUrl.trim()) {
+      alert("Vui lòng nhập URL Google Apps Script Webhook trước khi đồng bộ!");
+      return;
+    }
+    setIsSyncingAll(true);
+    setSyncStatusMsg(`Đang đồng bộ ${submissions.length} bài thi lên Google Sheets...`);
+    let successCount = 0;
+    let failCount = 0;
+    for (const s of submissions) {
+      const res = await syncSubmissionToGoogleSheetsWebhook(s, webhookUrl.trim());
+      if (res.success) successCount++;
+      else failCount++;
+    }
+    setIsSyncingAll(false);
+    setSyncStatusMsg(`✓ Đã hoàn tất: ${successCount} bài thi đã đồng bộ thành công sang Google Sheets (tự động phân theo từng tab lớp).${failCount > 0 ? ` (${failCount} lỗi)` : ""}`);
+  };
+
+  // Handle Copy Google Apps Script Code
+  const handleCopyAppsScript = async () => {
+    try {
+      await navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_SAMPLE_CODE);
+      setScriptCopied(true);
+      setTimeout(() => setScriptCopied(false), 3000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Handle Copy TSV by selected Class
+  const handleCopyTSVByClass = async () => {
+    const tsvData = generateGoogleSheetsTSVByClass(submissions, targetClassForTSV);
+    try {
+      await navigator.clipboard.writeText(tsvData);
+      setTsvClassCopied(true);
+      setTimeout(() => setTsvClassCopied(false), 3000);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -246,22 +324,34 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              id="btn-copy-google-sheet"
-              onClick={handleCopyForGoogleSheets}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold border border-emerald-200 transition-colors shadow-xs"
-              title="Copy bảng điểm dạng TSV để dán trực tiếp vào Google Sheets"
+              id="btn-open-google-sheets-modal"
+              onClick={() => setShowGoogleSheetsModal(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs hover:shadow active:scale-95"
+              title="Đồng bộ Google Sheets tự động phân theo lớp & lưu đầy đủ đáp án, nhật ký"
             >
-              <Copy className="w-3.5 h-3.5" />
-              <span>{copySuccess ? "Đã copy vào Clipboard!" : "Đưa vào Google Sheets (Copy)"}</span>
+              <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+              <span>📊 Đồng Bộ Google Sheets (Tự Động Theo Lớp)</span>
             </button>
 
             <button
               type="button"
-              onClick={handleExportExcel}
+              onClick={handleExportMultiSheetExcel}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+              title="Xuất file Excel gồm nhiều sheet tự động phân chia theo từng lớp học"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Xuất Excel (.xlsx)</span>
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Xuất Excel Đa Lớp (.xlsx)</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-copy-google-sheet"
+              onClick={handleCopyForGoogleSheets}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold border border-emerald-200 transition-colors shadow-xs"
+              title="Copy nhanh bảng điểm vào Clipboard để dán"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>{copySuccess ? "Đã copy!" : "Copy Nhanh TSV"}</span>
             </button>
 
             <button
@@ -731,6 +821,353 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
                 type="button"
                 onClick={() => setSelectedSubmission(null)}
                 className="ml-auto px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Sheets Class-Based Sync Modal */}
+      {showGoogleSheetsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-6 bg-gradient-to-r from-emerald-600 via-teal-600 to-slate-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20">
+                  <FileSpreadsheet className="w-6 h-6 text-emerald-300" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">Đồng Bộ Điểm & Đáp Án Sang Google Sheets</h3>
+                  <p className="text-xs text-emerald-100 font-medium">
+                    Tự động phân tách dữ liệu theo từng lớp học, kèm đầy đủ đáp án & biên bản vi phạm
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGoogleSheetsModal(false)}
+                className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Tabs */}
+            <div className="flex border-b border-slate-200 bg-slate-50 px-6 shrink-0 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSheetsModalTab("webhook")}
+                className={`px-4 py-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors ${
+                  sheetsModalTab === "webhook"
+                    ? "border-emerald-600 text-emerald-800 bg-white rounded-t-xl"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <Zap className="w-4 h-4 text-emerald-600" />
+                <span>⚡ Tự Động Real-time (Webhook)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSheetsModalTab("multisheet_excel")}
+                className={`px-4 py-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors ${
+                  sheetsModalTab === "multisheet_excel"
+                    ? "border-emerald-600 text-emerald-800 bg-white rounded-t-xl"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <Layers className="w-4 h-4 text-emerald-600" />
+                <span>📑 File Excel Đa Sheet Theo Lớp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSheetsModalTab("tsv_copy")}
+                className={`px-4 py-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors ${
+                  sheetsModalTab === "tsv_copy"
+                    ? "border-emerald-600 text-emerald-800 bg-white rounded-t-xl"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <Copy className="w-4 h-4 text-emerald-600" />
+                <span>📋 Sao Chép TSV Dán Thủ Công</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1 text-slate-700">
+              {/* TAB 1: WEBHOOK REAL-TIME SYNC */}
+              {sheetsModalTab === "webhook" && (
+                <div className="space-y-6">
+                  {/* Explanatory Banner */}
+                  <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-200 flex items-start gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-emerald-950 space-y-1">
+                      <p className="font-bold">Cơ chế đồng bộ tự động theo từng lớp:</p>
+                      <p>
+                        Khi học sinh bấm nộp bài (hoặc bị loại do gian lận), hệ thống sẽ gửi dữ liệu trực tiếp về Google Sheets của thầy cô. Script sẽ <strong>tự động tìm hoặc tạo mới một Tab (Sheet) mang tên lớp của học sinh đó</strong> (ví dụ: <code className="bg-emerald-100 px-1 py-0.5 rounded text-emerald-900 font-mono font-bold">12A1</code>, <code className="bg-emerald-100 px-1 py-0.5 rounded text-emerald-900 font-mono font-bold">12A2</code>), đồng thời ghi nhận vào Sheet tổng hợp. Thí sinh vi phạm sẽ được tự động tô nền đỏ cảnh báo!
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Webhook URL Input Form */}
+                  <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      URL Webhook Google Apps Script (Web App URL)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                        placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
+                        className="flex-1 px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveWebhookUrl}
+                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 shadow-xs"
+                      >
+                        <Save className="w-4 h-4" />
+                        <span>Lưu cấu hình</span>
+                      </button>
+                    </div>
+                    {webhookUrl && webhookUrl.trim().startsWith("http") && (
+                      <p className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 mt-1">
+                        <Check className="w-3.5 h-3.5" />
+                        Đang kích hoạt: Bài nộp mới sẽ tự động đồng bộ ngay lập tức!
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Manual Sync All Button */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">Đồng bộ toàn bộ bài thi hiện có</h4>
+                      <p className="text-xs text-slate-500">
+                        Đang có <strong>{submissions.length}</strong> bài thi đã thu thập trong hệ thống.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isSyncingAll || submissions.length === 0 || !webhookUrl.trim()}
+                      onClick={handleSyncAllSubmissions}
+                      className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-2 shrink-0 shadow-xs"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isSyncingAll ? "animate-spin" : ""}`} />
+                      <span>{isSyncingAll ? "Đang đồng bộ..." : `Đẩy toàn bộ (${submissions.length}) bài lên Sheet`}</span>
+                    </button>
+                  </div>
+
+                  {syncStatusMsg && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 font-medium">
+                      {syncStatusMsg}
+                    </div>
+                  )}
+
+                  {/* Code Box & Instructions */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Terminal className="w-4 h-4 text-emerald-600" />
+                        <span>Mã nguồn Google Apps Script (Tự Động Phân Sheet Theo Lớp)</span>
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={handleCopyAppsScript}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+                      >
+                        {scriptCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{scriptCopied ? "Đã sao chép mã!" : "Sao chép mã Apps Script"}</span>
+                      </button>
+                    </div>
+
+                    <pre className="p-4 bg-slate-900 text-emerald-300 font-mono text-[11px] rounded-2xl overflow-x-auto max-h-56 leading-relaxed border border-slate-800 select-all">
+                      {GOOGLE_APPS_SCRIPT_SAMPLE_CODE}
+                    </pre>
+
+                    {/* Step-by-step Setup Guide */}
+                    <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2 text-xs text-amber-950">
+                      <p className="font-bold flex items-center gap-1.5 text-amber-900">
+                        <HelpCircle className="w-4 h-4 text-amber-700" />
+                        <span>Hướng dẫn thiết lập 2 phút trên Google Sheets:</span>
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1 pl-1 text-[11px] leading-relaxed">
+                        <li>
+                          Mở file Google Sheets của thầy cô &rarr; Vào menu <strong>Tiện ích mở rộng (Extensions)</strong> &rarr; Chọn <strong>Apps Script</strong>.
+                        </li>
+                        <li>
+                          Xóa mã mặc định, <strong>Dán mã ở trên</strong> vào và nhấn biểu tượng <strong>Lưu (Ctrl + S)</strong>.
+                        </li>
+                        <li>
+                          Nhấn nút xanh <strong>Triển khai (Deploy)</strong> ở góc phải &rarr; Chọn <strong>Tùy chọn triển khai mới (New deployment)</strong>.
+                        </li>
+                        <li>
+                          Nhấp bánh răng (Chọn loại) &rarr; Chọn <strong>Ứng dụng web (Web app)</strong>:
+                          <div className="pl-4 py-1 text-slate-700 font-medium">
+                            • Mô tả: <span className="font-mono text-emerald-800">EduTest Sync</span><br />
+                            • Người thực thi: <strong>Tôi (email của bạn)</strong><br />
+                            • Ai có quyền truy cập: <strong className="text-rose-700">Bất kỳ ai (Anyone)</strong> *(Bắt buộc để gửi bài thi)*
+                          </div>
+                        </li>
+                        <li>
+                          Nhấn <strong>Triển khai</strong> &rarr; Nhấn <strong>Ủy quyền truy cập</strong> &rarr; Sao chép <strong>URL ứng dụng web</strong> (đuôi <code className="font-mono bg-amber-100 px-1 rounded">/exec</code>) dán vào ô Webhook ở trên rồi bấm <strong>Lưu cấu hình</strong>.
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: MULTI-SHEET EXCEL EXPORT */}
+              {sheetsModalTab === "multisheet_excel" && (
+                <div className="space-y-6">
+                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-start gap-3">
+                    <Layers className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-emerald-950 space-y-1">
+                      <p className="font-bold">Xuất file Excel thông minh tự động chia Sheet theo lớp:</p>
+                      <p>
+                        Mỗi lớp học sẽ được tự động tách thành 1 Sheet (Tab) riêng biệt trong file Excel (ví dụ: <code className="bg-white px-1 py-0.5 rounded font-mono font-bold">Lớp 12A1</code>, <code className="bg-white px-1 py-0.5 rounded font-mono font-bold">Lớp 12A2</code>...), đồng thời có 1 Tab <code className="bg-white px-1 py-0.5 rounded font-mono font-bold">Tất Cả Các Lớp</code> để xem toàn cục.
+                      </p>
+                      <p>
+                        Thầy cô có thể mở trực tiếp bằng Microsoft Excel hoặc tải lên Google Drive / Google Sheets (chọn <em>Tệp &rarr; Nhập &rarr; Tải lên</em>) để có đầy đủ các tab lớp ngay tức thì.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Class Summary Breakdown */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Danh sách các lớp nhận diện được ({classesList.length} lớp):
+                    </h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {classesList.map((cls) => {
+                        const count = submissions.filter((s) => s.studentClass === cls).length;
+                        const locked = submissions.filter((s) => s.studentClass === cls && s.isLockedDueToCheating).length;
+                        return (
+                          <div key={cls} className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                            <div className="font-bold text-slate-800 text-sm">Lớp {cls}</div>
+                            <div className="text-xs text-slate-500 mt-1">{count} thí sinh</div>
+                            {locked > 0 && (
+                              <div className="text-[10px] text-rose-600 font-bold mt-0.5 flex items-center gap-1">
+                                <ShieldAlert className="w-3 h-3" />
+                                <span>{locked} bị loại gian lận</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {classesList.length === 0 && (
+                        <div className="col-span-4 p-4 text-center text-xs text-slate-400">
+                          Chưa có thí sinh nộp bài để thống kê lớp.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Included Columns Description */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+                    <p className="font-bold text-slate-700">Các thông tin đầy đủ có trong mỗi Sheet của lớp:</p>
+                    <div className="flex flex-wrap gap-1.5 text-[11px]">
+                      {[
+                        "STT",
+                        "Mã HS",
+                        "Họ và Tên",
+                        "Lớp",
+                        "Mã Đề",
+                        "Điểm Số",
+                        "Số Câu Đúng / Tổng",
+                        "Thời Gian Làm",
+                        "Đáp Án Chi Tiết (Phần I, II, III)",
+                        "Số Lần Chuyển Tab",
+                        "Cảnh Báo Gian Lận",
+                        "Biên Bản Vi Phạm Thời Gian Thực",
+                        "Thời Điểm Nộp",
+                      ].map((col) => (
+                        <span key={col} className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-slate-700 font-medium">
+                          ✓ {col}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Export Button */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={handleExportMultiSheetExcel}
+                      className="w-full sm:w-auto px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl text-xs transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Tải File Excel Đa Sheet Phân Theo Lớp Ngay (.xlsx)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: CLASS TSV COPY FOR GOOGLE SHEETS */}
+              {sheetsModalTab === "tsv_copy" && (
+                <div className="space-y-6">
+                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-start gap-3">
+                    <Copy className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-emerald-950 space-y-1">
+                      <p className="font-bold">Sao chép nhanh dán vào Google Sheets theo lớp:</p>
+                      <p>
+                        Nếu thầy cô đã có sẵn file Google Sheets và muốn dán trực tiếp kết quả của một lớp cụ thể vào Sheet của lớp đó: Thầy cô chỉ cần chọn lớp, bấm <strong>Sao chép</strong>, sau đó mở tab lớp đó trên Google Sheets và nhấn <strong>Ctrl + V</strong> (ô A1).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Class Filter Selection */}
+                  <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Chọn lớp cần sao chép dữ liệu:
+                    </label>
+                    <select
+                      value={targetClassForTSV}
+                      onChange={(e) => setTargetClassForTSV(e.target.value)}
+                      className="w-full sm:w-80 px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    >
+                      <option value="all">Tất cả các lớp ({submissions.length} bài thi)</option>
+                      {classesList.map((c) => {
+                        const count = submissions.filter((s) => s.studentClass === c).length;
+                        return (
+                          <option key={c} value={c}>
+                            Lớp {c} ({count} bài thi)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Copy Button */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleCopyTSVByClass}
+                      className="w-full sm:w-auto px-6 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl text-xs transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      {tsvClassCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      <span>
+                        {tsvClassCopied
+                          ? "✓ Đã sao chép vào Clipboard! Hãy sang Google Sheets bấm Ctrl + V"
+                          : `Sao chép dữ liệu ${targetClassForTSV === "all" ? "tất cả các lớp" : `Lớp ${targetClassForTSV}`} để dán vào Sheet`}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowGoogleSheetsModal(false)}
+                className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors"
               >
                 Đóng
               </button>

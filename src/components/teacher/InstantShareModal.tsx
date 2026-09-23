@@ -3,6 +3,7 @@ import {
   QrCode,
   Copy,
   Check,
+  CheckCircle2,
   Smartphone,
   ExternalLink,
   Download,
@@ -16,9 +17,13 @@ import {
   Share2,
   Wifi,
   Globe,
+  Cloud,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { ExamPackage } from "../../types";
 import { buildExamShareLinks } from "../../utils/shareUrlHelper";
+import { publishExamToCloud } from "../../utils/cloudExamDatabase";
 
 interface InstantShareModalProps {
   isOpen: boolean;
@@ -35,9 +40,17 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isFullscreenProjector, setIsFullscreenProjector] = useState(false);
-  const [lanIp, setLanIp] = useState<string>("10.10.10.164");
+  const [lanIp, setLanIp] = useState<string>(() => {
+    try {
+      return localStorage.getItem("edutest_lan_ip") || "";
+    } catch {
+      return "";
+    }
+  });
   const isLocalHost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  const [networkMode, setNetworkMode] = useState<"wifi" | "online">(isLocalHost ? "wifi" : "online");
+  const [networkMode, setNetworkMode] = useState<"wifi" | "online">("online");
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<"syncing" | "synced" | "error">("syncing");
+  const [cloudSyncMsg, setCloudSyncMsg] = useState<string>("");
 
   const [links, setLinks] = useState<{
     directLink: string;
@@ -52,15 +65,45 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
   });
   const [isLoadingLinks, setIsLoadingLinks] = useState(false);
 
-  // Discover actual LAN IP from server
+  // Discover actual LAN IP from server if available
   useEffect(() => {
     fetch("/api/network-ip")
       .then((r) => r.json())
       .then((data) => {
-        if (data && data.lanIp) setLanIp(data.lanIp);
+        if (data && data.lanIp && data.lanIp !== "127.0.0.1") {
+          setLanIp(data.lanIp);
+          try {
+            localStorage.setItem("edutest_lan_ip", data.lanIp);
+          } catch {}
+        }
       })
       .catch(() => {});
   }, []);
+
+  // Sync to Cloud Database on open
+  useEffect(() => {
+    if (!isOpen || !exam) return;
+
+    let isMounted = true;
+    setCloudSyncStatus("syncing");
+    setCloudSyncMsg("Đang đồng bộ đề thi lên Cloud Database...");
+
+    publishExamToCloud(exam).then((res) => {
+      if (isMounted) {
+        if (res.success) {
+          setCloudSyncStatus("synced");
+          setCloudSyncMsg(res.message);
+        } else {
+          setCloudSyncStatus("error");
+          setCloudSyncMsg(res.message);
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, exam]);
 
   useEffect(() => {
     if (!isOpen || !exam) return;
@@ -71,7 +114,11 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
     let targetOrigin: string | undefined = undefined;
     if (networkMode === "wifi") {
       const port = typeof window !== "undefined" ? window.location.port || 3000 : 3000;
-      targetOrigin = `http://${lanIp}:${port}`;
+      if (lanIp && lanIp !== "127.0.0.1" && lanIp !== "localhost") {
+        targetOrigin = `http://${lanIp}:${port}`;
+      } else {
+        targetOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+      }
     } else {
       targetOrigin = typeof window !== "undefined" && window.location.origin && !window.location.origin.includes("localhost")
         ? window.location.origin
@@ -243,8 +290,19 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
                   Mã Phòng: <strong className="text-emerald-700">{exam.accessCode}</strong>
                 </span>
               </div>
+
+              {cloudSyncStatus === "synced" ? (
+                <div className="p-2 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-[11px] text-emerald-300 font-bold flex items-center justify-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>🟢 Đã đồng bộ Cloud Database • Học sinh quét 4G/Wi-Fi vào làm bài ngay</span>
+                </div>
+              ) : (
+                <div className="p-2 bg-slate-900 border border-slate-700 rounded-xl text-[11px] text-slate-300 font-medium flex items-center justify-center gap-1.5">
+                  <span>🔗 Quét mã QR tự động mở phòng thi</span>
+                </div>
+              )}
               <p className="text-[11px] text-slate-500">
-                {networkMode === "wifi" ? `Mạng nội bộ Wi-Fi (IP: ${lanIp})` : "Web trực tuyến Vercel"}
+                {networkMode === "wifi" ? `Mạng nội bộ Wi-Fi (IP: ${lanIp})` : "Web trực tuyến Vercel & Đám mây"}
               </p>
             </div>
           </div>
@@ -345,21 +403,42 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
           </button>
         </div>
 
+        {/* Cloud Sync Status Banner */}
+        {cloudSyncStatus === "synced" && (
+          <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5 shadow-xs">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-emerald-900">
+                🟢 Đã đồng bộ lên Cloud Database thành công!
+              </p>
+              <p className="text-[11px] text-emerald-800 mt-0.5">
+                Toàn bộ học sinh dùng <strong>4G/5G hoặc Wi-Fi bất kỳ</strong> chỉ cần quét mã QR hoặc nhập mã <strong className="font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-900 font-bold">{exam.accessCode}</strong> là vào thi ngay lập tức.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {cloudSyncStatus === "syncing" && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-950 flex items-center gap-2.5">
+            <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+            <span className="text-[11px] font-medium text-blue-800">
+              Đang đẩy dữ liệu đề thi lên Cloud Database trực tuyến...
+            </span>
+          </div>
+        )}
+
+        {cloudSyncStatus === "error" && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-950 flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">Lưu ý kết nối:</p>
+              <p className="text-[11px] text-amber-800 mt-0.5">{cloudSyncMsg}</p>
+            </div>
+          </div>
+        )}
+
         {/* Environment Switcher: Wi-Fi vs Online Vercel */}
         <div className="p-1.5 bg-slate-100 rounded-2xl flex gap-1.5 text-xs">
-          <button
-            type="button"
-            onClick={() => setNetworkMode("wifi")}
-            className={`flex-1 py-2.5 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              networkMode === "wifi"
-                ? "bg-white text-emerald-800 shadow-sm border border-emerald-200 ring-2 ring-emerald-500/10"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Thử Trên Điện Thoại (Wi-Fi: {lanIp})</span>
-          </button>
-
           <button
             type="button"
             onClick={() => setNetworkMode("online")}
@@ -369,33 +448,23 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
-            <Globe className="w-3.5 h-3.5 text-blue-600" />
-            <span>Dành Cho Cả Lớp (Web Online Vercel)</span>
+            <Globe className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Dành Cho Cả Lớp (Web Online & 4G/Wi-Fi)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setNetworkMode("wifi")}
+            className={`flex-1 py-2.5 px-3 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              networkMode === "wifi"
+                ? "bg-white text-emerald-800 shadow-sm border border-emerald-200 ring-2 ring-emerald-500/10"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Wifi className="w-3.5 h-3.5 text-slate-600" />
+            <span>Thử Mạng Cục Bộ ({lanIp || "LAN IP"})</span>
           </button>
         </div>
-
-        {/* Mode Explanatory Notice */}
-        {networkMode === "wifi" ? (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5">
-            <span className="text-base leading-none mt-0.5">📱</span>
-            <div>
-              <p className="font-bold">Đang phát đề qua mạng Wi-Fi cục bộ (Đang chạy thử trên máy tính):</p>
-              <p className="text-[11px] text-emerald-800 mt-0.5">
-                Điện thoại chỉ cần kết nối cùng mạng Wi-Fi với máy tính là quét mã QR vào làm bài ngay lập tức (không cần gõ mã).
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-950 flex items-start gap-2.5">
-            <span className="text-base leading-none mt-0.5">🌐</span>
-            <div>
-              <p className="font-bold">Đang phát đề qua trang web trực tuyến (Vercel):</p>
-              <p className="text-[11px] text-blue-800 mt-0.5">
-                Sau khi Thầy/Cô bấm push lên GitHub, toàn bộ học sinh ở nhà hay trên lớp dùng 4G/Wi-Fi đều có thể quét mã này để thi.
-              </p>
-            </div>
-          </div>
-        )}
 
         {/* Exam Quick Specs Card */}
         <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2.5 text-xs">
@@ -459,6 +528,16 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
               <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                 Thầy/Cô có thể <strong>bấm trực tiếp vào ảnh mã QR</strong> hoặc bấm nút màu xanh dưới đây để mở bài thi kiểm tra ngay.
               </p>
+              {links.isSelfContained ? (
+                <div className="mt-2 p-2 bg-emerald-50 border border-emerald-300 rounded-xl text-[11px] text-emerald-800 font-bold flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>⚡ Đề thi tự động nhúng trọn vẹn trong mã QR (Học sinh quét là nhận đề ngay 100%)</span>
+                </div>
+              ) : (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-300 rounded-xl text-[11px] text-blue-800 font-medium flex items-center gap-1.5">
+                  <span>🔗 Mã QR chia sẻ tự động tải đề theo mã phòng trực tuyến</span>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

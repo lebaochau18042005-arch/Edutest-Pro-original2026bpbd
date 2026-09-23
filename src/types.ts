@@ -134,6 +134,7 @@ export type ViolationType =
   | "COPY_PASTE_ATTEMPT"
   | "SHORTCUT_VIOLATION"
   | "SUSPICIOUS_SPEED"
+  | "ANSWER_SELECTED"
   | "TEACHER_UNLOCK";
 
 export interface ViolationLog {

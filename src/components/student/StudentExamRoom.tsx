@@ -415,36 +415,37 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
       isWindowActiveRef.current = false;
       setTabSwitchCount((prevCount) => {
         const newCount = prevCount + 1;
-        const msg =
-          newCount >= maxViolations
-            ? `HỆ THỐNG ĐÃ KHÓA BÀI THI DO RỜI KHỎI MÀN HÌNH ${newCount} LẦN`
-            : `Rời khỏi màn hình bài thi (Lần ${newCount}/${maxViolations}) tại Câu ${currentQIndex}`;
+        const isDisqualified = newCount >= maxViolations;
+        const msg = isDisqualified
+          ? `⛔ ĐÃ BỊ ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI DO RỜI KHỎI BÀI THI ${newCount} LẦN`
+          : `Rời khỏi màn hình bài thi (Lần ${newCount}/${maxViolations}) tại Câu ${currentQIndex}`;
 
         const logItem = logViolation(
           type,
           msg,
-          newCount >= maxViolations ? "critical" : "high",
+          isDisqualified ? "critical" : "high",
           currentQIndex
         );
 
-        if (newCount >= maxViolations) {
+        if (isDisqualified) {
           setIsLocked(true);
           setShowWarningModal(false);
           setTimeout(() => {
             handleFinalSubmit(
               true,
-              "Bài thi bị khóa do rời màn hình quá số lần quy định",
+              `Thí sinh bị ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI do rời màn hình bài thi ${newCount} lần`,
               newCount,
               copyPasteCount,
               devToolsCount,
               suspiciousSpeedCount,
               [...violationLogs, logItem]
             );
-          }, 1500);
+          }, 2000);
         } else {
           setWarningType("tab");
+          const remaining = maxViolations - newCount;
           setWarningMessage(
-            `CẢNH BÁO RỜI PHÒNG THI: Bạn vừa chuyển tab/thu nhỏ màn hình! Đây là lần vi phạm thứ ${newCount}/${maxViolations}. Nếu vượt quá ${maxViolations} lần, bài thi sẽ bị TỰ ĐỘNG KHÓA VÀ NỘP VỀ GIÁO VIÊN!`
+            `CẢNH BÁO NGUY CƠ GIAN LẬN: Bạn vừa rời khỏi màn hình bài thi (Lần ${newCount}/${maxViolations})! Bạn chỉ còn ${remaining} lần vi phạm trước khi BỊ ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI NGAY LẬP TỨC!`
           );
           setShowWarningModal(true);
         }
@@ -486,36 +487,37 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
     if (isLocked) return;
     setTabSwitchCount((prevCount) => {
       const newCount = prevCount + 1;
-      const msg =
-        newCount >= maxViolations
-          ? `HỆ THỐNG ĐÃ KHÓA BÀI THI DO RỜI KHỎI MÀN HÌNH ${newCount} LẦN`
-          : `Rời khỏi màn hình bài thi (Lần ${newCount}/${maxViolations}) tại Câu ${currentQIndex}`;
+      const isDisqualified = newCount >= maxViolations;
+      const msg = isDisqualified
+        ? `⛔ ĐÃ BỊ ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI DO RỜI KHỎI BÀI THI ${newCount} LẦN`
+        : `Rời khỏi màn hình bài thi (Lần ${newCount}/${maxViolations}) tại Câu ${currentQIndex}`;
 
       const logItem = logViolation(
         "TAB_SWITCH",
         msg,
-        newCount >= maxViolations ? "critical" : "high",
+        isDisqualified ? "critical" : "high",
         currentQIndex
       );
 
-      if (newCount >= maxViolations) {
+      if (isDisqualified) {
         setIsLocked(true);
         setShowWarningModal(false);
         setTimeout(() => {
           handleFinalSubmit(
             true,
-            "Bài thi bị khóa do rời màn hình quá số lần quy định",
+            `Thí sinh bị ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI do rời màn hình bài thi ${newCount} lần`,
             newCount,
             copyPasteCount,
             devToolsCount,
             suspiciousSpeedCount,
             [...violationLogs, logItem]
           );
-        }, 1500);
+        }, 2000);
       } else {
         setWarningType("tab");
+        const remaining = maxViolations - newCount;
         setWarningMessage(
-          `CẢNH BÁO RỜI PHÒNG THI: Bạn vừa chuyển tab/thu nhỏ màn hình! Đây là lần vi phạm thứ ${newCount}/${maxViolations}. Nếu vượt quá ${maxViolations} lần, bài thi sẽ bị TỰ ĐỘNG KHÓA VÀ NỘP VỀ GIÁO VIÊN!`
+          `CẢNH BÁO NGUY CƠ GIAN LẬN: Bạn vừa rời khỏi màn hình bài thi (Lần ${newCount}/${maxViolations})! Bạn chỉ còn ${remaining} lần vi phạm trước khi BỊ ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI NGAY LẬP TỨC!`
         );
         setShowWarningModal(true);
       }
@@ -598,6 +600,13 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
       ...prev,
       [qIndex]: optionIndex,
     }));
+
+    logViolation(
+      "ANSWER_SELECTED",
+      `Đã chọn đáp án ${["A", "B", "C", "D"][optionIndex] || optionIndex} tại Câu ${qIndex}`,
+      "low",
+      qIndex
+    );
   };
 
   // True/False select handler
@@ -613,6 +622,13 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
         },
       };
     });
+
+    logViolation(
+      "ANSWER_SELECTED",
+      `Chọn ý ${statementId.toUpperCase()}: ${value ? "ĐÚNG" : "SAI"} tại Câu ${qIndex}`,
+      "low",
+      qIndex
+    );
   };
 
   // Short Answer input handler
@@ -883,21 +899,73 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
         </div>
       </div>
 
-      {/* 3. Anti-Cheat Monitoring Status */}
-      <div className="bg-slate-900 text-white rounded-2xl p-3.5 sm:p-4 border border-indigo-500/30 shadow-md space-y-2.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+      {/* 3. Anti-Cheat Monitoring Status & Risk Meter */}
+      <div className="bg-slate-900 text-white rounded-2xl p-4 border border-indigo-500/30 shadow-md space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
           <div className="flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="font-bold text-xs text-emerald-300">
-              Giám Sát Chống Gian Lận (Tối đa {maxViolations} lần rời tab):
+              Giám Sát Chống Gian Lận (Tối đa {maxViolations} lần rời bài thi):
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* Real-time Risk Level Badge */}
+          <div>
+            {tabSwitchCount === 0 ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>🟢 An Toàn (0 vi phạm)</span>
+              </span>
+            ) : tabSwitchCount === 1 ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                <span>🟡 Cảnh Báo Cấp 1 (Đã rời tab 1/{maxViolations})</span>
+              </span>
+            ) : tabSwitchCount === 2 ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-orange-600/30 text-orange-300 border border-orange-500/60 flex items-center gap-1.5 animate-bounce">
+                <span className="w-2 h-2 rounded-full bg-orange-400" />
+                <span>🟠 NGUY HIỂM 2/{maxViolations}: Vi phạm 1 lần nữa sẽ BỊ LOẠI KHỎI PHÒNG THI!</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-600 text-white border border-rose-500 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                <span>🔴 ĐÃ BỊ ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Visual Progress Bar of Risk */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-[11px] text-slate-400 font-medium">
+            <span>Nguy cơ bị loại khỏi phòng thi:</span>
+            <span className="font-mono font-bold text-white">
+              {tabSwitchCount >= maxViolations
+                ? "100% (ĐÃ BỊ ĐÌNH CHỈ)"
+                : `${Math.round((tabSwitchCount / maxViolations) * 100)}%`}
+            </span>
+          </div>
+          <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-500 rounded-full ${
+                tabSwitchCount === 0
+                  ? "w-0"
+                  : tabSwitchCount === 1
+                  ? "w-1/3 bg-amber-400"
+                  : tabSwitchCount === 2
+                  ? "w-2/3 bg-orange-500"
+                  : "w-full bg-rose-600 animate-pulse"
+              }`}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={`px-2 py-0.5 rounded-lg font-mono font-bold border ${
               tabSwitchCount > 0 ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-slate-800 text-slate-300 border-slate-700"
             }`}>
-              Rời tab: {tabSwitchCount}/{maxViolations}
+              Rời bài thi: {tabSwitchCount}/{maxViolations}
             </span>
             <span className={`px-2 py-0.5 rounded-lg font-mono font-bold border ${
               copyPasteCount > 0 ? "bg-rose-500/20 text-rose-300 border-rose-500/40" : "bg-slate-800 text-slate-300 border-slate-700"
@@ -910,30 +978,28 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
               DevTools: {devToolsCount}
             </span>
           </div>
-        </div>
 
-        {/* Quick Testing buttons for simulation */}
-        <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
-          <span className="text-slate-400">Thử nghiệm phản hồi chống gian lận:</span>
-          <div className="flex flex-wrap gap-1.5">
+          {/* Quick Testing buttons for simulation */}
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="text-slate-400">Thử nghiệm:</span>
             <button
               type="button"
               onClick={triggerTabViolation}
-              className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded border border-amber-500/40 font-bold"
+              className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded border border-amber-500/40 font-bold cursor-pointer"
             >
               Thử Chuyển Tab
             </button>
             <button
               type="button"
               onClick={triggerCopyPasteViolation}
-              className="px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded border border-rose-500/40 font-bold"
+              className="px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded border border-rose-500/40 font-bold cursor-pointer"
             >
               Thử Copy
             </button>
             <button
               type="button"
               onClick={triggerDevToolsViolation}
-              className="px-2 py-0.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded border border-purple-500/40 font-bold"
+              className="px-2 py-0.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded border border-purple-500/40 font-bold cursor-pointer"
             >
               Thử F12
             </button>
@@ -941,17 +1007,67 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
         </div>
       </div>
 
-      {/* 4. Locked Overlay if Cheating Threshold Exceeded */}
+      {/* 4. FULLSCREEN DISQUALIFICATION OVERLAY WHEN CHEATING */}
       {isLocked && (
-        <div className="bg-rose-600 text-white p-6 rounded-2xl shadow-xl text-center space-y-3 animate-fade-in">
-          <Lock className="w-12 h-12 mx-auto text-rose-200" />
-          <h2 className="text-xl font-extrabold uppercase tracking-wide">
-            BÀI THI ĐÃ BỊ KHÓA DO VI PHẠM QUY CHẾ THI!
-          </h2>
-          <p className="text-xs text-rose-100 max-w-lg mx-auto leading-relaxed">
-            Bạn đã rời khỏi màn hình làm bài / chuyển tab quá {maxViolations} lần hoặc vi phạm quy chế
-            chống gian lận. Toàn bộ nhật ký vi phạm đã được chuyển về giáo viên để xử lý.
-          </p>
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gradient-to-b from-slate-900 to-rose-950 border-2 border-rose-600 text-white rounded-3xl max-w-lg w-full p-6 sm:p-8 text-center space-y-5 shadow-2xl shadow-rose-950/80">
+            <div className="w-20 h-20 rounded-3xl bg-rose-600 text-white flex items-center justify-center mx-auto text-3xl shadow-xl shadow-rose-600/40 animate-pulse">
+              <ShieldAlert className="w-10 h-10" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/30 text-rose-300 border border-rose-500/50">
+                QUY CHẾ KHẢO THÍ CHỐNG GIAN LẬN
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-rose-100 uppercase tracking-tight">
+                ⛔ BẠN ĐÃ BỊ ĐÌNH CHỈ & LOẠI KHỎI PHÒNG THI!
+              </h2>
+              <p className="text-xs sm:text-sm text-rose-200/90 leading-relaxed">
+                Hệ thống phát hiện thí sinh có hành vi gian lận: <strong>Rời khỏi màn hình làm bài / chuyển tab quá {maxViolations} lần</strong>. Toàn bộ quyền tiếp tục làm bài đã bị thu hồi ngay lập tức.
+              </p>
+            </div>
+
+            {/* Student metadata snapshot */}
+            <div className="p-4 bg-slate-900/80 rounded-2xl border border-rose-900/50 text-left text-xs space-y-1.5 font-mono">
+              <p className="text-slate-300">
+                Thí sinh: <strong className="text-white">{studentInfo.name}</strong> • Lớp: <strong className="text-amber-300">{studentInfo.studentClass}</strong>
+              </p>
+              <p className="text-slate-300">
+                SBD: <strong className="text-white">{studentInfo.studentId || "SBD"}</strong> • Mã đề: <strong className="text-white">{variant.examCode}</strong>
+              </p>
+              <p className="text-rose-400 font-bold">
+                Trạng thái: ĐÌNH CHỈ THI (Bị loại khỏi phòng thi)
+              </p>
+              <p className="text-slate-400 text-[11px]">
+                Thời điểm bị loại: {new Date().toLocaleTimeString("vi-VN")}
+              </p>
+            </div>
+
+            {/* Violation logs list */}
+            {violationLogs.length > 0 && (
+              <div className="p-3 bg-black/40 rounded-xl border border-rose-900/40 text-left max-h-28 overflow-y-auto space-y-1 text-[11px] font-mono text-rose-300">
+                <p className="font-bold text-white text-[10px] uppercase">Nhật ký vi phạm đã ghi nhận:</p>
+                {violationLogs.slice(-4).map((log, i) => (
+                  <p key={i} className="truncate">
+                    • [{new Date(log.timestamp).toLocaleTimeString("vi-VN")}] {log.message}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                handleFinalSubmit(
+                  true,
+                  "Bài thi bị khóa do rời màn hình quá số lần quy định"
+                );
+              }}
+              className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-xs font-bold shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
+            >
+              Xác Nhận Biên Bản & Chuyển Đến Kết Quả
+            </button>
+          </div>
         </div>
       )}
 

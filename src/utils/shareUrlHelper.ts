@@ -1,73 +1,139 @@
-import { ExamPackage, Question, ExamConfig } from "../types";
+import { ExamPackage, Question, ExamConfig, TrueFalseStatement } from "../types";
 import { generateVariantsFromQuestions } from "./examHelpers";
 
-interface SharedExamPayload {
-  v: number; // version
+// Legacy v1 schema
+interface SharedExamPayloadV1 {
+  v: 1;
   title: string;
   accessCode: string;
   config: ExamConfig;
   questions: Question[];
 }
 
+// Ultra-compact v2 schema (60-80% smaller payload so 40 questions easily fit in QR code)
+interface MinifiedExamPayloadV2 {
+  v: 2;
+  t: string; // exam title
+  c: string; // accessCode
+  cfg: {
+    s: string; // subject
+    g: string; // grade
+    d: number; // duration
+    m?: number; // maxScore
+    v?: number; // maxTabViolations
+    k?: string[]; // examCodes
+  };
+  q: Array<{
+    p: number; // part (1: 4-choice, 2: true/false, 3: short answer)
+    c: string; // content
+    o?: string[]; // options (part 1)
+    a?: number; // correctIndex (part 1)
+    s?: Array<[string, boolean]>; // statements: [text, value] (part 2)
+    k?: string; // shortAnswer (part 3)
+    u?: string; // diagramUrl if any
+    g?: string; // passageContent if any
+  }>;
+}
+
 /**
- * Compresses an exam package into a compact Base64URL string using native CompressionStream (gzip)
+ * Converts a Uint8Array to a URL-safe Base64 string without call stack limits
+ */
+function uint8ArrayToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as any);
+  }
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * Converts a URL-safe Base64 string to a Uint8Array
+ */
+function base64UrlToUint8Array(base64url: string): Uint8Array {
+  let base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) base64 += "=";
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
+ * Compresses an exam package into a compact Base64URL string using native CompressionStream (gzip).
+ * Uses minified format (v: 2) to ensure 30-50 question exams easily fit within standard QR codes (< 1500 chars).
  */
 export async function compressExamForSharing(pkg: ExamPackage): Promise<string> {
   try {
-    // Strip redundant large data if present to keep URL ultra lightweight
-    const sanitizedQuestions = pkg.originalQuestions.map((q) => {
-      const copy = { ...q };
-      // Keep essential question fields, omit heavy base64 data to guarantee fast QR scanning
-      const isShortUrl = copy.diagramUrl && (copy.diagramUrl.startsWith("http://") || copy.diagramUrl.startsWith("https://") || copy.diagramUrl.length < 500);
-      return {
-        id: copy.id,
-        content: copy.content,
-        options: copy.options,
-        correctIndex: copy.correctIndex,
-        part: copy.part || 1,
-        questionType: copy.questionType || "multiple_choice",
-        statements: copy.statements,
-        shortAnswer: copy.shortAnswer,
-        explanation: copy.explanation && copy.explanation.length > 300 ? copy.explanation.slice(0, 300) : copy.explanation,
-        level: copy.level,
-        chapter: copy.chapter,
-        subject: copy.subject,
-        grade: copy.grade,
-        passageContent: copy.passageContent,
-        groupId: copy.groupId,
-        diagramUrl: isShortUrl ? copy.diagramUrl : undefined,
+    const minifiedQuestions = pkg.originalQuestions.map((q) => {
+      const part = q.part || 1;
+      const item: any = {
+        p: part,
+        c: q.content,
       };
+
+      if (part === 1 || q.questionType === "multiple_choice") {
+        item.o = q.options || [];
+        item.a = q.correctIndex ?? 0;
+      } else if (part === 2 || q.questionType === "true_false") {
+        if (q.statements && Array.isArray(q.statements)) {
+          item.s = q.statements.map((st) => [st.text, Boolean(st.correctValue)]);
+        }
+      } else if (part === 3 || q.questionType === "short_answer") {
+        item.k = q.shortAnswer || (q.acceptableAnswers && q.acceptableAnswers[0]) || "";
+      }
+
+      if (q.passageContent) {
+        item.g = q.passageContent;
+      }
+      // Include diagramUrl only if it is short or hosted (omitting giant raw base64 data to keep QR ultra-scannable)
+      if (
+        q.diagramUrl &&
+        (q.diagramUrl.startsWith("http://") ||
+          q.diagramUrl.startsWith("https://") ||
+          q.diagramUrl.length < 350)
+      ) {
+        item.u = q.diagramUrl;
+      }
+
+      return item;
     });
 
-    const payload: SharedExamPayload = {
-      v: 1,
-      title: pkg.title,
-      accessCode: pkg.accessCode,
-      config: pkg.config,
-      questions: sanitizedQuestions as Question[],
+    const payload: MinifiedExamPayloadV2 = {
+      v: 2,
+      t: pkg.title,
+      c: (pkg.accessCode || "THPT2026").toUpperCase(),
+      cfg: {
+        s: pkg.config?.subject || "Khảo thí",
+        g: pkg.config?.grade || "Khối 12",
+        d: pkg.config?.duration || 45,
+        m: pkg.config?.maxScore || 10,
+        v: pkg.config?.maxTabViolations || 3,
+        k: pkg.config?.examCodes || ["101", "102", "103", "104"],
+      },
+      q: minifiedQuestions,
     };
 
     const json = JSON.stringify(payload);
 
-    // Use native CompressionStream if available
+    // Native gzip compression via CompressionStream
     if (typeof CompressionStream !== "undefined") {
       const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
       const res = new Response(stream);
       const buf = await res.arrayBuffer();
       const bytes = new Uint8Array(buf);
-      
-      // Convert to base64url
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      return btoa(binary)
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
+      return uint8ArrayToBase64Url(bytes);
     }
 
-    // Fallback if CompressionStream not supported: encodeURIComponent + btoa
+    // Fallback if CompressionStream not available
     return btoa(unescape(encodeURIComponent(json)))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -79,28 +145,22 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
 }
 
 /**
- * Decompresses a Base64URL string back into a full ExamPackage with generated variants
+ * Decompresses a Base64URL string back into a full ExamPackage with generated variants.
+ * Supports both v: 2 (ultra-compact minified) and legacy v: 1.
  */
 export async function decompressExamFromSharing(base64url: string): Promise<ExamPackage | null> {
   try {
-    if (!base64url) return null;
+    if (!base64url || typeof base64url !== "string") return null;
 
     let json = "";
 
     if (typeof DecompressionStream !== "undefined") {
       try {
-        let base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
-        while (base64.length % 4) base64 += "=";
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-
+        const bytes = base64UrlToUint8Array(base64url);
         const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
         const res = new Response(stream);
         json = await res.text();
-      } catch (e) {
+      } catch {
         // Fallback standard base64 decoding
         let base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
         while (base64.length % 4) base64 += "=";
@@ -113,39 +173,111 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
     }
 
     if (!json) return null;
-    const payload: SharedExamPayload = JSON.parse(json);
+    const payload: any = JSON.parse(json);
 
-    if (!payload.questions || !Array.isArray(payload.questions)) {
-      return null;
+    // FORMAT V2: Ultra-compact minified
+    if (payload.v === 2) {
+      const questions: Question[] = (payload.q || []).map((item: any, idx: number) => {
+        const part = (item.p || 1) as 1 | 2 | 3;
+        const qType = part === 1 ? "multiple_choice" : part === 2 ? "true_false" : "short_answer";
+
+        let statements: TrueFalseStatement[] | undefined = undefined;
+        if (part === 2 && Array.isArray(item.s)) {
+          const labels = ["a", "b", "c", "d"];
+          statements = item.s.map((st: [string, boolean], sIdx: number) => ({
+            id: labels[sIdx] || String(sIdx),
+            label: `${labels[sIdx] || sIdx})`,
+            text: st[0] || "",
+            correctValue: Boolean(st[1]),
+          }));
+        }
+
+        return {
+          id: `q_${Date.now()}_${idx + 1}`,
+          subject: payload.cfg?.s || "Khảo thí",
+          grade: payload.cfg?.g || "Khối 12",
+          level: "Thông hiểu",
+          part,
+          questionType: qType,
+          content: item.c || "",
+          options: item.o || [],
+          correctIndex: item.a ?? 0,
+          statements,
+          shortAnswer: item.k,
+          passageContent: item.g,
+          diagramUrl: item.u,
+        };
+      });
+
+      const config: ExamConfig = {
+        department: "BỘ GIÁO DỤC VÀ ĐÀO TẠO",
+        school: "TRƯỜNG THPT CHUYÊN LÊ HỒNG PHONG",
+        examPeriod: "Kiểm tra định kỳ",
+        subject: payload.cfg?.s || "Khảo thí",
+        grade: payload.cfg?.g || "Khối 12",
+        duration: Number(payload.cfg?.d) || 45,
+        originalExamCode: "101",
+        examCodes:
+          payload.cfg?.k && payload.cfg.k.length > 0
+            ? payload.cfg.k
+            : ["101", "102", "103", "104"],
+        isOriginalKept: false,
+        maxScore: Number(payload.cfg?.m) || 10,
+        shuffleQuestions: true,
+        shuffleOptions: true,
+        allowReviewAfterSubmit: true,
+        maxTabViolations: Number(payload.cfg?.v) || 3,
+      };
+
+      const variants = generateVariantsFromQuestions(questions, config);
+
+      return {
+        id: `exam-${Date.now()}`,
+        title: payload.t || "Đề thi trực tuyến",
+        config,
+        originalQuestions: questions,
+        variants,
+        createdAt: new Date().toISOString(),
+        status: "published",
+        accessCode: (payload.c || "THPT2026").toUpperCase(),
+      };
     }
 
-    // Reconstruct full ExamPackage with generated variants
-    const config = payload.config || {
-      subject: "Khảo thí",
-      examPeriod: "Kiểm tra",
-      duration: 45,
-      maxScore: 10,
-      examCodes: ["101", "102", "103", "104"],
-      shuffleQuestions: true,
-      shuffleOptions: true,
-      allowReviewAfterSubmit: true,
-      maxTabViolations: 3,
-    };
+    // FORMAT V1: Legacy full payload
+    if (payload.questions && Array.isArray(payload.questions)) {
+      const config: ExamConfig = {
+        department: payload.config?.department || "BỘ GIÁO DỤC VÀ ĐÀO TẠO",
+        school: payload.config?.school || "TRƯỜNG THPT CHUYÊN LÊ HỒNG PHONG",
+        examPeriod: payload.config?.examPeriod || "Kiểm tra định kỳ",
+        subject: payload.config?.subject || "Khảo thí",
+        grade: payload.config?.grade || "Khối 12",
+        duration: payload.config?.duration || 45,
+        originalExamCode: payload.config?.originalExamCode || "101",
+        examCodes: payload.config?.examCodes || ["101", "102", "103", "104"],
+        isOriginalKept: payload.config?.isOriginalKept ?? false,
+        maxScore: payload.config?.maxScore || 10,
+        shuffleQuestions: payload.config?.shuffleQuestions ?? true,
+        shuffleOptions: payload.config?.shuffleOptions ?? true,
+        allowReviewAfterSubmit: payload.config?.allowReviewAfterSubmit ?? true,
+        maxTabViolations: payload.config?.maxTabViolations || 3,
+        ...payload.config,
+      };
 
-    const variants = generateVariantsFromQuestions(payload.questions, config);
+      const variants = generateVariantsFromQuestions(payload.questions, config);
 
-    const examPackage: ExamPackage = {
-      id: `shared-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: payload.title || "Đề thi trực tuyến",
-      config,
-      originalQuestions: payload.questions,
-      variants,
-      createdAt: new Date().toISOString(),
-      status: "published",
-      accessCode: (payload.accessCode || "THPT2026").toUpperCase(),
-    };
+      return {
+        id: `exam-shared-${Date.now()}`,
+        title: payload.title || "Đề thi trực tuyến",
+        config,
+        originalQuestions: payload.questions,
+        variants,
+        createdAt: new Date().toISOString(),
+        status: "published",
+        accessCode: (payload.accessCode || "THPT2026").toUpperCase(),
+      };
+    }
 
-    return examPackage;
+    return null;
   } catch (err) {
     console.error("Error decompressing exam:", err);
     return null;
@@ -153,7 +285,8 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
 }
 
 /**
- * Builds the complete shareable URL
+ * Builds the complete shareable URL and QR code for an exam package.
+ * Optimized with Cloud Database integration so QR code is ultra-clean, short, and 100% scannable.
  */
 export async function buildExamShareLinks(
   pkg: ExamPackage,
@@ -167,35 +300,33 @@ export async function buildExamShareLinks(
   let origin = customOrigin;
   if (!origin) {
     if (typeof window !== "undefined") {
-      const hostname = window.location.hostname;
-      // If user is running on localhost or 127.0.0.1, phone scanning QR code cannot open localhost!
-      // So we default to the local Wi-Fi IP (10.10.10.164:3000) for testing, or window.location.origin
-      if (hostname === "localhost" || hostname === "127.0.0.1") {
-        origin = `http://10.10.10.164:${window.location.port || 3000}`;
-      } else {
-        origin = window.location.origin;
-      }
+      origin = window.location.origin;
     } else {
       origin = "https://edutest-pro-original2026bpbd.vercel.app";
     }
   }
 
-  const simpleCodeLink = `${origin}/?code=${encodeURIComponent(pkg.accessCode)}&auto=1`;
+  // Remove trailing slash
+  origin = origin.replace(/\/+$/, "");
 
-  // Try self-contained compressed link
+  const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
+  const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&auto=1`;
+
+  // Try self-contained compressed link for standalone offline sharing if needed
   const compressed = await compressExamForSharing(pkg);
   let directLink = simpleCodeLink;
   let isSelfContained = false;
 
-  // Use query param ?exam=... which QR scanners & Zalo open 100% reliably
-  if (compressed && compressed.length < 3800) {
+  // Ultra-compact v2 payload: if compressed string is under 1200 chars, it can be self-contained
+  if (compressed && compressed.length < 1200) {
     directLink = `${origin}/?exam=${compressed}`;
     isSelfContained = true;
   }
 
-  // Use qrserver API for crisp 400x400 QR code
-  const targetForQr = directLink.length < 2800 ? directLink : simpleCodeLink;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=15&format=png&data=${encodeURIComponent(targetForQr)}`;
+  // For the QR code: Simple clean link guarantees 100% phone camera / Zalo scannability
+  // With Cloud Database sync, `simpleCodeLink` immediately retrieves the full exam from Cloud!
+  const targetForQr = simpleCodeLink;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=450x450&margin=12&ecc=M&format=png&data=${encodeURIComponent(targetForQr)}`;
 
   return {
     directLink,
