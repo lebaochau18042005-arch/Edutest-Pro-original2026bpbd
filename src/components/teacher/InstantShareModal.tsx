@@ -167,14 +167,14 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
     if (linkToOpen) {
       window.open(linkToOpen, "_blank");
     } else if (onOpenAsStudent && exam) {
-      onOpenAsStudent(exam.id, exam.accessCode);
+      onOpenAsStudent(exam.accessCode || exam.id, exam.accessCode);
       onClose();
     }
   };
 
   const handleOpenInThisTab = () => {
     if (onOpenAsStudent && exam) {
-      onOpenAsStudent(exam.id, exam.accessCode);
+      onOpenAsStudent(exam.accessCode || exam.id, exam.accessCode);
       onClose();
     }
   };
@@ -636,7 +636,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
               type="button"
               onClick={() => {
                 onClose();
-                onOpenAsStudent(exam.id, exam.variants[0]?.examCode || "101");
+                onOpenAsStudent(exam.accessCode || exam.id, exam.variants[0]?.examCode || "101");
               }}
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
             >

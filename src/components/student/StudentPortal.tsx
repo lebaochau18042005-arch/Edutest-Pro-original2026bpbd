@@ -137,15 +137,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         }
 
         const codeFromUrl = search.get("code") || search.get("examId");
-        const codeToLookup = (codeFromUrl || prefillExamId || "").trim().toUpperCase();
+        const rawLookup = (codeFromUrl || prefillExamId || "").trim();
+        const codeToLookup = rawLookup.toUpperCase();
 
-        if (codeToLookup) {
-          setAccessCodeInput(codeToLookup);
+        if (rawLookup) {
           const matched = exams.find(
-            (e) => e.accessCode?.toUpperCase() === codeToLookup || e.id === codeToLookup
+            (e) =>
+              e.accessCode?.toUpperCase() === codeToLookup ||
+              e.id?.toLowerCase() === rawLookup.toLowerCase() ||
+              e.id?.toUpperCase() === codeToLookup
           );
           if (matched) {
             setActiveExam(matched);
+            setAccessCodeInput(matched.accessCode || codeToLookup);
             if (matched.variants && matched.variants.length > 0) {
               const randIdx = Math.floor(Math.random() * matched.variants.length);
               setSelectedVariantCode(matched.variants[randIdx].examCode);
@@ -157,6 +161,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               const cloudExam = await fetchExamFromCloud(codeToLookup);
               if (cloudExam) {
                 setActiveExam(cloudExam);
+                setAccessCodeInput(cloudExam.accessCode || codeToLookup);
                 if (onAddExam) onAddExam(cloudExam);
                 if (cloudExam.variants && cloudExam.variants.length > 0) {
                   const randIdx = Math.floor(Math.random() * cloudExam.variants.length);
@@ -169,10 +174,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               // Fallback localStorage
               const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
               const localMatch = saved.find(
-                (e: any) => e.accessCode?.toUpperCase() === codeToLookup || e.id === codeToLookup
+                (e: any) =>
+                  e.accessCode?.toUpperCase() === codeToLookup ||
+                  e.id?.toLowerCase() === rawLookup.toLowerCase() ||
+                  e.id?.toUpperCase() === codeToLookup
               );
               if (localMatch) {
                 setActiveExam(localMatch);
+                setAccessCodeInput(localMatch.accessCode || codeToLookup);
                 if (onAddExam) onAddExam(localMatch);
                 if (localMatch.variants && localMatch.variants.length > 0) {
                   const randIdx = Math.floor(Math.random() * localMatch.variants.length);
@@ -188,6 +197,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 const json = await res.json();
                 if (json.success && json.data) {
                   setActiveExam(json.data);
+                  setAccessCodeInput(json.data.accessCode || codeToLookup);
                   if (onAddExam) onAddExam(json.data);
                   if (json.data.variants && json.data.variants.length > 0) {
                     const randIdx = Math.floor(Math.random() * json.data.variants.length);
@@ -303,13 +313,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
 
     const code = accessCodeInput.trim().toUpperCase();
+    const rawInput = accessCodeInput.trim();
     let foundExam: ExamPackage | null = null;
 
     // Priority 1: Check if activeExam state is already loaded and matches
     if (
       activeExam &&
       (activeExam.accessCode?.toUpperCase() === code ||
-        activeExam.id === accessCodeInput ||
+        activeExam.id?.toLowerCase() === rawInput.toLowerCase() ||
+        activeExam.id?.toUpperCase() === code ||
         !code ||
         activeExam.title.toUpperCase().includes(code))
     ) {
@@ -321,8 +333,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       foundExam =
         exams.find(
           (ex) =>
-            ex.id === accessCodeInput ||
             ex.accessCode?.toUpperCase() === code ||
+            ex.id?.toLowerCase() === rawInput.toLowerCase() ||
+            ex.id?.toUpperCase() === code ||
             ex.title.toUpperCase().includes(code)
         ) || null;
     }
@@ -367,8 +380,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         foundExam =
           saved.find(
             (ex: any) =>
-              ex.id === accessCodeInput ||
               ex.accessCode?.toUpperCase() === code ||
+              ex.id?.toLowerCase() === rawInput.toLowerCase() ||
+              ex.id?.toUpperCase() === code ||
               ex.title?.toUpperCase().includes(code)
           ) || null;
         if (foundExam && onAddExam) {
@@ -402,8 +416,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           if (json.success && Array.isArray(json.data)) {
             const match = json.data.find(
               (ex: any) =>
-                ex.id === accessCodeInput ||
                 ex.accessCode?.toUpperCase() === code ||
+                ex.id?.toLowerCase() === rawInput.toLowerCase() ||
+                ex.id?.toUpperCase() === code ||
                 ex.title?.toUpperCase().includes(code)
             );
             if (match) {
@@ -425,6 +440,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }
 
     setActiveExam(foundExam);
+    setAccessCodeInput(foundExam.accessCode);
     const variantExists = foundExam.variants.some((v) => v.examCode === selectedVariantCode);
     if (!variantExists && foundExam.variants.length > 0) {
       setSelectedVariantCode(foundExam.variants[0].examCode);
@@ -519,6 +535,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     if (ex.variants.length > 0) {
       setSelectedVariantCode(ex.variants[0].examCode);
     }
+    setEntryError("");
   };
 
   // When student finishes submission in online exam room

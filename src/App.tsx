@@ -500,9 +500,15 @@ export default function App() {
         const code = search.get("code") || search.get("examId");
         if (code) {
           const upperCode = code.trim().toUpperCase();
-          setPrefillExamId(upperCode);
+          const rawCode = code.trim();
 
-          let found = activeExams.find((e) => e.accessCode === upperCode || e.id === code);
+          let found = activeExams.find(
+            (e) =>
+              e.accessCode?.toUpperCase() === upperCode ||
+              e.id.toLowerCase() === rawCode.toLowerCase() ||
+              e.id.toUpperCase() === upperCode
+          );
+          setPrefillExamId(found?.accessCode || upperCode);
 
           // If not in React state yet, check Cloud Database (Firebase / Cloud DB)
           if (!found) {
@@ -968,7 +974,14 @@ export default function App() {
                 onPublishExam={handlePublishExam}
                 onUnlockStudent={handleUnlockStudent}
                 onOpenStudentExam={(examId, code) => {
-                  setPrefillExamId(examId);
+                  const matched = activeExams.find(
+                    (e) =>
+                      e.id.toLowerCase() === examId.toLowerCase() ||
+                      e.id.toUpperCase() === examId.toUpperCase() ||
+                      e.accessCode?.toUpperCase() === examId.toUpperCase()
+                  );
+                  const resolvedCode = matched?.accessCode || examId;
+                  setPrefillExamId(resolvedCode);
                   setPrefillExamCode(code);
                   setCurrentRole("student");
                   setStudentTab("online_test");

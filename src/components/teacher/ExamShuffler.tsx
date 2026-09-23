@@ -3081,7 +3081,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                         {publishedExam && (
                           <button
                             type="button"
-                            onClick={() => onOpenStudentExam(publishedExam.id, currentVariant.examCode)}
+                            onClick={() => onOpenStudentExam(publishedExam.accessCode || publishedExam.id, currentVariant.examCode)}
                             className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
                           >
                             <span>Mở Phòng Thi Thực Tế</span>
@@ -3393,7 +3393,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                           {publishedExam && (
                             <button
                               type="button"
-                              onClick={() => onOpenStudentExam(publishedExam.id, currentVariant.examCode)}
+                              onClick={() => onOpenStudentExam(publishedExam.accessCode || publishedExam.id, currentVariant.examCode)}
                               className="w-full py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all"
                             >
                               <span>Bắt Đầu Làm Thử Phòng Thi</span>
@@ -4376,7 +4376,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         exam={publishedExam}
         onOpenAsStudent={(examId, code) => {
           if (onOpenStudentExam && publishedExam) {
-            onOpenStudentExam(publishedExam.id, code);
+            onOpenStudentExam(publishedExam.accessCode || publishedExam.id, code);
           }
         }}
       />
