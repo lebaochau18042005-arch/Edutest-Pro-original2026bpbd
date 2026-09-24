@@ -800,15 +800,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     <div className="flex items-center gap-3 shrink-0">
                       <div className="text-right">
                         <p className="text-2xl font-black text-slate-900">
-                          {sub.score.toFixed(2)}
+                          {typeof sub.score === "number" ? sub.score.toFixed(2) : "0.00"}
                           <span className="text-xs font-normal text-slate-400">/10</span>
                         </p>
                         <p className="text-[10px] font-bold text-emerald-600">
-                          {sub.score >= 8
+                          {(sub.score ?? 0) >= 8
                             ? "Giỏi / Xuất sắc"
-                            : sub.score >= 6.5
+                            : (sub.score ?? 0) >= 6.5
                             ? "Khá"
-                            : sub.score >= 5
+                            : (sub.score ?? 0) >= 5
                             ? "Trung bình"
                             : "Yêu cầu rèn luyện"}
                         </p>

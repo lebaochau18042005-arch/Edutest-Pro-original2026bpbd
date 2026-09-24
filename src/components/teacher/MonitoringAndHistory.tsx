@@ -122,7 +122,7 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
 
   const avgScore =
     totalStudents > 0
-      ? (submissions.reduce((acc, curr) => acc + curr.score, 0) / totalStudents).toFixed(2)
+      ? (submissions.reduce((acc, curr) => acc + (typeof curr.score === "number" ? curr.score : 0), 0) / totalStudents).toFixed(2)
       : "0.00";
 
   // Handle Copy to Clipboard for Google Sheets
@@ -475,7 +475,7 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
                             <span className="text-slate-500">
                               Đúng {sub.correctCount}/{totalQ} ({sub.wrongCount} sai)
                             </span>
-                            <span className="font-bold text-indigo-700 font-mono text-xs">{sub.score.toFixed(2)} đ</span>
+                            <span className="font-bold text-indigo-700 font-mono text-xs">{typeof sub.score === "number" ? sub.score.toFixed(2) : "--"} đ</span>
                           </div>
                           {(sub.part1Score !== undefined || sub.part2Score !== undefined || sub.part3Score !== undefined) && (
                             <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500">
@@ -489,7 +489,7 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
                               className={`h-full ${
                                 sub.isLockedDueToCheating
                                   ? "bg-rose-500"
-                                  : sub.score >= 8
+                                  : (sub.score || 0) >= 8
                                   ? "bg-emerald-500"
                                   : "bg-indigo-500"
                               }`}
@@ -501,7 +501,7 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
 
                       <td className="py-3 px-4">
                         <div className="text-slate-700 font-medium">
-                          {(sub.durationTakenSeconds / 60).toFixed(1)} phút
+                          {((sub.durationTakenSeconds || 0) / 60).toFixed(1)} phút
                         </div>
                         {(sub.suspiciousSpeedCount || 0) > 0 && (
                           <div className="text-[10px] text-amber-700 font-bold flex items-center space-x-0.5">
@@ -644,7 +644,7 @@ export const MonitoringAndHistory: React.FC<MonitoringAndHistoryProps> = ({
                 <div>
                   <div className="text-slate-500 font-medium">Điểm số</div>
                   <div className="text-lg font-bold text-indigo-700 font-mono">
-                    {selectedSubmission.score.toFixed(2)}
+                    {typeof selectedSubmission.score === "number" ? selectedSubmission.score.toFixed(2) : "--"}
                   </div>
                 </div>
                 <div>

@@ -238,7 +238,7 @@ export const ScoreAnalyticsChart: React.FC<ScoreAnalyticsChartProps> = ({
           const entry = chapterMap[chName][studentGrade];
           entry.totalAttempts += 1;
           entry.studentIds.add(sub.id);
-          if (Math.random() < sub.score / 10) {
+          if (Math.random() < (sub.score || 0) / 10) {
             entry.correctAttempts += 1;
           }
         });
@@ -289,10 +289,11 @@ export const ScoreAnalyticsChart: React.FC<ScoreAnalyticsChartProps> = ({
         else if (sub.studentClass.startsWith("11")) g = "Khối 11";
         else if (sub.studentClass.startsWith("12")) g = "Khối 12";
       }
+      const sScore = typeof sub.score === "number" && !isNaN(sub.score) ? sub.score : 0;
       if (!gradeMap[g]) gradeMap[g] = { totalScore: 0, count: 0, passed: 0 };
-      gradeMap[g].totalScore += sub.score;
+      gradeMap[g].totalScore += sScore;
       gradeMap[g].count += 1;
-      if (sub.score >= 5.0) gradeMap[g].passed += 1;
+      if (sScore >= 5.0) gradeMap[g].passed += 1;
     });
 
     // If gradeMap is empty (no submissions yet), provide helpful illustrative baseline
@@ -909,7 +910,7 @@ export const ScoreAnalyticsChart: React.FC<ScoreAnalyticsChartProps> = ({
                               : "bg-rose-50 text-rose-700 border border-rose-200"
                           }`}
                         >
-                          {stat.avgScore.toFixed(2)}
+                          {Number(stat.avgScore || 0).toFixed(2)}
                         </span>
                       </td>
 

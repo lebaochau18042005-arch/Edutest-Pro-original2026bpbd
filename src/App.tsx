@@ -477,12 +477,25 @@ export default function App() {
     return DEFAULT_INITIAL_EXAMS;
   });
 
+  const sanitizeSubmission = (s: any): StudentSubmission => ({
+    ...s,
+    score: typeof s.score === "number" && !isNaN(s.score) ? s.score : 0,
+    durationTakenSeconds: typeof s.durationTakenSeconds === "number" ? s.durationTakenSeconds : 0,
+    tabSwitchCount: typeof s.tabSwitchCount === "number" ? s.tabSwitchCount : 0,
+    correctCount: typeof s.correctCount === "number" ? s.correctCount : 0,
+    wrongCount: typeof s.wrongCount === "number" ? s.wrongCount : 0,
+    totalQuestions: typeof s.totalQuestions === "number" ? s.totalQuestions : 0,
+    status: s.status || "submitted",
+  });
+
   const [submissions, setSubmissions] = useState<StudentSubmission[]>(() => {
     try {
       const saved = localStorage.getItem("edutest_submissions");
       if (saved) {
         const p = JSON.parse(saved);
-        if (Array.isArray(p) && p.length > 0) return p;
+        if (Array.isArray(p) && p.length > 0) {
+          return p.map(sanitizeSubmission);
+        }
       }
     } catch (e) {}
     return DEFAULT_INITIAL_SUBMISSIONS;
@@ -687,14 +700,15 @@ export default function App() {
       }
       if (resSubs && resSubs.ok && resSubs.headers.get("content-type")?.includes("application/json")) {
         const d = await resSubs.json().catch(() => null);
-        if (d && d.data) setSubmissions(d.data);
+        if (d && Array.isArray(d.data)) setSubmissions(d.data.map(sanitizeSubmission));
       }
 
       // Merge realtime Cloud Database submissions for live monitoring
       if (cloudSubs && Array.isArray(cloudSubs) && cloudSubs.length > 0) {
+        const sanitizedCloud = cloudSubs.map(sanitizeSubmission);
         setSubmissions((prev) => {
           const existingIds = new Set(prev.map((s) => s.id));
-          const newOnes = cloudSubs.filter((s) => !existingIds.has(s.id));
+          const newOnes = sanitizedCloud.filter((s) => !existingIds.has(s.id));
           if (newOnes.length === 0) return prev;
           const merged = [...newOnes, ...prev];
           try {
@@ -783,10 +797,11 @@ export default function App() {
 
   // Student Submits Exam
   const handleSubmissionComplete = async (sub: StudentSubmission) => {
-    setSubmissions((prev) => [sub, ...prev]);
+    const safeSub = sanitizeSubmission(sub);
+    setSubmissions((prev) => [safeSub, ...prev]);
 
     // Push to Cloud Database
-    submitExamToCloud(sub).catch((err) => {
+    submitExamToCloud(safeSub).catch((err) => {
       console.warn("Auto cloud submit error:", err);
     });
 

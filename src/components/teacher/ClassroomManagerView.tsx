@@ -566,15 +566,16 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
           statusStr = "Đã nộp bài";
         }
 
-        scoreStr = sub.score.toFixed(2);
+        scoreStr = typeof sub.score === "number" ? sub.score.toFixed(2) : "--";
         variantStr = sub.examCode || "101";
         correctStr = `${sub.correctCount}/${sub.totalQuestions}`;
         timeSpentStr = `${Math.round(sub.durationTakenSeconds / 60)} phút`;
         violationStr = String(sub.tabSwitchCount || 0);
 
-        if (sub.score >= 8.0) classification = "Giỏi";
-        else if (sub.score >= 6.5) classification = "Khá";
-        else if (sub.score >= 5.0) classification = "Trung bình";
+        const safeScore = typeof sub.score === "number" ? sub.score : 0;
+        if (safeScore >= 8.0) classification = "Giỏi";
+        else if (safeScore >= 6.5) classification = "Khá";
+        else if (safeScore >= 5.0) classification = "Trung bình";
         else classification = "Chưa đạt / Yếu";
       }
 
@@ -1010,7 +1011,7 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                                       </span>
                                     ) : (
                                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                        Đã nộp: {stuSub.score.toFixed(1)}đ
+                                        Đã nộp: {typeof stuSub.score === "number" ? stuSub.score.toFixed(1) : "--"}đ
                                       </span>
                                     )
                                   ) : (
@@ -1281,11 +1282,11 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                 const submittedSubs = classSubs.filter((s) => s.status === "submitted");
                 const avgScore =
                   submittedSubs.length > 0
-                    ? (submittedSubs.reduce((acc, cur) => acc + cur.score, 0) / submittedSubs.length).toFixed(2)
+                    ? (submittedSubs.reduce((acc, cur) => acc + (typeof cur.score === "number" ? cur.score : 0), 0) / submittedSubs.length).toFixed(2)
                     : "0.00";
                 const highestScore =
                   submittedSubs.length > 0
-                    ? Math.max(...submittedSubs.map((s) => s.score)).toFixed(1)
+                    ? Math.max(0, ...submittedSubs.map((s) => typeof s.score === "number" ? s.score : 0)).toFixed(1)
                     : "--";
 
                 return (
@@ -1419,14 +1420,14 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                               {sub ? (
                                 <span
                                   className={`text-sm font-black ${
-                                    sub.score >= 8.0
+                                    (sub.score || 0) >= 8.0
                                       ? "text-emerald-600"
-                                      : sub.score >= 5.0
+                                      : (sub.score || 0) >= 5.0
                                       ? "text-blue-600"
                                       : "text-rose-600"
                                   }`}
                                 >
-                                  {sub.score.toFixed(2)}
+                                  {typeof sub.score === "number" ? sub.score.toFixed(2) : "--"}
                                 </span>
                               ) : (
                                 <span className="text-slate-300 font-bold">--</span>
@@ -1921,7 +1922,7 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700">Điểm Số</span>
                 <div className="text-xl font-black text-blue-900 mt-0.5">
-                  {selectedSubmissionForDetail.score.toFixed(2)}
+                  {typeof selectedSubmissionForDetail.score === "number" ? selectedSubmissionForDetail.score.toFixed(2) : "--"}
                 </div>
               </div>
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl">

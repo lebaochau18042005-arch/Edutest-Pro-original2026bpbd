@@ -50,7 +50,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
   } | null>(null);
 
   useEffect(() => {
-    if (submission.score >= 7 && !submission.isLockedDueToCheating) {
+    if ((submission.score || 0) >= 7 && !submission.isLockedDueToCheating) {
       confetti({
         particleCount: 80,
         spread: 70,
@@ -106,7 +106,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
             className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center shadow-lg ${
               submission.isLockedDueToCheating
                 ? "bg-rose-100 text-rose-700 shadow-rose-100"
-                : submission.score >= 8
+                : (submission.score || 0) >= 8
                 ? "bg-emerald-100 text-emerald-700 shadow-emerald-100"
                 : "bg-indigo-100 text-indigo-700 shadow-indigo-100"
             }`}
@@ -160,7 +160,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
             Tổng Điểm (Thang điểm 10.0)
           </span>
           <div className="text-5xl font-extrabold text-indigo-700 my-1 font-mono">
-            {submission.score.toFixed(2)}
+            {typeof submission?.score === "number" ? submission.score.toFixed(2) : "0.00"}
           </div>
           <span className="text-xs text-slate-600 font-medium">
             Đúng <strong>{submission.correctCount}</strong> / {submission.totalQuestions} câu hỏi & lệnh hỏi
@@ -475,11 +475,11 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                       {detail && (
                         <div className="shrink-0 text-right">
                           <span className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono inline-block ${
-                            detail.scoreEarned > 0
+                            (detail.scoreEarned || 0) > 0
                               ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                               : "bg-rose-100 text-rose-800 border border-rose-300"
                           }`}>
-                            +{detail.scoreEarned.toFixed(2)} đ
+                            +{typeof detail.scoreEarned === "number" ? detail.scoreEarned.toFixed(2) : "0.00"} đ
                           </span>
                         </div>
                       )}
