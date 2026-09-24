@@ -42,6 +42,7 @@ export const DualNavigationBar: React.FC<DualNavigationBarProps> = ({
   activeExamCount,
   submissionCount,
   lockedViolationCount,
+  classesCount = 0,
   onQuickLaunchStudentTest,
 }) => {
   return (

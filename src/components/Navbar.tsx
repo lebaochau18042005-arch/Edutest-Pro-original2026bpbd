@@ -40,6 +40,7 @@ export const SidebarNav: React.FC<SidebarNavbarProps> = ({
   activeExamCount,
   submissionCount,
   lockedViolationCount,
+  classesCount = 0,
   onQuickLaunchStudentTest,
 }) => {
   return (
