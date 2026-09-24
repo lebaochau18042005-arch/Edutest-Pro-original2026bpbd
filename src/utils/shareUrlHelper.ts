@@ -335,7 +335,8 @@ export async function buildExamShareLinks(
   let isSelfContained = false;
 
   if (compressed && compressed.length > 0) {
-    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&exam=${compressed}&role=student&auto=1`;
+    // Put compressed payload in hash (#exam=...) to bypass HTTP length limits and prevent Vercel 414 errors
+    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&role=student&auto=1#exam=${compressed}`;
     isSelfContained = true;
   }
 
@@ -377,3 +378,68 @@ export async function buildExamShareLinks(
     isSelfContained,
   };
 }
+
+/**
+ * Builds a 1-click self-contained shareable URL specifically bound to a class.
+ */
+export async function buildClassExamShareLink(
+  pkg: ExamPackage,
+  classroomId: string,
+  classroomName: string,
+  assignmentId?: string,
+  customOrigin?: string
+): Promise<string> {
+  let origin = customOrigin;
+  if (!origin) {
+    if (typeof window !== "undefined") {
+      origin = window.location.origin;
+    } else {
+      origin = "https://edutest-pro-original2026bpbd.vercel.app";
+    }
+  }
+  origin = origin.replace(/\/+$/, "");
+  const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
+  const compressed = await compressExamForSharing(pkg);
+  const baseQuery = `?code=${encodeURIComponent(cleanCode)}&classId=${encodeURIComponent(classroomId)}&className=${encodeURIComponent(classroomName)}&role=student&auto=1${assignmentId ? `&assignId=${encodeURIComponent(assignmentId)}` : ""}`;
+  if (compressed && compressed.length > 0) {
+    return `${origin}/${baseQuery}#exam=${compressed}`;
+  }
+  return `${origin}/${baseQuery}`;
+}
+
+/**
+ * Robust extractor for exam payloads and query parameters from current window URL.
+ */
+export function extractExamPayloadFromUrl(): {
+  examPayload: string;
+  code: string;
+  classId?: string;
+  className?: string;
+  assignId?: string;
+} {
+  if (typeof window === "undefined") return { examPayload: "", code: "" };
+  try {
+    const search = new URLSearchParams(window.location.search);
+    const code = (search.get("code") || search.get("examId") || "").trim().toUpperCase();
+    const classId = search.get("classId") || search.get("class") || undefined;
+    const className = search.get("className") || undefined;
+    const assignId = search.get("assignId") || search.get("assign") || undefined;
+
+    let examPayload = "";
+    const hash = window.location.hash || "";
+    if (hash.includes("exam=")) {
+      const match = hash.match(/exam=([^&]+)/);
+      if (match && match[1]) {
+        examPayload = decodeURIComponent(match[1]);
+      }
+    }
+    if (!examPayload) {
+      examPayload = search.get("exam") || "";
+    }
+
+    return { examPayload, code, classId, className, assignId };
+  } catch {
+    return { examPayload: "", code: "" };
+  }
+}
+

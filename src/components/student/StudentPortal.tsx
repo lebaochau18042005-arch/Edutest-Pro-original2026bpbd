@@ -29,6 +29,7 @@ import {
   Smartphone,
   Laptop,
   Users,
+  ShieldCheck,
 } from "lucide-react";
 import {
   ExamPackage,
@@ -43,7 +44,7 @@ import { StudentResultView } from "./StudentResultView";
 import { clientGradePaper } from "../../utils/clientAI";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
 import { fetchExamFromCloud, submitExamToCloud } from "../../utils/cloudExamDatabase";
-import { decompressExamFromSharing } from "../../utils/shareUrlHelper";
+import { decompressExamFromSharing, extractExamPayloadFromUrl } from "../../utils/shareUrlHelper";
 
 interface StudentPortalProps {
   exams: ExamPackage[];
@@ -138,16 +139,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   useEffect(() => {
     const parseUrlAndPrefill = async () => {
       try {
-        const search = new URLSearchParams(window.location.search);
-        const examParam = search.get("exam");
-        const hash = window.location.hash;
-        const base64url =
-          hash && hash.startsWith("#exam=")
-            ? hash.replace(/^#exam=/, "")
-            : examParam || "";
+        const { examPayload, code: urlCode, classId: urlClassId, className: urlClassName, assignId: urlAssignId } = extractExamPayloadFromUrl();
 
-        if (base64url) {
-          const decompressed = await decompressExamFromSharing(base64url);
+        if (examPayload) {
+          const decompressed = await decompressExamFromSharing(examPayload);
           if (decompressed) {
             setActiveExam(decompressed);
             setAccessCodeInput(decompressed.accessCode);
@@ -158,15 +153,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             if (onAddExam) {
               onAddExam(decompressed);
             }
+
+            if (urlClassId) {
+              setEntryMethod("class");
+              setChosenClassId(urlClassId);
+              if (urlAssignId) setChosenAssignmentId(urlAssignId);
+              if (urlClassName) setStudentClass(urlClassName);
+            } else {
+              setEntryMethod("code");
+            }
             return;
           }
         }
 
-        const codeFromUrl = search.get("code") || search.get("examId");
-        const rawLookup = (codeFromUrl || prefillExamId || "").trim();
+        const rawLookup = (urlCode || prefillExamId || "").trim();
         const codeToLookup = rawLookup.toUpperCase();
 
         if (rawLookup) {
+          setAccessCodeInput(codeToLookup);
+          if (!urlClassId) {
+            setEntryMethod("code");
+          }
           const matched = exams.find(
             (e) =>
               e.accessCode?.toUpperCase() === codeToLookup ||
@@ -175,11 +182,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           );
           if (matched) {
             setActiveExam(matched);
-            setAccessCodeInput(matched.accessCode || codeToLookup);
             if (matched.variants && matched.variants.length > 0) {
               const randIdx = Math.floor(Math.random() * matched.variants.length);
               setSelectedVariantCode(matched.variants[randIdx].examCode);
             }
+            return;
           } else {
             setIsLoadingCloudExam(true);
             try {
@@ -216,21 +223,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 setIsLoadingCloudExam(false);
                 return;
               }
-
-              // Fallback local backend API
-              const res = await fetch(`/api/exams/${encodeURIComponent(codeToLookup)}`);
-              if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
-                const json = await res.json();
-                if (json.success && json.data) {
-                  setActiveExam(json.data);
-                  setAccessCodeInput(json.data.accessCode || codeToLookup);
-                  if (onAddExam) onAddExam(json.data);
-                  if (json.data.variants && json.data.variants.length > 0) {
-                    const randIdx = Math.floor(Math.random() * json.data.variants.length);
-                    setSelectedVariantCode(json.data.variants[randIdx].examCode);
-                  }
-                }
-              }
             } catch (e) {
             } finally {
               setIsLoadingCloudExam(false);
@@ -243,7 +235,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     };
 
     parseUrlAndPrefill();
-  }, [prefillExamId, exams]);
+    window.addEventListener("popstate", parseUrlAndPrefill);
+    window.addEventListener("hashchange", parseUrlAndPrefill);
+    return () => {
+      window.removeEventListener("popstate", parseUrlAndPrefill);
+      window.removeEventListener("hashchange", parseUrlAndPrefill);
+    };
+  }, [exams, prefillExamId]);
 
   // Sync prefillExamCode when changed
   useEffect(() => {
@@ -558,10 +556,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const handleSelectExamFromList = (ex: ExamPackage) => {
     setActiveExam(ex);
     setAccessCodeInput(ex.accessCode);
-    if (ex.variants.length > 0) {
-      setSelectedVariantCode(ex.variants[0].examCode);
+    setEntryMethod("code");
+    if (ex.variants && ex.variants.length > 0) {
+      const randIdx = Math.floor(Math.random() * ex.variants.length);
+      setSelectedVariantCode(ex.variants[randIdx].examCode);
     }
     setEntryError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // When student finishes submission in online exam room
@@ -1061,34 +1062,42 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </div>
               )}
 
-              {/* Direct Exam Access Banner (from QR / 1-Click Link / Cloud) */}
+              {/* Direct Exam Access Banner (Premium Exam Admission Card) */}
               {(() => {
                 const targetExam = activeExam || exams.find(
                   (e) => e.accessCode?.toUpperCase() === accessCodeInput.toUpperCase() || e.id === accessCodeInput
                 );
                 if (!targetExam) return null;
                 return (
-                  <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-300/60 flex items-start gap-3 animate-fade-in">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-700 text-white flex items-center justify-center shrink-0 shadow-md">
-                      <Sparkles className="w-5 h-5 text-amber-300" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          🎯 ĐÃ NHẬN ĐỀ THI TRỰC TUYẾN
-                        </span>
-                        <span className="text-[11px] font-mono font-bold text-slate-500">
-                          MÃ PHÒNG: {targetExam.accessCode}
-                        </span>
+                  <div className="relative overflow-hidden p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-emerald-600 via-teal-700 to-slate-900 text-white shadow-lg shadow-emerald-900/15 border border-emerald-500/30 animate-fade-in">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-400/20 backdrop-blur-md border border-emerald-300/30 text-[11px] font-bold text-emerald-100">
+                        <span className="w-2 h-2 rounded-full bg-emerald-300 animate-ping inline-block" />
+                        <span>🎯 ĐÃ KẾT NỐI PHÒNG THI</span>
                       </div>
-                      <h4 className="font-bold text-sm text-slate-900 mt-1 truncate">
-                        {targetExam.title}
-                      </h4>
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        Thời gian: <strong>{targetExam.config.duration} phút</strong> •{" "}
-                        {targetExam.originalQuestions.length} câu hỏi • Tự động gán{" "}
-                        <strong className="text-emerald-700 font-mono font-bold">Mã đề {selectedVariantCode}</strong> (Chống nhìn bài)
-                      </p>
+                      <span className="font-mono text-xs font-black tracking-wider bg-white/15 px-2.5 py-1 rounded-lg border border-white/20 text-white shadow-xs">
+                        MÃ: {targetExam.accessCode}
+                      </span>
+                    </div>
+
+                    <h4 className="font-bold text-base sm:text-lg text-white mt-1 leading-snug break-words">
+                      {targetExam.title}
+                    </h4>
+
+                    <div className="mt-3 pt-3 border-t border-white/15 flex flex-wrap items-center gap-2 text-xs text-emerald-100">
+                      <span className="inline-flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
+                        <Clock className="w-3.5 h-3.5 text-amber-300" />
+                        <span className="font-medium">{targetExam.config.duration} phút</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
+                        <BookOpen className="w-3.5 h-3.5 text-sky-300" />
+                        <span className="font-medium">{targetExam.originalQuestions.length} câu hỏi</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 bg-emerald-400/20 text-emerald-200 border border-emerald-300/30 px-2.5 py-1 rounded-lg font-mono font-bold">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>Mã đề: {selectedVariantCode}</span>
+                        <span className="text-[10px] text-emerald-300 font-normal hidden sm:inline">(Chống nhìn bài)</span>
+                      </span>
                     </div>
                   </div>
                 );
@@ -1100,9 +1109,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-700 mb-1">
                     Họ và tên học sinh <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1111,12 +1120,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     value={studentName}
                     onChange={(e) => setStudentName(e.target.value)}
                     placeholder="Ví dụ: Lê Bảo Châu"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-medium"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-none text-sm font-medium text-slate-900 transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-700 mb-1">
                     Lớp <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1124,15 +1133,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     required
                     value={studentClass}
                     onChange={(e) => setStudentClass(e.target.value)}
-                    placeholder="Ví dụ: 12A1"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-medium"
+                    placeholder="Ví dụ: 12C2"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-none text-sm font-medium text-slate-900 transition-all"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-700 mb-1">
                     Trường THPT <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1141,12 +1148,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     value={school}
                     onChange={(e) => setSchool(e.target.value)}
                     placeholder="Ví dụ: THPT Chuyên Lê Hồng Phong"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-medium"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-none text-sm font-medium text-slate-900 transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-700 mb-1">
                     Số Báo Danh (SBD) / Mã Thí Sinh
                   </label>
                   <input
@@ -1154,14 +1161,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
                     placeholder="Ví dụ: SBD-12058"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-mono font-bold text-amber-900"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-none text-sm font-mono font-bold text-slate-800 transition-all"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-700 mb-1">
                     Mã phòng thi / Mã đề <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1170,18 +1175,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     value={accessCodeInput}
                     onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
                     placeholder="Ví dụ: TOAN12"
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-mono font-bold uppercase tracking-wider text-emerald-800"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white focus:outline-none text-sm font-mono font-bold uppercase tracking-wider text-emerald-800 transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-bold text-slate-700 mb-1">
                     Mã đề trắc nghiệm
                   </label>
                   <select
                     value={selectedVariantCode}
                     onChange={(e) => setSelectedVariantCode(e.target.value)}
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-sm font-medium bg-white"
+                    className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-sm font-bold text-slate-800"
                   >
                     {(() => {
                       const matched =
@@ -1194,11 +1199,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       const codes = matched?.variants?.map((v) => v.examCode) || ["101", "102", "103", "104"];
                       return codes.map((c) => (
                         <option key={c} value={c}>
-                          Mã đề {c} {c === selectedVariantCode ? "(Tự động chia ngẫu nhiên)" : ""}
+                          Mã đề {c} {c === selectedVariantCode ? "(Mã đề của em)" : ""}
                         </option>
                       ));
                     })()}
                   </select>
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    🎲 Tự động chia ngẫu nhiên mã đề để chống nhìn bài
+                  </span>
                 </div>
               </div>
 
@@ -1279,22 +1287,22 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 type="submit"
                 id="btn-student-submit-form"
                 disabled={isGradingPaper}
-                className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl font-bold text-sm transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center space-x-2 disabled:opacity-50"
+                className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 active:scale-[0.99] text-white rounded-2xl font-bold text-sm sm:text-base transition-all shadow-lg shadow-emerald-600/25 flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
               >
                 {isGradingPaper ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <RefreshCw className="w-5 h-5 animate-spin" />
                     <span>AI Đang Phân Tích & Chấm Điểm Bài Làm...</span>
                   </>
                 ) : submissionMode === "upload_paper" ? (
                   <>
-                    <Sparkles className="w-4 h-4" />
+                    <Sparkles className="w-5 h-5" />
                     <span>Nộp Bài & Nhận Điểm Ngay (AI Chấm)</span>
                   </>
                 ) : (
                   <>
-                    <span>Vào Phòng Thi Trực Tuyến & Ngoại Tuyến</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <span>Vào Thi Trực Tuyến Ngay</span>
+                    <ArrowRight className="w-5 h-5" />
                   </>
                 )}
               </button>
@@ -1303,40 +1311,53 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             {/* List of active exams in system for quick selection */}
             {exams.length > 0 && (
               <div className="border-t border-slate-100 pt-5 space-y-3">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Đề thi khả dụng trong hệ thống (Bấm để điền nhanh):
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Đề thi khả dụng trong hệ thống:
+                  </p>
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    (Chạm để chọn nhanh)
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {exams.map((ex) => (
-                    <div
-                      key={ex.id}
-                      onClick={() => handleSelectExamFromList(ex)}
-                      className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition-all ${
-                        accessCodeInput === ex.accessCode
-                          ? "bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20"
-                          : "bg-slate-50 border-slate-200 hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="space-y-1">
-                          <p className="font-bold text-slate-900 line-clamp-1">{ex.title}</p>
-                          <div className="flex items-center space-x-2 text-[11px] text-slate-500">
-                            <span className="font-mono font-bold text-emerald-700">
-                              MÃ: {ex.accessCode}
-                            </span>
-                            <span>•</span>
-                            <span className="flex items-center space-x-1">
-                              <Clock className="w-3 h-3" />
-                              <span>{ex.config.duration} phút</span>
-                            </span>
+                  {exams.map((ex) => {
+                    const isSelected = accessCodeInput === ex.accessCode;
+                    return (
+                      <div
+                        key={ex.id}
+                        onClick={() => handleSelectExamFromList(ex)}
+                        className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition-all ${
+                          isSelected
+                            ? "bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-400 ring-2 ring-emerald-500/20 shadow-sm"
+                            : "bg-slate-50/80 hover:bg-slate-100 border-slate-200/80 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-1.5 flex-1 min-w-0">
+                            <p className="font-bold text-slate-900 truncate text-[13px]">{ex.title}</p>
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                              <span className="px-2 py-0.5 rounded-md font-mono font-bold bg-white border border-emerald-200 text-emerald-800 shadow-2xs">
+                                MÃ: {ex.accessCode}
+                              </span>
+                              <span className="flex items-center space-x-1 font-medium text-slate-600">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span>{ex.config.duration}p</span>
+                              </span>
+                              <span className="text-slate-400">•</span>
+                              <span className="font-medium text-slate-600">
+                                {ex.originalQuestions.length} câu
+                              </span>
+                            </div>
                           </div>
+                          {isSelected && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shrink-0 shadow-xs">
+                              Đang chọn
+                            </span>
+                          )}
                         </div>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
-                          {ex.originalQuestions.length} câu
-                        </span>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

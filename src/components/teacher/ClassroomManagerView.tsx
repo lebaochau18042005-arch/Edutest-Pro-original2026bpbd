@@ -29,6 +29,8 @@ import {
   ClipboardList,
   BarChart3,
   UserCheck,
+  Share2,
+  Copy,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -39,6 +41,7 @@ import {
   StudentSubmission,
   GradeType,
 } from "../../types";
+import { buildClassExamShareLink } from "../../utils/shareUrlHelper";
 
 interface ClassroomManagerViewProps {
   classrooms: Classroom[];
@@ -120,9 +123,40 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [copiedAssignId, setCopiedAssignId] = useState<string | null>(null);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleCopyClassAssignmentLink = async (assign: ClassAssignment) => {
+    try {
+      const matchingExam = exams.find(
+        (e) => e.id === assign.examId || e.accessCode === assign.accessCode
+      );
+
+      let link = "";
+      if (matchingExam) {
+        link = await buildClassExamShareLink(
+          matchingExam,
+          assign.classroomId,
+          assign.classroomName,
+          assign.id
+        );
+      } else {
+        const origin = window.location.origin;
+        link = `${origin}/?code=${encodeURIComponent(assign.accessCode)}&classId=${encodeURIComponent(assign.classroomId)}&className=${encodeURIComponent(assign.classroomName)}&role=student&auto=1`;
+      }
+
+      await navigator.clipboard.writeText(link);
+      setCopiedAssignId(assign.id);
+      showToast(`Đã sao chép link đề thi cho lớp ${assign.classroomName}! Học sinh bấm vào là có đề làm ngay.`);
+      setTimeout(() => setCopiedAssignId(null), 3500);
+    } catch (err) {
+      console.error("Failed to copy assignment share link:", err);
+      showToast("Không thể sao chép link, vui lòng thử lại.");
+    }
   };
 
   const currentClass = classrooms.find((c) => c.id === selectedClassId) || classrooms[0];
@@ -1181,7 +1215,33 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
+                    {/* 1-Click Link Copy for Class */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyClassAssignmentLink(assign)}
+                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs ${
+                          copiedAssignId === assign.id
+                            ? "bg-emerald-600 text-white shadow-emerald-600/25"
+                            : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        }`}
+                        title="Copy link kèm toàn bộ đề thi để gửi Zalo hoặc nhóm lớp, học sinh bấm vào trên điện thoại là làm bài được ngay"
+                      >
+                        {copiedAssignId === assign.id ? (
+                          <>
+                            <Check className="w-4 h-4 text-white" />
+                            <span>Đã sao chép link kèm đề cho lớp!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Share2 className="w-4 h-4 text-emerald-600" />
+                            <span>Copy Link Giao Cho Lớp (Gửi Zalo)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => {

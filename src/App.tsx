@@ -19,7 +19,7 @@ import {
 } from "./types";
 import { generateVariantsFromQuestions } from "./utils/examHelpers";
 import { exportAppDataBackupFile, importAppDataBackupFile } from "./utils/cloudSyncManager";
-import { decompressExamFromSharing } from "./utils/shareUrlHelper";
+import { decompressExamFromSharing, extractExamPayloadFromUrl } from "./utils/shareUrlHelper";
 import {
   fetchExamFromCloud,
   publishExamToCloud,
@@ -570,18 +570,15 @@ export default function App() {
   useEffect(() => {
     const handleUrlExamEntry = async () => {
       try {
-        const search = new URLSearchParams(window.location.search);
-        const examParam = search.get("exam");
-        const hash = window.location.hash;
-        const base64url = (hash && hash.startsWith("#exam="))
-          ? hash.replace(/^#exam=/, "")
-          : (examParam || "");
+        const { examPayload, code: urlCode } = extractExamPayloadFromUrl();
 
-        if (base64url) {
-          const decompressedPkg = await decompressExamFromSharing(base64url);
+        if (examPayload) {
+          const decompressedPkg = await decompressExamFromSharing(examPayload);
           if (decompressedPkg) {
             setActiveExams((prev) => {
-              const filtered = prev.filter((e) => e.accessCode !== decompressedPkg.accessCode && e.id !== decompressedPkg.id);
+              const filtered = prev.filter(
+                (e) => e.accessCode !== decompressedPkg.accessCode && e.id !== decompressedPkg.id
+              );
               const updated = [decompressedPkg, ...filtered];
               try {
                 localStorage.setItem("edutest_active_exams", JSON.stringify(updated));
@@ -602,7 +599,8 @@ export default function App() {
         }
 
         // Check query params ?code=...
-        const code = search.get("code") || search.get("examId");
+        const search = new URLSearchParams(window.location.search);
+        const code = urlCode || search.get("code") || search.get("examId");
         if (code) {
           const upperCode = code.trim().toUpperCase();
           const rawCode = code.trim();
