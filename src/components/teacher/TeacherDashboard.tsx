@@ -1,10 +1,18 @@
-import React from "react";
+import React, { useState } from "react";
 import { ExamShuffler } from "./ExamShuffler";
 import { QuestionBankView } from "./QuestionBankView";
 import { MonitoringAndHistory } from "./MonitoringAndHistory";
 import { AIGraderView } from "./AIGraderView";
 import { MatrixManagerView } from "./MatrixManagerView";
-import { Question, ExamPackage, StudentSubmission, TeacherTab } from "../../types";
+import { ClassroomManagerView } from "./ClassroomManagerView";
+import {
+  Question,
+  ExamPackage,
+  StudentSubmission,
+  TeacherTab,
+  Classroom,
+  ClassAssignment,
+} from "../../types";
 
 interface TeacherDashboardProps {
   currentTab: TeacherTab;
@@ -12,6 +20,10 @@ interface TeacherDashboardProps {
   questionBank: Question[];
   submissions: StudentSubmission[];
   exams?: ExamPackage[];
+  classrooms?: Classroom[];
+  onSaveClassrooms?: (classes: Classroom[]) => void;
+  assignments?: ClassAssignment[];
+  onSaveAssignments?: (assignments: ClassAssignment[]) => void;
   onAddQuestion: (q: Question) => void;
   onAddMultipleQuestions: (qList: Question[]) => void;
   onDeleteQuestion: (id: string) => void;
@@ -27,6 +39,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   questionBank,
   submissions,
   exams = [],
+  classrooms = [],
+  onSaveClassrooms = () => {},
+  assignments = [],
+  onSaveAssignments = () => {},
   onAddQuestion,
   onAddMultipleQuestions,
   onDeleteQuestion,
@@ -35,6 +51,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onOpenStudentExam,
   onRefreshData,
 }) => {
+  const [selectedExamForAssign, setSelectedExamForAssign] = useState<ExamPackage | null>(null);
+
+  const handleAssignToClassFromShuffler = (exam: ExamPackage) => {
+    setSelectedExamForAssign(exam);
+    setTeacherTab("classes");
+  };
+
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {currentTab === "shuffler" && (
@@ -44,6 +67,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           onOpenStudentExam={onOpenStudentExam}
           onAddQuestion={onAddQuestion}
           onAddMultipleQuestions={onAddMultipleQuestions}
+          onAssignToClass={handleAssignToClassFromShuffler}
+        />
+      )}
+
+      {currentTab === "classes" && (
+        <ClassroomManagerView
+          classrooms={classrooms}
+          onSaveClassrooms={onSaveClassrooms}
+          assignments={assignments}
+          onSaveAssignments={onSaveAssignments}
+          exams={exams}
+          submissions={submissions}
+          onUnlockStudent={onUnlockStudent}
+          onOpenStudentExam={onOpenStudentExam}
+          defaultSelectedExam={selectedExamForAssign}
         />
       )}
 

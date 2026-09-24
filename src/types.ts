@@ -212,11 +212,51 @@ export interface StudentSubmission {
   violationLogs: ViolationLog[];
   syncedToGoogleSheet: boolean;
   status: "in_progress" | "submitted" | "locked";
+  classroomId?: string;
+  assignmentId?: string;
 }
 
 export type AppRole = "teacher" | "student";
-export type TeacherTab = "shuffler" | "bank" | "monitoring" | "grader" | "matrix" | "quick-guide";
+export type TeacherTab = "shuffler" | "bank" | "monitoring" | "grader" | "matrix" | "classes" | "quick-guide";
 export type StudentTab = "online_test" | "upload_paper" | "history_results";
+
+export interface StudentInfo {
+  id: string; // e.g. "stu_1"
+  studentId: string; // SBD hoặc Mã định danh e.g. "HS1201"
+  name: string; // Họ và tên e.g. "Nguyễn Thành Nam"
+  gender?: "Nam" | "Nữ";
+  dob?: string; // Ngày sinh e.g. "15/05/2008"
+  note?: string;
+}
+
+export interface Classroom {
+  id: string;
+  name: string; // e.g. "12A1"
+  grade: GradeType | string; // e.g. "Khối 12"
+  schoolYear: string; // e.g. "2025-2026"
+  subject?: string; // e.g. "Toán học"
+  homeroomTeacher?: string; // e.g. "Thầy Nguyễn Văn A"
+  students: StudentInfo[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ClassAssignment {
+  id: string;
+  examId: string;
+  examTitle: string;
+  accessCode: string;
+  classroomId: string;
+  classroomName: string;
+  assignedAt: string;
+  openTime?: string;
+  closeTime?: string;
+  duration: number; // phút
+  shuffleVariants: boolean;
+  allowReviewAfterSubmit: boolean;
+  status: "active" | "scheduled" | "closed";
+  assignedStudentIds?: string[];
+}
 
 export interface StudentProfile {
   name: string;

@@ -28,8 +28,16 @@ import {
   Database,
   Smartphone,
   Laptop,
+  Users,
 } from "lucide-react";
-import { ExamPackage, StudentSubmission, GradedPaperResult, StudentTab } from "../../types";
+import {
+  ExamPackage,
+  StudentSubmission,
+  GradedPaperResult,
+  StudentTab,
+  Classroom,
+  ClassAssignment,
+} from "../../types";
 import { StudentExamRoom } from "./StudentExamRoom";
 import { StudentResultView } from "./StudentResultView";
 import { clientGradePaper } from "../../utils/clientAI";
@@ -46,6 +54,8 @@ interface StudentPortalProps {
   setCurrentStudentTab?: (tab: StudentTab) => void;
   submissions?: StudentSubmission[];
   onAddExam?: (exam: ExamPackage) => void;
+  classrooms?: Classroom[];
+  assignments?: ClassAssignment[];
 }
 
 export const StudentPortal: React.FC<StudentPortalProps> = ({
@@ -57,6 +67,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   setCurrentStudentTab,
   submissions = [],
   onAddExam,
+  classrooms = [],
+  assignments = [],
 }) => {
   // Student registration state with LocalStorage persistence
   const [studentName, setStudentName] = useState(() => {
@@ -93,6 +105,20 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     prefillExamId || exams[0]?.accessCode || "TOAN12"
   );
   const [selectedVariantCode, setSelectedVariantCode] = useState(prefillExamCode || "101");
+
+  // Classroom-based assignment state
+  const [entryMethod, setEntryMethod] = useState<"class" | "code">(() => {
+    return classrooms && classrooms.length > 0 && assignments && assignments.length > 0
+      ? "class"
+      : "code";
+  });
+  const [chosenClassId, setChosenClassId] = useState<string>(() => {
+    return classrooms && classrooms.length > 0 ? classrooms[0].id : "";
+  });
+  const [chosenStudentRosterId, setChosenStudentRosterId] = useState<string>("");
+  const [chosenAssignmentId, setChosenAssignmentId] = useState<string>(() => {
+    return assignments && assignments.length > 0 ? assignments[0].id : "";
+  });
 
   // Portal submission mode: "online_test" | "upload_paper"
   const [submissionMode, setSubmissionMode] = useState<"online_test" | "upload_paper">(
@@ -540,10 +566,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
   // When student finishes submission in online exam room
   const handleExamSubmitted = (sub: StudentSubmission) => {
-    setCurrentSubmission(sub);
-    onSubmissionComplete(sub);
+    const finalSub: StudentSubmission = {
+      ...sub,
+      classroomId: chosenClassId || sub.classroomId,
+      assignmentId: chosenAssignmentId || sub.assignmentId,
+    };
+    setCurrentSubmission(finalSub);
+    onSubmissionComplete(finalSub);
     // Asynchronously push submission to Cloud Database
-    submitExamToCloud(sub).catch(() => {});
+    submitExamToCloud(finalSub).catch(() => {});
     // Refresh offline queue
     try {
       const q = JSON.parse(localStorage.getItem("eduexam_offline_submissions") || "[]");
@@ -864,6 +895,168 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   <div>
                     <p className="text-xs font-bold text-blue-900">Đang kết nối và tải đề thi từ Cloud Database...</p>
                     <p className="text-[11px] text-blue-700">Đang đồng bộ dữ liệu phòng thi {accessCodeInput}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Entry Method Selector: Vào thi theo Lớp vs Nhập mã tự do */}
+              {classrooms.length > 0 && (
+                <div className="flex p-1 bg-slate-100 rounded-2xl gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setEntryMethod("class")}
+                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      entryMethod === "class"
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>🏫 Vào Thi Theo Lớp Đã Giao (Khuyên dùng)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEntryMethod("code")}
+                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      entryMethod === "code"
+                        ? "bg-slate-800 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <span>🔑 Nhập Mã Phòng / Tự Do</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Khi chọn hình thức Vào thi theo Lớp */}
+              {entryMethod === "class" && classrooms.length > 0 && (
+                <div className="p-4 bg-gradient-to-br from-blue-50/70 to-indigo-50/70 border border-blue-200 rounded-2xl space-y-4 text-xs animate-fade-in">
+                  <div className="flex items-center gap-2 text-blue-900 font-bold">
+                    <Users className="w-4 h-4 text-blue-600" />
+                    <span>Học sinh chọn Lớp và chọn Tên của mình để nhận bài thi:</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        1. Lớp của bạn <span className="text-rose-500">*</span>:
+                      </label>
+                      <select
+                        value={chosenClassId}
+                        onChange={(e) => {
+                          const newCId = e.target.value;
+                          setChosenClassId(newCId);
+                          const cls = classrooms.find((c) => c.id === newCId);
+                          if (cls) {
+                            setStudentClass(cls.name);
+                            if (cls.students.length > 0) {
+                              setStudentName(cls.students[0].name);
+                              setStudentId(cls.students[0].studentId);
+                              setChosenStudentRosterId(cls.students[0].id);
+                            }
+                          }
+                          const cAssigns = assignments.filter((a) => a.classroomId === newCId);
+                          if (cAssigns.length > 0) {
+                            setChosenAssignmentId(cAssigns[0].id);
+                            const matchedExam = exams.find((x) => x.id === cAssigns[0].examId);
+                            if (matchedExam) {
+                              setActiveExam(matchedExam);
+                              setAccessCodeInput(matchedExam.accessCode);
+                            }
+                          }
+                        }}
+                        className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      >
+                        {classrooms.map((cls) => (
+                          <option key={cls.id} value={cls.id}>
+                            Lớp {cls.name} ({cls.grade} • Sĩ số: {cls.students.length} HS)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        2. Chọn Tên bạn trong danh sách lớp <span className="text-rose-500">*</span>:
+                      </label>
+                      <select
+                        value={chosenStudentRosterId}
+                        onChange={(e) => {
+                          const sId = e.target.value;
+                          setChosenStudentRosterId(sId);
+                          const currentCls = classrooms.find((c) => c.id === chosenClassId) || classrooms[0];
+                          const foundStu = currentCls?.students.find((s) => s.id === sId);
+                          if (foundStu) {
+                            setStudentName(foundStu.name);
+                            setStudentId(foundStu.studentId);
+                            setStudentClass(currentCls.name);
+                          }
+                        }}
+                        className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="">-- Bấm để chọn tên của em --</option>
+                        {(() => {
+                          const currentCls = classrooms.find((c) => c.id === chosenClassId) || classrooms[0];
+                          return (currentCls?.students || []).map((stu) => (
+                            <option key={stu.id} value={stu.id}>
+                              {stu.studentId} - {stu.name} {stu.gender ? `(${stu.gender})` : ""}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Danh sách đề thi được giao cho lớp này */}
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1.5">
+                      3. Bài kiểm tra đang được giao cho Lớp:
+                    </label>
+                    {(() => {
+                      const classAssigns = assignments.filter((a) => a.classroomId === chosenClassId);
+                      if (classAssigns.length === 0) {
+                        return (
+                          <div className="p-3 bg-white rounded-xl border border-dashed border-slate-300 text-center text-slate-500">
+                            Hiện lớp này chưa có bài kiểm tra nào được giao từ giáo viên.
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {classAssigns.map((assign) => {
+                            const isChosen = assign.id === chosenAssignmentId;
+                            return (
+                              <div
+                                key={assign.id}
+                                onClick={() => {
+                                  setChosenAssignmentId(assign.id);
+                                  const matchedExam = exams.find((x) => x.id === assign.examId);
+                                  if (matchedExam) {
+                                    setActiveExam(matchedExam);
+                                    setAccessCodeInput(matchedExam.accessCode);
+                                    if (matchedExam.variants && matchedExam.variants.length > 0) {
+                                      const randIdx = Math.floor(Math.random() * matchedExam.variants.length);
+                                      setSelectedVariantCode(matchedExam.variants[randIdx].examCode);
+                                    }
+                                  }
+                                }}
+                                className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${
+                                  isChosen
+                                    ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                                    : "bg-white text-slate-800 border-slate-200 hover:border-blue-300"
+                                }`}
+                              >
+                                <div className="font-bold text-xs line-clamp-1">{assign.examTitle}</div>
+                                <div className={`text-[10px] mt-1 ${isChosen ? "text-blue-100" : "text-slate-500"}`}>
+                                  Thời lượng: {assign.duration} phút • Mã: {assign.accessCode}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

@@ -14,6 +14,8 @@ import {
   ExamConfig,
   ExamPackage,
   StudentSubmission,
+  Classroom,
+  ClassAssignment,
 } from "./types";
 import { generateVariantsFromQuestions } from "./utils/examHelpers";
 import { exportAppDataBackupFile, importAppDataBackupFile } from "./utils/cloudSyncManager";
@@ -362,6 +364,62 @@ const DEFAULT_INITIAL_SUBMISSIONS: StudentSubmission[] = [
   },
 ];
 
+const DEFAULT_INITIAL_CLASSROOMS: Classroom[] = [
+  {
+    id: "class-12a1",
+    name: "12A1",
+    grade: "Khối 12",
+    schoolYear: "2025-2026",
+    subject: "Toán học & KHTN",
+    homeroomTeacher: "Thầy Nguyễn Thành Long",
+    createdAt: new Date().toISOString(),
+    students: [
+      { id: "stu-1", studentId: "HS202601", name: "Nguyễn Thành Nam", gender: "Nam", dob: "15/04/2008" },
+      { id: "stu-2", studentId: "HS202602", name: "Trần Thu Thủy", gender: "Nữ", dob: "20/08/2008" },
+      { id: "stu-3", studentId: "HS202603", name: "Lê Minh Tâm", gender: "Nam", dob: "05/11/2008" },
+      { id: "stu-4", studentId: "HS202604", name: "Phạm Hoàng Gia Huy", gender: "Nam", dob: "12/02/2008" },
+      { id: "stu-5", studentId: "HS202605", name: "Vũ Bảo Châu", gender: "Nữ", dob: "18/04/2008" },
+      { id: "stu-6", studentId: "HS202606", name: "Đỗ Đăng Khoa", gender: "Nam", dob: "25/09/2008" },
+      { id: "stu-7", studentId: "HS202607", name: "Hoàng Yến Nhi", gender: "Nữ", dob: "30/01/2008" },
+      { id: "stu-8", studentId: "HS202608", name: "Phan Tuấn Kiệt", gender: "Nam", dob: "14/07/2008" },
+      { id: "stu-9", studentId: "HS202609", name: "Bùi Phương Thảo", gender: "Nữ", dob: "22/10/2008" },
+      { id: "stu-10", studentId: "HS202610", name: "Đinh Gia Bảo", gender: "Nam", dob: "09/03/2008" },
+    ],
+  },
+  {
+    id: "class-12a2",
+    name: "12A2",
+    grade: "Khối 12",
+    schoolYear: "2025-2026",
+    subject: "Địa lý & KHXH",
+    homeroomTeacher: "Cô Lê Thị Thái",
+    createdAt: new Date().toISOString(),
+    students: [
+      { id: "stu-11", studentId: "HS202611", name: "Trần Văn Hùng", gender: "Nam", dob: "10/05/2008" },
+      { id: "stu-12", studentId: "HS202612", name: "Nguyễn Thị Mai", gender: "Nữ", dob: "19/08/2008" },
+      { id: "stu-13", studentId: "HS202613", name: "Lê Hoàng Phúc", gender: "Nam", dob: "03/12/2008" },
+      { id: "stu-14", studentId: "HS202614", name: "Võ Thị Thanh", gender: "Nữ", dob: "27/02/2008" },
+      { id: "stu-15", studentId: "HS202615", name: "Ngô Quốc Bảo", gender: "Nam", dob: "11/06/2008" },
+    ],
+  },
+];
+
+const DEFAULT_INITIAL_ASSIGNMENTS: ClassAssignment[] = [
+  {
+    id: "assign-1",
+    examId: "exam-demo-01",
+    examTitle: "Đề kiểm tra giữa kỳ Toán 12 - Trực Tuyến Chống Gian Lận",
+    accessCode: "TOAN12",
+    classroomId: "class-12a1",
+    classroomName: "12A1",
+    assignedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    duration: 45,
+    shuffleVariants: true,
+    allowReviewAfterSubmit: true,
+    status: "active",
+  },
+];
+
 export default function App() {
   const [isDirectStudentAccess, setIsDirectStudentAccess] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -430,6 +488,28 @@ export default function App() {
     return DEFAULT_INITIAL_SUBMISSIONS;
   });
 
+  const [classrooms, setClassrooms] = useState<Classroom[]>(() => {
+    try {
+      const saved = localStorage.getItem("edutest_classrooms");
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p) && p.length > 0) return p;
+      }
+    } catch (e) {}
+    return DEFAULT_INITIAL_CLASSROOMS;
+  });
+
+  const [assignments, setAssignments] = useState<ClassAssignment[]>(() => {
+    try {
+      const saved = localStorage.getItem("edutest_class_assignments");
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (Array.isArray(p) && p.length > 0) return p;
+      }
+    } catch (e) {}
+    return DEFAULT_INITIAL_ASSIGNMENTS;
+  });
+
   // Sync to localStorage
   useEffect(() => {
     try {
@@ -448,6 +528,18 @@ export default function App() {
       localStorage.setItem("edutest_submissions", JSON.stringify(submissions));
     } catch (e) {}
   }, [submissions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("edutest_classrooms", JSON.stringify(classrooms));
+    } catch (e) {}
+  }, [classrooms]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("edutest_class_assignments", JSON.stringify(assignments));
+    } catch (e) {}
+  }, [assignments]);
 
   const [prefillExamId, setPrefillExamId] = useState<string>("TOAN12");
   const [prefillExamCode, setPrefillExamCode] = useState<string>("101");
@@ -774,6 +866,7 @@ export default function App() {
             activeExamCount={activeExams.length}
             submissionCount={submissions.length}
             lockedViolationCount={lockedCount}
+            classesCount={classrooms.length}
             onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
           />
         </div>
@@ -809,6 +902,7 @@ export default function App() {
               activeExamCount={activeExams.length}
               submissionCount={submissions.length}
               lockedViolationCount={lockedCount}
+              classesCount={classrooms.length}
               onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
             />
           </div>
@@ -951,6 +1045,7 @@ export default function App() {
             activeExamCount={activeExams.length}
             submissionCount={submissions.length}
             lockedViolationCount={lockedCount}
+            classesCount={classrooms.length}
             onQuickLaunchStudentTest={handleQuickLaunchStudentTest}
           />
         )}
@@ -968,6 +1063,10 @@ export default function App() {
                 questionBank={questionBank}
                 submissions={submissions}
                 exams={activeExams}
+                classrooms={classrooms}
+                onSaveClassrooms={setClassrooms}
+                assignments={assignments}
+                onSaveAssignments={setAssignments}
                 onAddQuestion={handleAddQuestion}
                 onAddMultipleQuestions={handleAddMultipleQuestions}
                 onDeleteQuestion={handleDeleteQuestion}
@@ -999,6 +1098,8 @@ export default function App() {
                 currentStudentTab={studentTab}
                 setCurrentStudentTab={setStudentTab}
                 submissions={submissions}
+                classrooms={classrooms}
+                assignments={assignments}
                 onAddExam={(newExam) => {
                   setActiveExams((prev) => [newExam, ...prev.filter((e) => e.id !== newExam.id && e.accessCode !== newExam.accessCode)]);
                 }}

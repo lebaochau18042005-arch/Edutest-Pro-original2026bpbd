@@ -1,5 +1,6 @@
 import { ExamPackage, Question, ExamConfig, TrueFalseStatement } from "../types";
 import { generateVariantsFromQuestions } from "./examHelpers";
+import QRCode from "qrcode";
 
 // Legacy v1 schema
 interface SharedExamPayloadV1 {
@@ -338,9 +339,36 @@ export async function buildExamShareLinks(
     isSelfContained = true;
   }
 
-  // Target for QR: Use self-contained directLink so every phone camera / Zalo instantly opens the exam
-  const targetForQr = directLink;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=450x450&margin=10&ecc=L&format=png&data=${encodeURIComponent(targetForQr)}`;
+  // Generate QR Code locally using 'qrcode' library (no external servers, no URI length limits)
+  let qrCodeUrl = "";
+  try {
+    // Try self-contained link first
+    qrCodeUrl = await QRCode.toDataURL(directLink, {
+      margin: 1,
+      width: 450,
+      errorCorrectionLevel: "L",
+      color: {
+        dark: "#0f172a",
+        light: "#ffffff",
+      },
+    });
+  } catch (err) {
+    console.warn("Direct link too large for single QR, falling back to simple code link:", err);
+    try {
+      qrCodeUrl = await QRCode.toDataURL(simpleCodeLink, {
+        margin: 1,
+        width: 450,
+        errorCorrectionLevel: "M",
+        color: {
+          dark: "#0f172a",
+          light: "#ffffff",
+        },
+      });
+    } catch (e2) {
+      console.error("Failed to generate fallback QR code:", e2);
+      qrCodeUrl = "";
+    }
+  }
 
   return {
     directLink,

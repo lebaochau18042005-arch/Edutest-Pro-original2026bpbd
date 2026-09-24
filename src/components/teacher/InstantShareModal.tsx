@@ -20,6 +20,7 @@ import {
   Cloud,
   RefreshCw,
   AlertCircle,
+  Users,
 } from "lucide-react";
 import { ExamPackage } from "../../types";
 import { buildExamShareLinks } from "../../utils/shareUrlHelper";
@@ -30,6 +31,7 @@ interface InstantShareModalProps {
   onClose: () => void;
   exam: ExamPackage | null;
   onOpenAsStudent?: (examId: string, code: string) => void;
+  onAssignToClass?: (exam: ExamPackage) => void;
 }
 
 export const InstantShareModal: React.FC<InstantShareModalProps> = ({
@@ -37,6 +39,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
   onClose,
   exam,
   onOpenAsStudent,
+  onAssignToClass,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isFullscreenProjector, setIsFullscreenProjector] = useState(false);
@@ -612,6 +615,37 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
             💡 Học sinh bấm vào link này trên điện thoại sẽ tự động mở thẳng bài thi, không cần nhập mã.
           </p>
         </div>
+
+        {/* Giao Đề Cho Lớp Học Trực Tiếp */}
+        {onAssignToClass && (
+          <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-blue-900 flex items-center gap-2">
+                  <span>Giao Đề Cho Lớp Học (Theo Danh Sách Học Sinh)</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-200 text-blue-800 font-bold">Khuyên dùng</span>
+                </div>
+                <div className="text-[11px] text-blue-700 mt-0.5">
+                  Giao bài theo lớp, học sinh vào chọn tên là làm bài ngay, không cần quét mã QR hay copy link.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onAssignToClass(exam);
+                onClose();
+              }}
+              className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap cursor-pointer active:scale-95"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Giao Cho Lớp Ngay</span>
+            </button>
+          </div>
+        )}
 
         {/* Smart Anti-Cheat Notice */}
         <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-start gap-2.5 text-xs text-indigo-950">

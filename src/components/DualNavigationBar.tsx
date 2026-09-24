@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Flame,
   Table,
+  Users,
 } from "lucide-react";
 import { AppRole, TeacherTab, StudentTab } from "../types";
 
@@ -27,6 +28,7 @@ interface DualNavigationBarProps {
   activeExamCount: number;
   submissionCount: number;
   lockedViolationCount: number;
+  classesCount?: number;
   onQuickLaunchStudentTest?: () => void;
 }
 
@@ -88,6 +90,28 @@ export const DualNavigationBar: React.FC<DualNavigationBarProps> = ({
             >
               <Shuffle className="w-3.5 h-3.5 text-blue-500" />
               <span>Trộn Đề & Cấu Hình</span>
+            </button>
+
+            <button
+              type="button"
+              id="dualnav-teacher-classes"
+              onClick={() => {
+                setCurrentRole("teacher");
+                setTeacherTab("classes");
+              }}
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                currentRole === "teacher" && teacherTab === "classes"
+                  ? "bg-white text-blue-700 shadow-xs border border-blue-200 font-bold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-blue-600" />
+              <span>Lớp Học & Giao Bài</span>
+              {classesCount !== undefined && classesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                  {classesCount}
+                </span>
+              )}
             </button>
 
             <button

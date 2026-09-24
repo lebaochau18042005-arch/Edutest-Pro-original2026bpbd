@@ -211,6 +211,7 @@ interface ExamShufflerProps {
   onOpenStudentExam: (examId: string, examCode: string) => void;
   onAddQuestion?: (q: Question) => void;
   onAddMultipleQuestions?: (qList: Question[]) => void;
+  onAssignToClass?: (exam: ExamPackage) => void;
 }
 
 export const ExamShuffler: React.FC<ExamShufflerProps> = ({
@@ -219,6 +220,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   onOpenStudentExam,
   onAddQuestion,
   onAddMultipleQuestions,
+  onAssignToClass,
 }) => {
   // General Configurations
   const [config, setConfig] = useState<ExamConfig>({
@@ -4379,6 +4381,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             onOpenStudentExam(publishedExam.accessCode || publishedExam.id, code);
           }
         }}
+        onAssignToClass={onAssignToClass}
       />
     </div>
   );

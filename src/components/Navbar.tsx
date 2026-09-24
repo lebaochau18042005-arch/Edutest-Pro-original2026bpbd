@@ -12,6 +12,7 @@ import {
   Flame,
   FileSpreadsheet,
   ChevronRight,
+  Users,
 } from "lucide-react";
 import { AppRole, TeacherTab, StudentTab } from "../types";
 
@@ -25,6 +26,7 @@ interface SidebarNavbarProps {
   activeExamCount: number;
   submissionCount: number;
   lockedViolationCount: number;
+  classesCount?: number;
   onQuickLaunchStudentTest: () => void;
 }
 
@@ -128,6 +130,28 @@ export const SidebarNav: React.FC<SidebarNavbarProps> = ({
               <Shuffle className="w-4 h-4 text-blue-400 shrink-0" />
               <span className="flex-1">Trộn đề & Cấu hình</span>
               <span className="text-[10px] font-mono text-slate-500">4 mã</span>
+            </button>
+
+            <button
+              type="button"
+              id="sidebar-tab-classes"
+              onClick={() => {
+                setCurrentRole("teacher");
+                setTeacherTab("classes");
+              }}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all text-left text-xs ${
+                currentRole === "teacher" && teacherTab === "classes"
+                  ? "bg-blue-600/25 text-blue-300 border border-blue-500/40 font-bold shadow-xs"
+                  : "text-slate-400 hover:bg-slate-900 hover:text-slate-200 border border-transparent"
+              }`}
+            >
+              <Users className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="flex-1">Lớp học & Giao bài</span>
+              {classesCount !== undefined && classesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-blue-500/20 text-blue-300 font-bold">
+                  {classesCount}
+                </span>
+              )}
             </button>
 
             <button
