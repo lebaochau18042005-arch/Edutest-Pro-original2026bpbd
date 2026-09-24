@@ -74,13 +74,29 @@ export function convertDocxHtmlToMarkdown(
         if (stmtMatch) statementLetters.add((stmtMatch[1] || stmtMatch[2] || stmtMatch[3]).toLowerCase());
       });
 
-      // A table is an options/statements layout table if:
-      // - It has 3+ distinct option letters (A, B, C, D) or statement letters (a, b, c, d)
-      // - Total rows is <= 6 and total cells is <= 16
+      // Detect if this table is a true DATA TABLE (Bảng số liệu):
+      // - Contains statistical indicators, years, percentages, numbers with units
+      // - Or has a clear header row with descriptive words (Năm, Tiêu chí, Chỉ số, Vùng, x, y, f(x)...)
+      const dataKeywords = /(?:năm|tháng|quốc gia|tỉnh|thành phố|vùng|địa phương|sản lượng|diện tích|dân số|tốc độ|tỉ lệ|tỷ lệ|gdp|xuất khẩu|nhập khẩu|giá trị|doanh thu|khối lượng|thể tích|nhiệt độ|áp suất|nồng độ|thời gian|chỉ số|bảng biến thiên|tần số|tần suất|khoảng biến thiên|\b[xy]\b|f\(x\)|y'|y''|đơn vị|triệu|nghìn|tấn|ha|km|m\^?2|m\^?3|%|USD|VNĐ)/i;
+      const hasDataKeywords = flatCells.some((c) => dataKeywords.test(c));
+      const numericCellsCount = flatCells.filter((c) => /^\d+([.,]\d+)?\s*(%|triệu|tỉ|tấn|ha|km|m|kg|s|h|độ|lần)?$/i.test(c.trim())).length;
+      const hasNumericData = numericCellsCount >= 2;
+
+      // Only treat as layout table if it is STRICTLY options/statements AND NOT a data table
       const isPureOptionsLayout =
+        !hasDataKeywords &&
+        !hasNumericData &&
         (optionLetters.size >= 3 || statementLetters.size >= 3) &&
         rows.length <= 6 &&
-        flatCells.length <= 16;
+        flatCells.length <= 16 &&
+        flatCells.every((c) => {
+          const t = c.trim();
+          return (
+            !t ||
+            /^\*{0,2}(?:\[?[A-D]\]?|\([A-D]\)|[A-D])[.)/:]/i.test(t) ||
+            /^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?[a-d]\]?|\(([a-d]\)|[a-d]))[.)/:]/i.test(t)
+          );
+        });
 
       if (isPureOptionsLayout) {
         return "\n" + flatCells.join("\n") + "\n";

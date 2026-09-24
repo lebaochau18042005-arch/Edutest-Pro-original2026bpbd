@@ -30,8 +30,63 @@ function escapeXML(text: string): string {
 
 function wrapCDATA(text: string): string {
   if (!text) return "<![CDATA[]]>";
-  // If text contains LaTeX or Markdown, format as HTML with MathJax
-  const formattedHtml = `<p>${text.replace(/\n/g, "<br/>")}</p>`;
+
+  // Process Markdown tables into clean HTML tables for Moodle/LMS
+  const lines = text.split("\n");
+  const outLines: string[] = [];
+  let inTable = false;
+  let tableRows: string[][] = [];
+
+  const buildHtmlTable = (rows: string[][]) => {
+    if (!rows || rows.length === 0) return "";
+    const header = rows[0];
+    const body = rows.slice(1);
+    let html = `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; margin:10px auto; width:95%; max-width:600px; text-align:center;">`;
+    if (header && header.length > 0) {
+      html += `<thead style="background:#f1f5f9; font-weight:bold;"><tr>`;
+      header.forEach((c) => { html += `<th>${c}</th>`; });
+      html += `</tr></thead>`;
+    }
+    html += `<tbody>`;
+    body.forEach((r, idx) => {
+      html += `<tr style="background:${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">`;
+      r.forEach((c) => { html += `<td>${c}</td>`; });
+      html += `</tr>`;
+    });
+    html += `</tbody></table>`;
+    return html;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    const isPipe = (l.startsWith("|") && l.endsWith("|")) || (l.includes("|") && l.split("|").length >= 3);
+    if (isPipe) {
+      if (!/^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(l)) {
+        let clean = l;
+        if (clean.startsWith("|")) clean = clean.slice(1);
+        if (clean.endsWith("|")) clean = clean.slice(0, -1);
+        const cells = clean.split("|").map((c) => c.trim());
+        if (cells.length > 0) {
+          inTable = true;
+          tableRows.push(cells);
+          continue;
+        }
+      } else {
+        continue;
+      }
+    }
+    if (inTable && tableRows.length > 0) {
+      outLines.push(buildHtmlTable(tableRows));
+      inTable = false;
+      tableRows = [];
+    }
+    outLines.push(lines[i]);
+  }
+  if (inTable && tableRows.length > 0) {
+    outLines.push(buildHtmlTable(tableRows));
+  }
+
+  const formattedHtml = `<p>${outLines.join("<br/>")}</p>`;
   return `<![CDATA[${formattedHtml}]]>`;
 }
 

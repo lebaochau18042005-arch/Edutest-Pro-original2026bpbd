@@ -850,6 +850,184 @@ function isSyntheticPlaceholder(value: unknown): boolean {
  * still useful for classification and answer metadata, but it must not replace
  * exact stems/options/statements with shortened text or placeholders.
  */
+/**
+ * Pre-processes text to automatically detect tabular data (tab-delimited or multi-space aligned)
+ * and convert them into standardized Markdown tables (| col1 | col2 |).
+ */
+export function convertRawTextTablesToMarkdown(rawText: string): string {
+  if (!rawText || !rawText.trim()) return rawText;
+
+  const lines = rawText.split("\n");
+  const processedLines: string[] = [];
+  let buffer: string[] = [];
+  let bufferType: "tab" | "pipe" | "spaces" | null = null;
+
+  const flushBuffer = () => {
+    if (buffer.length === 0) return;
+
+    if (buffer.length >= 2) {
+      if (bufferType === "tab") {
+        const rows = buffer.map((line) => line.split("\t").map((c) => c.trim()).filter((c) => c.length > 0));
+        const maxCols = Math.max(...rows.map((r) => r.length));
+        if (maxCols >= 2) {
+          const header = rows[0];
+          while (header.length < maxCols) header.push("");
+          processedLines.push("| " + header.map((c) => c || "-").join(" | ") + " |");
+          processedLines.push("| " + Array(maxCols).fill(":---").join(" | ") + " |");
+          for (let r = 1; r < rows.length; r++) {
+            const row = rows[r];
+            while (row.length < maxCols) row.push("");
+            processedLines.push("| " + row.map((c) => c || "").join(" | ") + " |");
+          }
+          buffer = [];
+          bufferType = null;
+          return;
+        }
+      } else if (bufferType === "pipe") {
+        // If pipe table doesn't have divider row, insert it
+        const hasDivider = buffer.some((l) => /^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(l.trim()));
+        if (!hasDivider && buffer.length >= 2) {
+          const firstLine = buffer[0].trim();
+          let cleanFirst = firstLine;
+          if (cleanFirst.startsWith("|")) cleanFirst = cleanFirst.slice(1);
+          if (cleanFirst.endsWith("|")) cleanFirst = cleanFirst.slice(0, -1);
+          const colCount = Math.max(2, cleanFirst.split("|").length);
+          const divider = "| " + Array(colCount).fill(":---").join(" | ") + " |";
+          processedLines.push(buffer[0]);
+          processedLines.push(divider);
+          for (let r = 1; r < buffer.length; r++) {
+            processedLines.push(buffer[r]);
+          }
+          buffer = [];
+          bufferType = null;
+          return;
+        }
+      } else if (bufferType === "spaces") {
+        const rows = buffer.map((line) => line.trim().split(/\s{2,}|\t/).map((c) => c.trim()).filter(Boolean));
+        const colCounts = rows.map((r) => r.length);
+        const maxCols = Math.max(...colCounts);
+        const minCols = Math.min(...colCounts);
+        const hasNumbers = buffer.some((l) => /\d+([.,]\d+)?/.test(l));
+        if (maxCols >= 2 && maxCols - minCols <= 1 && hasNumbers) {
+          const header = rows[0];
+          while (header.length < maxCols) header.push("");
+          processedLines.push("| " + header.map((c) => c || "-").join(" | ") + " |");
+          processedLines.push("| " + Array(maxCols).fill(":---").join(" | ") + " |");
+          for (let r = 1; r < rows.length; r++) {
+            const row = rows[r];
+            while (row.length < maxCols) row.push("");
+            processedLines.push("| " + row.map((c) => c || "").join(" | ") + " |");
+          }
+          buffer = [];
+          bufferType = null;
+          return;
+        }
+      }
+    }
+
+    processedLines.push(...buffer);
+    buffer = [];
+    bufferType = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    const isQHeader = /^(?:\*{0,2}(?:Câu|Bài|Question)\s*\d+|\*{0,2}\d+[.)/:]|\[Câu\s*\d+\])/i.test(trimmed);
+    const isOption = /^(?:\*{0,2}[A-D][.)/:]\*{0,2})\s+/i.test(trimmed);
+    const isStatement = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định)\s*)?(?:\[?[a-d]\]?|\([a-d]\)|[a-d])[.)/:]\*{0,2})\s+/i.test(trimmed);
+
+    if (isQHeader || isOption || isStatement || !trimmed) {
+      flushBuffer();
+      processedLines.push(rawLine);
+      continue;
+    }
+
+    const tabCols = trimmed.split("\t").filter((c) => c.trim().length > 0);
+    if (tabCols.length >= 2) {
+      if (bufferType && bufferType !== "tab") flushBuffer();
+      bufferType = "tab";
+      buffer.push(rawLine);
+      continue;
+    }
+
+    const isPipe = (trimmed.startsWith("|") && trimmed.endsWith("|")) || (trimmed.includes("|") && trimmed.split("|").length >= 3);
+    if (isPipe) {
+      if (bufferType && bufferType !== "pipe") flushBuffer();
+      bufferType = "pipe";
+      buffer.push(rawLine);
+      continue;
+    }
+
+    const spaceCols = trimmed.split(/\s{2,}/).filter(Boolean);
+    const hasDataIndicator = /(?:năm|gdp|\bha\b|\bkm\b|tấn|triệu|tỉ|%|\$|\d{2,})/i.test(trimmed);
+    if (spaceCols.length >= 2 && hasDataIndicator) {
+      if (bufferType && bufferType !== "spaces") flushBuffer();
+      bufferType = "spaces";
+      buffer.push(rawLine);
+      continue;
+    }
+
+    flushBuffer();
+    processedLines.push(rawLine);
+  }
+
+  flushBuffer();
+  return processedLines.join("\n");
+}
+
+/**
+ * Intelligently merges parsed content and source content so that:
+ * 1. Data tables (|...|) are 100% preserved and never degraded into prose.
+ * 2. Charts, diagrams, and image tokens (![...], __IMG_TOKEN_X__) are 100% preserved.
+ */
+function mergeQuestionContentPreservingTablesAndDiagrams(
+  parsedContent: string,
+  sourceContent: string
+): string {
+  const p = (parsedContent || "").trim();
+  const s = (sourceContent || "").trim();
+
+  if (!p) return s;
+  if (!s) return p;
+
+  const pHasTable = p.includes("|") && p.split("\n").some((l) => l.trim().startsWith("|") && l.trim().endsWith("|"));
+  const sHasTable = s.includes("|") && s.split("\n").some((l) => l.trim().startsWith("|") && l.trim().endsWith("|"));
+
+  const imageRegex = /!\[.*?\]\([^\)]+\)|__IMG_TOKEN_\d+__/g;
+  const pImages = p.match(imageRegex) || [];
+  const sImages = s.match(imageRegex) || [];
+  const allImages = Array.from(new Set([...sImages, ...pImages]));
+
+  let baseContent = "";
+  if (pHasTable && !sHasTable) {
+    // AI successfully formatted data into a Markdown table -> PRESERVE AI TABLE!
+    baseContent = p;
+  } else if (sHasTable && !pHasTable) {
+    // Source has original table, AI flattened it -> RESTORE SOURCE TABLE!
+    baseContent = s;
+  } else if (p.length >= s.length) {
+    baseContent = p;
+  } else {
+    baseContent = s;
+  }
+
+  // Ensure ALL diagram and chart tokens are retained in the final content
+  allImages.forEach((imgToken) => {
+    if (!baseContent.includes(imgToken)) {
+      baseContent = baseContent + "\n\n" + imgToken;
+    }
+  });
+
+  return baseContent;
+}
+
+/**
+ * Keep text extracted directly from the source document authoritative. AI is
+ * still useful for classification and answer metadata, but it must not replace
+ * exact stems/options/statements with shortened text or placeholders.
+ */
 export function mergeParsedQuestionsWithSource(
   parsedQuestions: Question[],
   sourceQuestions: Question[]
@@ -876,6 +1054,7 @@ export function mergeParsedQuestionsWithSource(
     }
 
     const sourceContent = String(source.content || "").trim();
+    const parsedContent = String(question.content || "").trim();
     const parsedOptions = (question.options || []).filter((option) => !isSyntheticPlaceholder(option));
     const sourceOptions = (source.options || []).filter((option) => !isSyntheticPlaceholder(option));
     const options = part === 1
@@ -914,7 +1093,8 @@ export function mergeParsedQuestionsWithSource(
       });
     }
 
-    const content = sourceContent || String(question.content || "").trim();
+    // Preserve data tables and diagrams
+    const content = mergeQuestionContentPreservingTablesAndDiagrams(parsedContent, sourceContent);
     const isIncomplete =
       !content ||
       (part === 1 && options.length !== 4) ||
@@ -931,8 +1111,10 @@ export function mergeParsedQuestionsWithSource(
         question.hasTableOrDiagram ||
           source.hasTableOrDiagram ||
           content.includes("![") ||
+          content.includes("__IMG_TOKEN_") ||
           content.includes("|")
       ),
+      diagramUrl: question.diagramUrl || source.diagramUrl,
       needsReview: Boolean(question.needsReview || isIncomplete),
     };
   });
@@ -949,10 +1131,13 @@ export async function clientParseExam(payload: {
   apiKey?: string;
   model?: string;
 }): Promise<{ success: boolean; data?: Question[]; error?: string; warning?: string }> {
-  const { rawText, subject, grade, apiKey, model } = payload;
+  let { rawText, subject, grade, apiKey, model } = payload;
   if (!rawText || !rawText.trim()) {
     return { success: false, error: "Nội dung đề thi không được để trống" };
   }
+
+  // Pre-normalize raw text tables (convert tabs or multi-space aligned data into proper Markdown tables)
+  rawText = convertRawTextTablesToMarkdown(rawText);
 
   const key = apiKey || getStoredApiKey();
   const ai = getAI(key);
@@ -971,20 +1156,24 @@ export async function clientParseExam(payload: {
     const prompt = `Bạn là chuyên gia phân tích và bóc tách đề thi Tốt nghiệp THPT chuẩn Bộ GD&ĐT Việt Nam (Chương trình GDPT 2018 mới nhất).
 Hãy đọc kỹ toàn bộ văn bản đề thi dưới đây và trích xuất TOÀN BỘ CÁC CÂU HỎI VÀ ĐỦ 100% CÁC LỆNH HỎI, KHÔNG ĐƯỢC BỎ SÓT NỘI DUNG NÀO!
 
-QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, ĐỒ THỊ & BẢNG SỐ LIỆU:
+QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, BIỂU ĐỒ & BẢNG SỐ LIỆU (BẮT BUỘC TUÂN THỦ 100%):
 1. CÔNG THỨC TOÁN HỌC, VẬT LÝ, HÓA HỌC & SINH HỌC:
    - Giữ NGUYÊN từng chuỗi LaTeX đã có, kể cả cặp dấu $...$ hoặc $$...$$; không đổi thành ảnh hoặc văn bản thường.
    - Công thức mới phải dùng LaTeX: phân số, căn, tích phân, đạo hàm, véc-tơ, chỉ số/đơn vị vật lý, công thức phân tử, điện tích ion, đồng vị và mũi tên phản ứng.
    - Bảo toàn chính xác chữ hoa/thường khoa học như f(x), pH, DNA, mRNA và tên gene/protein.
    - Ví dụ định dạng: $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$, $A \\rightleftharpoons B$.
-2. HÌNH VẼ, BIỂU ĐỒ: Giữ nguyên các token hình ảnh Markdown dạng ![Alt](url) hoặc __IMG_TOKEN_X__ trong "content".
-3. BẢNG SỐ LIỆU / BẢNG BIẾN THIÊN / BẢNG THỐNG KÊ / BẢNG PHÂN BỐ TẦN SỐ (BẮT BUỘC):
-   - BẢNG SỐ LIỆU PHẢI ĐƯỢC GIỮ NGUYÊN 100% Ở ĐỊNH DẠNG BẢNG MARKDOWN CHUẨN:
+2. HÌNH VẼ, BIỂU ĐỒ, ĐỒ THỊ (CHARTS & DIAGRAMS):
+   - BẢO TOÀN 100% mọi token hình ảnh Markdown dạng ![Alt](url) hoặc __IMG_TOKEN_X__ hoặc diagramUrl trong "content".
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC XÓA BỎ TOKEN HÌNH ẢNH, KHÔNG ĐƯỢC THAY THẾ BIỂU ĐỒ BẰNG ĐOẠN VĂN MÔ TẢ TÙY TIỆN!
+   - Luôn gán "hasTableOrDiagram": true cho mọi câu hỏi có hình vẽ, biểu đồ hoặc đồ thị.
+3. BẢNG SỐ LIỆU / BẢNG THỐNG KÊ / BẢNG BIẾN THIÊN / BẢNG PHÂN BỐ TẦN SỐ (BẮT BUỘC):
+   - MỌI BẢNG SỐ LIỆU (nhất là môn Địa lý, Kinh tế, Sinh học, Hóa học, Toán thống kê) PHẢI ĐƯỢC GIỮ NGUYÊN 100% Ở ĐỊNH DẠNG BẢNG MARKDOWN CHUẨN:
      | Tiêu đề 1 | Tiêu đề 2 | Tiêu đề 3 |
      | :--- | :--- | :--- |
      | Dòng 1 | Dòng 2 | Dòng 3 |
-   - TUYỆT ĐỐI KHÔNG ĐƯỢC chuyển bảng số liệu thành dạng câu văn xuôi, đoạn văn hay gộp các ô thành văn bản!
-   - Bảng số liệu thuộc câu nào phải nằm đúng trong thuộc tính "content" hoặc "passageContent" của câu đó, và đặt "hasTableOrDiagram": true.
+   - NGHIÊM CẤM TUYỆT ĐỐI việc biến bảng số liệu thành dạng câu văn xuôi, đoạn văn hay kể lể số liệu (Ví dụ cấm viết: "Năm 2010 là 15%, năm 2020 là 20%...")!
+   - Toàn bộ các giá trị, số liệu, năm, tỷ lệ, đơn vị phải nằm nguyên vẹn trong các ô của Bảng Markdown.
+   - Bảng số liệu thuộc câu nào phải nằm đúng trong thuộc tính "content" của câu đó, và đặt "hasTableOrDiagram": true.
 4. PHẦN I: Trắc nghiệm 4 lựa chọn (part: 1, questionType: "multiple_choice") -> "options": ["A...", "B...", "C...", "D..."], "correctIndex": 0..3. TUYỆT ĐỐI KHÔNG gộp phương án.
 5. PHẦN II: Trắc nghiệm Đúng/Sai (part: 2, questionType: "true_false"):
    - "content": CHỈ chứa phần thân/dẫn/đề bài chung của câu hỏi (kể cả Bảng số liệu nếu có). TUYỆT ĐỐI KHÔNG để các ý a, b, c, d trong "content".
@@ -1352,13 +1541,16 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
    - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
 3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Học sinh tự tính toán và điền kết quả số) -> (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số ngắn. "options": [].
 
-QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC:
-4. BẢNG SỐ LIỆU / BẢNG BIẾN THIÊN / BẢNG THỐNG KÊ: BẮT BUỘC trích xuất 100% ở định dạng BẢNG MARKDOWN CHUẨN:
-   | Tiêu đề 1 | Tiêu đề 2 | Tiêu đề 3 |
-   |-----------|-----------|-----------|
-   | Giá trị 1 | Giá trị 2 | Giá trị 3 |
-   TUYỆT ĐỐI KHÔNG viết bảng thành dạng đoạn văn xuôi!
-5. HÌNH VẼ / BIỂU ĐỒ / ĐỒ THỊ: Nếu câu hỏi có hình vẽ, đồ thị hàm số, biểu đồ cột/tròn, hình khối không gian, hãy đặt "hasTableOrDiagram": true.
+QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN THỦ 100%):
+4. BẢNG SỐ LIỆU / BẢNG THỐNG KÊ / BẢNG BIẾN THIÊN:
+   - BẮT BUỘC trích xuất 100% ở định dạng BẢNG MARKDOWN CHUẨN:
+     | Tiêu đề 1 | Tiêu đề 2 | Tiêu đề 3 |
+     | :--- | :--- | :--- |
+     | Giá trị 1 | Giá trị 2 | Giá trị 3 |
+   - NGHIÊM CẤM TUYỆT ĐỐI việc viết hoặc chuyển bảng thành dạng đoạn văn xuôi hay kể lể số liệu! Mọi số liệu phải nằm nguyên trong các ô của Bảng Markdown!
+   - Đặt "hasTableOrDiagram": true cho mọi câu hỏi có bảng số liệu.
+5. HÌNH VẼ / BIỂU ĐỒ / ĐỒ THỊ (CHARTS & DIAGRAMS):
+   - Mọi câu hỏi có biểu đồ (biểu đồ cột, đường, tròn, miền, kết hợp), đồ thị hàm số, hình vẽ: BẮT BUỘC bảo toàn nội dung câu hỏi và gán "hasTableOrDiagram": true. Không được bỏ qua câu hỏi có biểu đồ!
 6. CÔNG THỨC TOÁN/LÝ/HÓA/SINH: Dùng LaTeX kẹp trong $...$ hoặc $$...$$ cho phân số, véc-tơ, chỉ số, đơn vị, công thức phân tử, ion, đồng vị và phản ứng hóa học.
    - Không làm mất chỉ số trên/dưới; ví dụ $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$.
    - Bảo toàn chính xác chữ hoa/thường như f(x), pH, DNA, mRNA, tên gene và protein.

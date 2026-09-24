@@ -51,6 +51,35 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
       --gold: #d97706;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    .slide-table {
+      border-collapse: collapse;
+      width: 92%;
+      max-width: 800px;
+      margin: 14px auto;
+      font-size: 15px;
+      border: 1.5px solid #475569;
+      background: #1e293b;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    .slide-table th {
+      background: #334155;
+      color: #38bdf8;
+      font-weight: bold;
+      padding: 8px 12px;
+      border: 1px solid #475569;
+      text-align: center;
+    }
+    .slide-table td {
+      padding: 8px 12px;
+      border: 1px solid #334155;
+      text-align: center;
+      color: #f1f5f9;
+    }
+    .slide-table tr:nth-child(even) td {
+      background: #162032;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       background: #0b0f19;
@@ -333,20 +362,76 @@ export function generatePresentationHTML(questions: Question[], config?: ExamCon
     let currentSlide = 0; // 0 is cover, 1..N are questions
     let isRevealed = false;
 
-    // Helper: Convert Markdown syntax (Images, Linebreaks, Bold) to HTML
+    // Helper: Convert Markdown syntax (Tables, Images, Linebreaks, Bold) to HTML
     function formatMarkdown(text) {
       if (!text) return '';
       let res = text;
       // 1. Markdown Images: ![alt](src) -> <img src="src" alt="alt"/>
-      res = res.replace(/!\\[(.*?)\\]\\(\\s*(data:image\\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\\s\\r\\n]+|https?:\\/\\/[^\\s)]+|\\/[^\\s)]+|[^\\s)]+?)\\s*\\)/gi, (m, alt, src) => {
-        const cleanSrc = src.trim().startsWith('data:image') ? src.replace(/\\s+/g, '') : src.trim();
+      res = res.replace(/!\[(.*?)\]\(\s*(data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\s\r\n]+|https?:\/\/[^\s)]+|\/[^\s)]+|[^\s)]+?)\s*\)/gi, (m, alt, src) => {
+        const cleanSrc = src.trim().startsWith('data:image') ? src.replace(/\s+/g, '') : src.trim();
         return '<img src="' + cleanSrc + '" alt="' + (alt || 'Hình vẽ') + '" style="max-height:260px; max-width:100%; border-radius:10px; margin:10px auto; display:block; background:#fff; padding:4px;" />';
       });
       // 2. Bold: **text**
-      res = res.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
-      // 3. Newlines to <br>
-      res = res.replace(/\\n/g, '<br>');
-      return res;
+      res = res.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+      // 3. Process Markdown Tables: | col1 | col2 |
+      const rawLines = res.split('\n');
+      const outLines = [];
+      let inTable = false;
+      let tableRows = [];
+
+      const buildHtmlTable = (rows) => {
+        if (!rows || rows.length === 0) return '';
+        const header = rows[0];
+        const body = rows.slice(1);
+        let html = '<table class="slide-table">';
+        if (header && header.length > 0) {
+          html += '<thead><tr>';
+          header.forEach(c => { html += '<th>' + c + '</th>'; });
+          html += '</tr></thead>';
+        }
+        html += '<tbody>';
+        body.forEach(r => {
+          html += '<tr>';
+          r.forEach(c => { html += '<td>' + c + '</td>'; });
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+      };
+
+      for (let i = 0; i < rawLines.length; i++) {
+        const l = rawLines[i].trim();
+        const isPipe = (l.startsWith('|') && l.endsWith('|')) || (l.includes('|') && l.split('|').length >= 3);
+        if (isPipe) {
+          if (!/^\|?[\s\-:]+(\|[\s\-:]+)+\|?$/.test(l)) {
+            let clean = l;
+            if (clean.startsWith('|')) clean = clean.slice(1);
+            if (clean.endsWith('|')) clean = clean.slice(0, -1);
+            const cells = clean.split('|').map(c => c.trim());
+            if (cells.length > 0) {
+              inTable = true;
+              tableRows.push(cells);
+              continue;
+            }
+          } else {
+            // Divider row
+            continue;
+          }
+        }
+        if (inTable && tableRows.length > 0) {
+          outLines.push(buildHtmlTable(tableRows));
+          inTable = false;
+          tableRows = [];
+        }
+        outLines.push(rawLines[i]);
+      }
+      if (inTable && tableRows.length > 0) {
+        outLines.push(buildHtmlTable(tableRows));
+      }
+
+      // 4. Newlines to <br> for non-table lines
+      return outLines.join('<br>');
     }
 
     function renderSlide() {
