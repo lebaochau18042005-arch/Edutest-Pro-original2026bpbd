@@ -1607,10 +1607,31 @@ ${sanitizedText.substring(0, 150000)}
     const totalRaw = parsed.length;
 
     const formatted = parsed.map((item: any, idx: number) => {
+      let cleanContent = item.content || "";
+      const hasRealOpts = Array.isArray(item.options) && item.options.filter((o: any) => o && !/^Phương án/i.test(o)).length >= 2;
+      const hasRealStmts = Array.isArray(item.statements) && item.statements.filter((s: any) => s && s.text && !/^Khẳng định/i.test(s.text)).length >= 2;
+      const stmtsFromContent = splitRawTextIntoStatementsServer(cleanContent);
+      const hasStmtsFromContent = stmtsFromContent.length >= 2;
+      const optsFromContent = splitRawTextIntoOptionsServer(cleanContent);
+      const hasOptsFromContent = optsFromContent.length >= 2;
+
       let part: 1 | 2 | 3 = 1;
-      if (item.part === 1 || item.part === 2 || item.part === 3) {
-        part = item.part;
-      } else if (totalRaw === 28) {
+      const rawPartNum = Number(item.part);
+
+      // 1. ƯU TIÊN TUYỆT ĐỐI CHO PHẦN II (ĐÚNG / SAI)
+      if (hasRealStmts || hasStmtsFromContent || (rawPartNum === 2 && !hasRealOpts && !hasOptsFromContent)) {
+        part = 2;
+      }
+      // 2. PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN)
+      else if (hasRealOpts || hasOptsFromContent || (rawPartNum === 1 && !item.shortAnswer)) {
+        part = 1;
+      }
+      // 3. PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
+      else if (rawPartNum === 3 || item.questionType === "short_answer" || item.shortAnswer) {
+        part = 3;
+      }
+      // 4. FALLBACK THEO SỐ CÂU CHUẨN BGD
+      else if (totalRaw === 28) {
         if (idx < 18) part = 1;
         else if (idx < 22) part = 2;
         else part = 3;
@@ -1618,14 +1639,11 @@ ${sanitizedText.substring(0, 150000)}
         if (idx < 12) part = 1;
         else if (idx < 16) part = 2;
         else part = 3;
-      } else if (item.statements && item.statements.length > 0) {
-        part = 2;
-      } else if (item.shortAnswer && (!item.options || item.options.length === 0)) {
+      } else {
         part = 3;
       }
 
       const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
-      let cleanContent = item.content || "";
 
       // Post-process options for Part 1 to guarantee no merged or missing options
       let finalOptions: string[] = [];
@@ -2327,26 +2345,40 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
       }
     }
 
-    // Auto-detect part based on structure if part wasn't explicitly declared
-    if (currentQ.statements && currentQ.statements.length >= 2) {
+    const rawContent = currentQ.content || "";
+    const extractedStmts = splitRawTextIntoStatementsServer(rawContent);
+    const hasStmts = extractedStmts.length >= 2;
+    const existingStmts = Array.isArray(currentQ.statements) ? currentQ.statements.filter((s: any) => s && s.text && !/^Khẳng định/i.test(s.text)) : [];
+    const hasExistingStmts = existingStmts.length >= 2;
+    const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length >= 2 && !currentQ.options.every((o: any) => /^Phương án/i.test(o));
+
+    // 1. ƯU TIÊN TUYỆT ĐỐI CHO PHẦN II (ĐÚNG / SAI)
+    if (hasExistingStmts || hasStmts || (currentQ.part === 2 && !hasOpts)) {
       currentQ.part = 2;
       currentQ.questionType = "true_false";
+      if (hasStmts && (!currentQ.statements.length || currentQ.statements.length < 4)) {
+        currentQ.statements = extractedStmts;
+      }
+      const firstLetterMatch = currentQ.content.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+      if (firstLetterMatch !== -1) {
+        currentQ.content = currentQ.content.substring(0, firstLetterMatch).trim();
+      }
       currentQ.options = [];
-    } else if (currentQ.part === 3 || (!currentQ.options.length && currentQ.shortAnswer)) {
-      currentQ.part = 3;
-      currentQ.questionType = "short_answer";
-      currentQ.options = [];
-    } else if (currentQ.options.length >= 2) {
+      currentQ.shortAnswer = undefined;
+    }
+    // 2. PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN)
+    else if (hasOpts || (currentQ.part === 1 && !currentQ.shortAnswer)) {
       currentQ.part = 1;
       currentQ.questionType = "multiple_choice";
-    } else if (currentQ.qNumber >= 23 && currentQ.qNumber <= 28) {
+      currentQ.statements = [];
+      currentQ.shortAnswer = undefined;
+    }
+    // 3. PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
+    else {
       currentQ.part = 3;
       currentQ.questionType = "short_answer";
       currentQ.options = [];
-    } else if (currentQ.qNumber >= 19 && currentQ.qNumber <= 22) {
-      currentQ.part = 2;
-      currentQ.questionType = "true_false";
-      currentQ.options = [];
+      currentQ.statements = [];
     }
 
     // If Part 2, strictly ensure all 4 statements a, b, c, d exist

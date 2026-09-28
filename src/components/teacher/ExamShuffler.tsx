@@ -2434,8 +2434,8 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                 (() => {
                   const currentQ = selectedQuestions[previewStudentQIndex - 1] || selectedQuestions[0];
                   if (!currentQ) return null;
-                  const isPart2 = currentQ.part === 2 || (currentQ.part !== 1 && currentQ.part !== 3 && (currentQ.questionType === "true_false" || (currentQ.statements && currentQ.statements.length > 0 && (!currentQ.options || currentQ.options.length === 0))));
-                  const isPart3 = currentQ.part === 3 || (currentQ.part !== 1 && (currentQ.questionType === "short_answer" || (!isPart2 && currentQ.options.length === 0)));
+                  const isPart2 = currentQ.part === 2 || currentQ.questionType === "true_false" || (currentQ.statements && currentQ.statements.length >= 2);
+                  const isPart3 = !isPart2 && (currentQ.part === 3 || currentQ.questionType === "short_answer" || (!currentQ.options || currentQ.options.length === 0));
                   const isPart1 = !isPart2 && !isPart3;
 
                   return (
@@ -2769,8 +2769,8 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                       .filter((q) => extractedPartFilter === "all" || q.part === extractedPartFilter);
 
                     return filteredQuestions.map((q, qIdx) => {
-                      const isPart2 = q.part === 2 || (q.part !== 1 && q.part !== 3 && (q.questionType === "true_false" || (q.statements && q.statements.length > 0 && (!q.options || q.options.length === 0))));
-                      const isPart3 = q.part === 3 || (q.part !== 1 && (q.questionType === "short_answer" || (!isPart2 && q.options.length === 0)));
+                      const isPart2 = q.part === 2 || q.questionType === "true_false" || (q.statements && q.statements.length >= 2);
+                      const isPart3 = !isPart2 && (q.part === 3 || q.questionType === "short_answer" || (!q.options || q.options.length === 0));
                       const isPart1 = !isPart2 && !isPart3;
                       const isFirstInPart = qIdx === 0 || q.part !== filteredQuestions[qIdx - 1]?.part;
 

@@ -652,7 +652,8 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
 export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question[] {
   const total = rawQuestions.length;
   return rawQuestions.map((q, idx) => {
-    let part: ExamPart = 1;
+    let cleanContent = q.content || "";
+    let hasMissingSourceData = false;
 
     // Check if real options (not synthetic placeholders) exist
     const rawOpts = Array.isArray(q.options)
@@ -666,28 +667,42 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       : [];
     const hasRealStatements = rawStmts.length >= 2;
 
+    // Check statements embedded in content or other fields
+    const stmtsInContent = splitRawTextIntoStatements(cleanContent);
+    const hasStatementsInContent = stmtsInContent.length >= 2;
+
+    const stmtsInPassage = q.passageContent ? splitRawTextIntoStatements(q.passageContent) : [];
+    const hasStatementsInPassage = stmtsInPassage.length >= 2;
+
+    const stmtsInExplanation = q.explanation ? splitRawTextIntoStatements(q.explanation) : [];
+    const hasStatementsInExplanation = stmtsInExplanation.length >= 2;
+
+    const hasAnyTrueFalseStatements = hasRealStatements || hasStatementsInContent || hasStatementsInPassage || hasStatementsInExplanation;
+
+    // Check options embedded in content
+    const optsInContent = splitRawTextIntoOptions(cleanContent);
+    const hasOptionsInContent = optsInContent.length >= 2;
+
+    let part: ExamPart = 1;
     const rawPartNum = Number(q.part);
-    if (rawPartNum === 3 || q.questionType === "short_answer") {
-      part = 3;
-    } else if (rawPartNum === 2 || q.questionType === "true_false" || hasRealStatements) {
+
+    // 1. NGUYÊN TẮC ƯU TIÊN TUYỆT ĐỐI CHO PHẦN II (TRẮC NGHIỆM ĐÚNG / SAI):
+    // Bất kỳ câu hỏi nào có chứa 4 mệnh đề a, b, c, d (trong statements hoặc trong content/passage/explanation)
+    // BẮT BUỘC 100% PHẢI LÀ PHẦN II (ĐÚNG / SAI), KHÔNG ĐƯỢC ĐỂ NHẢY SANG PHẦN III HOẶC PHẦN I!
+    if (hasAnyTrueFalseStatements || (rawPartNum === 2 && !hasRealOptions && !hasOptionsInContent)) {
       part = 2;
-    } else if (hasRealOptions) {
+    }
+    // 2. NGUYÊN TẮC CHO PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN):
+    else if (hasRealOptions || hasOptionsInContent || (rawPartNum === 1 && !q.shortAnswer)) {
       part = 1;
-    } else if (q.shortAnswer && !hasRealOptions && !hasRealStatements) {
+    }
+    // 3. NGUYÊN TẮC CHO PHẦN III (TRẮC NGHIỆM TRẢ LỜI NGẮN / ĐIỀN SỐ):
+    // Chỉ khi KHÔNG CÓ mệnh đề a, b, c, d và KHÔNG CÓ các phương án A, B, C, D
+    else if (rawPartNum === 3 || q.questionType === "short_answer" || q.shortAnswer) {
       part = 3;
-    } else if (rawPartNum === 1 && !hasRealOptions && !hasRealStatements) {
-      if (total === 28) {
-        if (idx < 18) part = 1;
-        else if (idx < 22) part = 2;
-        else part = 3;
-      } else if (total === 22) {
-        if (idx < 12) part = 1;
-        else if (idx < 16) part = 2;
-        else part = 3;
-      } else {
-        part = 3;
-      }
-    } else if (total === 28) {
+    }
+    // 4. FALLBACK THEO CẤU TRÚC SỐ CÂU CHUẨN CỦA BỘ GD&ĐT:
+    else if (total === 28) {
       if (idx < 18) part = 1;
       else if (idx < 22) part = 2;
       else part = 3;
@@ -695,15 +710,11 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       if (idx < 12) part = 1;
       else if (idx < 16) part = 2;
       else part = 3;
-    } else if (!hasRealOptions && !hasRealStatements) {
-      part = 3;
     } else {
-      part = 1;
+      part = 3;
     }
 
     const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
-    let cleanContent = q.content || "";
-    let hasMissingSourceData = false;
 
     // XỬ LÝ VÀ BÓC TÁCH TOÀN BỘ PHƯƠNG ÁN PHẦN I ĐẢM BẢO 100% NGUYÊN FILE GỐC
     let finalOptions: string[] = [];
@@ -791,12 +802,6 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
 
         if (recovered.length >= 2) {
           statements = recovered;
-          if (sourceUsed === cleanContent) {
-            const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
-            if (firstLetterMatch !== -1) {
-              cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
-            }
-          }
         } else if (q.options && q.options.length >= 2 && !q.options.every((o) => /^Phương án/i.test(o.trim()))) {
           // If options exist, map them to statements
           statements = q.options.slice(0, 4).map((opt, oIdx) => ({
@@ -806,6 +811,12 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
             correctValue: oIdx === (q.correctIndex || 0),
           }));
         }
+      }
+
+      // Làm sạch cleanContent: loại bỏ phần ý a, b, c, d khỏi nội dung đề bài (để lại đề bài và bảng biểu/hình ảnh)
+      const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+      if (firstLetterMatch !== -1) {
+        cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
       }
 
       const requiredLetters = ["a", "b", "c", "d"];
