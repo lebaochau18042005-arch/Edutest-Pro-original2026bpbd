@@ -1851,16 +1851,38 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                           </span>
                           <button
                             type="button"
-                            onClick={() => exportQuestionsToWordDoc(selectedQuestions, uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Chuyen_Doi")}
-                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                            onClick={() =>
+                              exportQuestionsToWordDoc(selectedQuestions, {
+                                title: examTitle || uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Chuyen_Doi",
+                                department: config.department,
+                                school: config.school,
+                                examPeriod: config.examPeriod,
+                                subject: config.subject,
+                                duration: config.duration,
+                                examCode: config.originalExamCode || "101",
+                                includeAnswers: false,
+                              })
+                            }
+                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
                           >
                             <FileText className="w-3.5 h-3.5" />
                             Tải Bản Word (.docx)
                           </button>
                           <button
                             type="button"
-                            onClick={() => exportQuestionsToPrintablePdf(selectedQuestions, uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Chuyen_Doi")}
-                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                            onClick={() =>
+                              exportQuestionsToPrintablePdf(selectedQuestions, {
+                                title: examTitle || uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Chuyen_Doi",
+                                department: config.department,
+                                school: config.school,
+                                examPeriod: config.examPeriod,
+                                subject: config.subject,
+                                duration: config.duration,
+                                examCode: config.originalExamCode || "101",
+                                includeAnswers: false,
+                              })
+                            }
+                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
                           >
                             <Printer className="w-3.5 h-3.5" />
                             Bản In PDF (.pdf)
@@ -2223,9 +2245,20 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => exportQuestionsToWordDoc(selectedQuestions, uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Trich_Xuat")}
-                    className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center gap-1 transition-all"
-                    title="Xuất file Word (.docx)"
+                    onClick={() =>
+                      exportQuestionsToWordDoc(selectedQuestions, {
+                        title: examTitle || uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Trich_Xuat",
+                        department: config.department,
+                        school: config.school,
+                        examPeriod: config.examPeriod,
+                        subject: config.subject,
+                        duration: config.duration,
+                        examCode: config.originalExamCode || "101",
+                        includeAnswers: false,
+                      })
+                    }
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                    title="Xuất file Word (.doc)"
                   >
                     <FileText className="w-3.5 h-3.5" />
                     <span>Xuất Word</span>
@@ -2233,8 +2266,19 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => exportQuestionsToPrintablePdf(selectedQuestions, uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Trich_Xuat")}
-                    className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 transition-all"
+                    onClick={() =>
+                      exportQuestionsToPrintablePdf(selectedQuestions, {
+                        title: examTitle || uploadedFileName.replace(/\.[^/.]+$/, "") || "De_Thi_Trich_Xuat",
+                        department: config.department,
+                        school: config.school,
+                        examPeriod: config.examPeriod,
+                        subject: config.subject,
+                        duration: config.duration,
+                        examCode: config.originalExamCode || "101",
+                        includeAnswers: false,
+                      })
+                    }
+                    className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
                     title="Xuất bản in / PDF"
                   >
                     <Printer className="w-3.5 h-3.5" />
@@ -3568,8 +3612,19 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                         {/* Word Exam */}
                         <button
                           type="button"
-                          onClick={() => exportQuestionsToWordDoc(currentVariant.questions, `De_Thi_${config.subject}_ma_${activeVariantTab}`, false)}
-                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-blue-700 border border-blue-200 hover:bg-blue-50 flex items-center gap-1"
+                          onClick={() =>
+                            exportQuestionsToWordDoc(currentVariant.questions, {
+                              title: examTitle,
+                              department: config.department,
+                              school: config.school,
+                              examPeriod: config.examPeriod,
+                              subject: config.subject,
+                              duration: config.duration,
+                              examCode: activeVariantTab,
+                              includeAnswers: false,
+                            })
+                          }
+                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-blue-700 border border-blue-200 hover:bg-blue-50 flex items-center gap-1 cursor-pointer"
                           title="Xuất file Word đề thi không có đáp án cho học sinh"
                         >
                           <FileDown className="w-3.5 h-3.5 text-blue-600" />
@@ -3579,8 +3634,19 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                         {/* Word with Answers */}
                         <button
                           type="button"
-                          onClick={() => exportQuestionsToWordDoc(currentVariant.questions, `De_Thi_${config.subject}_ma_${activeVariantTab}`, true)}
-                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 flex items-center gap-1"
+                          onClick={() =>
+                            exportQuestionsToWordDoc(currentVariant.questions, {
+                              title: examTitle,
+                              department: config.department,
+                              school: config.school,
+                              examPeriod: config.examPeriod,
+                              subject: config.subject,
+                              duration: config.duration,
+                              examCode: activeVariantTab,
+                              includeAnswers: true,
+                            })
+                          }
+                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 flex items-center gap-1 cursor-pointer"
                           title="Xuất file Word đề thi có sẵn đáp án chi tiết và ma trận"
                         >
                           <FileText className="w-3.5 h-3.5 text-emerald-600" />
@@ -3590,8 +3656,19 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                         {/* Printable PDF */}
                         <button
                           type="button"
-                          onClick={() => exportQuestionsToPrintablePdf(currentVariant.questions, `De_Thi_${config.subject}_ma_${activeVariantTab}`, isPaperAnswersVisible)}
-                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-slate-800 text-white hover:bg-slate-900 flex items-center gap-1"
+                          onClick={() =>
+                            exportQuestionsToPrintablePdf(currentVariant.questions, {
+                              title: examTitle,
+                              department: config.department,
+                              school: config.school,
+                              examPeriod: config.examPeriod,
+                              subject: config.subject,
+                              duration: config.duration,
+                              examCode: activeVariantTab,
+                              includeAnswers: isPaperAnswersVisible,
+                            })
+                          }
+                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-slate-800 text-white hover:bg-slate-900 flex items-center gap-1 cursor-pointer"
                           title="In hoặc lưu file PDF trực tiếp"
                         >
                           <Printer className="w-3.5 h-3.5" />

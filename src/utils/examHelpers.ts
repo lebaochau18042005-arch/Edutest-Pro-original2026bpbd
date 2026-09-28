@@ -1800,21 +1800,74 @@ function convertMarkdownToExportHtml(rawText: string, diagramUrl?: string): stri
   return formatted;
 }
 
-export function exportQuestionsToWordDoc(questions: Question[], title: string = "De_Thi_Chuyen_Doi_Tu_Anh", includeAnswers: boolean = false) {
-  const answerTitle = includeAnswers ? `${title} (Kèm Đáp Án & Hướng Dẫn Giải Chi Tiết)` : title;
+export interface WordExportOptions {
+  title?: string;
+  department?: string;
+  school?: string;
+  examPeriod?: string;
+  subject?: string;
+  duration?: number;
+  examCode?: string;
+  originalExamCode?: string;
+  grade?: string;
+  includeAnswers?: boolean;
+}
+
+export function exportQuestionsToWordDoc(
+  questions: Question[],
+  titleOrOptions: string | WordExportOptions = "De_Thi_Chuyen_Doi_Tu_Anh",
+  includeAnswers: boolean = false,
+  config?: Partial<ExamConfig>,
+  variantCode?: string
+) {
+  let opts: WordExportOptions = {};
+  if (typeof titleOrOptions === "object" && titleOrOptions !== null) {
+    opts = { ...titleOrOptions };
+  } else {
+    opts = {
+      title: typeof titleOrOptions === "string" ? titleOrOptions : "De_Thi_Chuyen_Doi_Tu_Anh",
+      includeAnswers,
+      department: config?.department,
+      school: config?.school,
+      examPeriod: config?.examPeriod,
+      subject: config?.subject,
+      duration: config?.duration,
+      examCode: variantCode || config?.originalExamCode,
+      grade: config?.grade,
+    };
+  }
+
+  const department = opts.department || "SỞ GIÁO DỤC VÀ ĐÀO TẠO";
+  const school = opts.school || "TRƯỜNG THPT BÌNH PHÚ";
+  const examPeriod = opts.examPeriod || "KỲ THI TỐT NGHIỆP TRUNG HỌC PHỔ THÔNG NĂM 2026";
+  const subject = opts.subject || "ĐỊA LÝ";
+  const duration = opts.duration || 50;
+  const examCode = opts.examCode || opts.originalExamCode || "101";
+  const rawTitle = opts.title || `ĐỀ THI THỬ TỐT NGHIỆP THPT 2026 - CHUẨN CẤU TRÚC BỘ GD&ĐT`;
+  const isIncludeAnswers = opts.includeAnswers ?? includeAnswers;
+  const answerTitle = isIncludeAnswers ? `${rawTitle} (Kèm Đáp Án & Lời Giải Chi Tiết)` : rawTitle;
+
+  // Compute question counts and part ranges
+  const p1Questions = questions.filter((q) => q.part === 1 || (!q.part && (q.options?.length ?? 0) >= 2));
+  const p2Questions = questions.filter((q) => q.part === 2 || q.questionType === "true_false");
+  const p3Questions = questions.filter((q) => q.part === 3 || q.questionType === "short_answer");
+
+  const p1End = p1Questions.length > 0 ? p1Questions.length : 18;
+  const p2End = p2Questions.length > 0 ? p2Questions.length : 4;
+  const p3End = p3Questions.length > 0 ? p3Questions.length : 6;
 
   let answerKeyTableHtml = "";
-  if (includeAnswers) {
+  if (isIncludeAnswers) {
     answerKeyTableHtml = `
-      <div style="margin-top: 24px; page-break-before: always;">
-        <h3 style="text-align: center; color: #1e3a8a; font-weight: bold; border-bottom: 2px solid #1e3a8a; padding-bottom: 6px;">
-          BẢNG ĐÁP ÁN VÀ MA TRẬN CHUẨN BỘ GIÁO DỤC & ĐÀO TẠO
+      <div style="margin-top: 28px; page-break-before: always;">
+        <h3 style="text-align: center; color: #1e3a8a; font-weight: bold; border-bottom: 2px solid #1e3a8a; padding-bottom: 6px; text-transform: uppercase;">
+          BẢNG ĐÁP ÁN VÀ MA TRẬN CHUẨN BỘ GIÁO DỤC & ĐÀO TẠO (MÃ ĐỀ ${examCode})
         </h3>
         <table style="width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11pt;" border="1">
           <thead>
             <tr style="background-color: #f1f5f9; font-weight: bold;">
-              <th style="padding: 6px; text-align: center; width: 80px;">Câu</th>
-              <th style="padding: 6px; text-align: center; width: 140px;">Phần / Dạng</th>
+              <th style="padding: 6px; text-align: center; width: 70px;">Câu</th>
+              <th style="padding: 6px; text-align: center; width: 150px;">Phần / Dạng</th>
               <th style="padding: 6px; text-align: center;">Đáp Án Chuẩn</th>
             </tr>
           </thead>
@@ -1850,53 +1903,149 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
       <meta charset='utf-8'>
       <title>${answerTitle}</title>
       <style>
-        body { font-family: 'Times New Roman', serif; font-size: 13pt; line-height: 1.45; color: #000; }
+        body { font-family: 'Times New Roman', serif; font-size: 12.5pt; line-height: 1.4; color: #000; }
         h1, h2, h3 { text-align: center; margin-bottom: 6px; }
-        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; border: none; }
+        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; border: none; }
         .header-table td { border: none; vertical-align: top; }
-        .question-block { margin-bottom: 14px; page-break-inside: avoid; }
-        .question-title { font-weight: bold; font-size: 13pt; margin-bottom: 4px; }
-        .options-grid { margin-top: 5px; margin-left: 20px; }
-        .option-item { margin-bottom: 4px; }
+        .section-header { margin-top: 16px; margin-bottom: 8px; border-bottom: 1.5px solid #000; padding-bottom: 3px; page-break-after: avoid; }
+        .section-title { font-weight: bold; font-size: 12pt; text-transform: uppercase; margin: 0 0 2px 0; }
+        .section-desc { font-style: italic; font-size: 10.5pt; color: #333; margin: 0; }
+        .question-block { margin-bottom: 12px; page-break-inside: avoid; }
+        .question-title { font-size: 12.5pt; margin-bottom: 3px; }
         .correct-badge { font-weight: bold; color: #047857; }
         .tf-true { font-weight: bold; color: #059669; }
         .tf-false { font-weight: bold; color: #dc2626; }
-        .explanation-box { margin-top: 6px; padding: 6px 10px; background-color: #f8fafc; border-left: 3px solid #2563eb; font-size: 11.5pt; color: #1e293b; font-style: italic; }
+        .explanation-box { margin-top: 5px; padding: 5px 10px; background-color: #f8fafc; border-left: 3px solid #2563eb; font-size: 11pt; color: #1e293b; font-style: italic; }
         img { max-width: 450px; max-height: 300px; display: block; margin: 6px auto; }
       </style>
     </head>
     <body>
+      <!-- Standard Ministry Exam Header Table -->
       <table class="header-table">
         <tr>
-          <td style="width: 48%; text-align: center;">
-            <strong>BỘ GIÁO DỤC VÀ ĐÀO TẠO</strong><br/>
-            <strong>TRƯỜNG THPT</strong>
+          <td style="width: 50%; text-align: center; vertical-align: top;">
+            <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase;">${department}</div>
+            <div style="font-size: 11.5pt; font-weight: bold; text-transform: uppercase;">${school}</div>
           </td>
-          <td style="width: 52%; text-align: center;">
-            <strong>KỲ THI TỐT NGHIỆP THPT</strong><br/>
-            <strong>${answerTitle}</strong><br/>
-            <em>(Đề thi gồm ${questions.length} câu hỏi)</em>
+          <td style="width: 50%; text-align: center; vertical-align: top;">
+            <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase;">${examPeriod}</div>
+            <div style="font-size: 11.5pt; font-weight: bold; text-transform: uppercase;">MÔN: ${subject}</div>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="text-align: center; padding-top: 8px;">
+            <div style="font-size: 13pt; font-weight: bold; text-transform: uppercase;">
+              ${rawTitle} ${isIncludeAnswers ? "(HƯỚNG DẪN GIẢI & ĐÁP ÁN)" : ""}
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="text-align: left; font-style: italic; font-size: 10.5pt; padding-top: 3px;">
+            Thời gian: ${duration} phút (Không kể phát đề)
+          </td>
+          <td style="text-align: right; font-weight: bold; font-size: 11pt; padding-top: 3px; font-family: 'Courier New', monospace;">
+            MÃ ĐỀ THI: ${examCode}
           </td>
         </tr>
       </table>
-      <div style="border-bottom: 1.5px solid #000; margin-bottom: 16px;"></div>
+      <div style="border-bottom: 1.5px solid #000; margin-bottom: 14px;"></div>
+
       <div class="content">
         ${questions.map((q, idx) => {
-          const isP2 = q.part === 2 || q.questionType === "true_false";
-          const isP3 = q.part === 3 || q.questionType === "short_answer";
-          const isP1 = !isP2 && !isP3;
+          const isPart2 = q.part === 2 || q.questionType === "true_false" || (q.statements && q.statements.length > 0);
+          const isPart3 = q.part === 3 || q.questionType === "short_answer" || (!isPart2 && (q.options?.length ?? 0) === 0);
+          const isPart1 = !isPart2 && !isPart3;
+
+          const currentPart = isPart2 ? 2 : isPart3 ? 3 : 1;
+          const prevPart = idx > 0 ? (questions[idx - 1].part === 2 || questions[idx - 1].questionType === "true_false" ? 2 : questions[idx - 1].part === 3 || questions[idx - 1].questionType === "short_answer" ? 3 : 1) : 0;
+          const isFirstInPart = idx === 0 || currentPart !== prevPart;
+
+          let sectionHeaderHtml = "";
+          if (isFirstInPart) {
+            if (currentPart === 1) {
+              sectionHeaderHtml = `
+                <div class="section-header">
+                  <p class="section-title">PHẦN I. CÂU TRẮC NGHIỆM NHIỀU PHƯƠNG ÁN LỰA CHỌN.</p>
+                  <p class="section-desc">Thí sinh trả lời từ câu 1 đến câu ${p1End}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.</p>
+                </div>
+              `;
+            } else if (currentPart === 2) {
+              sectionHeaderHtml = `
+                <div class="section-header">
+                  <p class="section-title">PHẦN II. CÂU TRẮC NGHIỆM ĐÚNG SAI.</p>
+                  <p class="section-desc">Thí sinh trả lời từ câu 1 đến câu ${p2End}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.</p>
+                </div>
+              `;
+            } else if (currentPart === 3) {
+              sectionHeaderHtml = `
+                <div class="section-header">
+                  <p class="section-title">PHẦN III. CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN.</p>
+                  <p class="section-desc">Thí sinh trả lời từ câu 1 đến câu ${p3End}.</p>
+                </div>
+              `;
+            }
+          }
 
           let optHtml = "";
-          if (isP1) {
-            optHtml = `<div class="options-grid">
-              ${(q.options || []).map((opt, oIdx) => {
-                const isCorrect = includeAnswers && oIdx === q.correctIndex;
-                return `<div class="option-item ${isCorrect ? "correct-badge" : ""}">
-                  <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? " ✓ <em>(Đáp án đúng)</em>" : ""}
-                </div>`;
-              }).join("")}
-            </div>`;
-          } else if (isP2) {
+          if (isPart1 && q.options && q.options.length > 0) {
+            const rawOpts = q.options.map((o) => String(o || "").trim());
+            const cleanPlainOpts = rawOpts.map((o) => o.replace(/<[^>]*>?/gm, "").trim());
+            const maxLen = cleanPlainOpts.reduce((acc, str) => Math.max(acc, str.length), 0);
+
+            if (rawOpts.length === 4 && maxLen <= 32) {
+              // 1 row of 4 columns
+              optHtml = `
+                <table style="width: 100%; border-collapse: collapse; border: none; margin: 4px 0 6px 0;">
+                  <tr>
+                    ${rawOpts.map((opt, oIdx) => {
+                      const isCorrect = isIncludeAnswers && oIdx === q.correctIndex;
+                      return `
+                        <td style="width: 25%; border: none; vertical-align: top; padding: 2px 4px; font-size: 12pt; ${isCorrect ? 'font-weight: bold; color: #047857;' : ''}">
+                          <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? "✓" : ""}
+                        </td>
+                      `;
+                    }).join("")}
+                  </tr>
+                </table>
+              `;
+            } else if (rawOpts.length === 4 && maxLen <= 65) {
+              // 2 rows of 2 columns
+              optHtml = `
+                <table style="width: 100%; border-collapse: collapse; border: none; margin: 4px 0 6px 0;">
+                  <tr>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 12pt; ${isIncludeAnswers && q.correctIndex === 0 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>A.</strong> ${convertMarkdownToExportHtml(rawOpts[0])} ${isIncludeAnswers && q.correctIndex === 0 ? "✓" : ""}
+                    </td>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 12pt; ${isIncludeAnswers && q.correctIndex === 1 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>B.</strong> ${convertMarkdownToExportHtml(rawOpts[1])} ${isIncludeAnswers && q.correctIndex === 1 ? "✓" : ""}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 12pt; ${isIncludeAnswers && q.correctIndex === 2 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>C.</strong> ${convertMarkdownToExportHtml(rawOpts[2])} ${isIncludeAnswers && q.correctIndex === 2 ? "✓" : ""}
+                    </td>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 12pt; ${isIncludeAnswers && q.correctIndex === 3 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>D.</strong> ${convertMarkdownToExportHtml(rawOpts[3])} ${isIncludeAnswers && q.correctIndex === 3 ? "✓" : ""}
+                    </td>
+                  </tr>
+                </table>
+              `;
+            } else {
+              // Stacked vertically
+              optHtml = `
+                <div style="margin-left: 15px; margin-top: 4px; margin-bottom: 6px;">
+                  ${rawOpts.map((opt, oIdx) => {
+                    const isCorrect = isIncludeAnswers && oIdx === q.correctIndex;
+                    return `
+                      <div style="margin-bottom: 3px; font-size: 12pt; ${isCorrect ? 'font-weight: bold; color: #047857;' : ''}">
+                        <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? " ✓ <em>(Đáp án)</em>" : ""}
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              `;
+            }
+          } else if (isPart2) {
             const stmts = q.statements && q.statements.length > 0 ? q.statements : [
               { id: "a", label: "a)", text: "Ý a", correctValue: true },
               { id: "b", label: "b)", text: "Ý b", correctValue: false },
@@ -1904,23 +2053,33 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
               { id: "d", label: "d)", text: "Ý d", correctValue: false },
             ];
 
-            optHtml = `<div class="options-grid">
-              ${stmts.map((st) => {
-                const ansTag = includeAnswers
-                  ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
-                  : "";
-                return `<div class="option-item">
-                  <strong>${st.label || `${st.id})`}</strong> ${convertMarkdownToExportHtml(st.text)}${ansTag}
-                </div>`;
-              }).join("")}
-            </div>`;
-          } else if (isP3) {
-            if (includeAnswers) {
-              optHtml = `<div style="margin-top: 6px; margin-left: 20px; font-weight: bold; color: #059669;">
-                Đáp số chuẩn: ${q.shortAnswer || "Chưa có đáp án"}
-              </div>`;
+            optHtml = `
+              <div style="margin-left: 15px; margin-top: 4px; margin-bottom: 6px;">
+                ${stmts.map((st) => {
+                  const ansTag = isIncludeAnswers
+                    ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
+                    : "";
+                  return `
+                    <div style="margin-bottom: 3px; font-size: 12pt;">
+                      <strong>${st.label || `${st.id})`}</strong> ${convertMarkdownToExportHtml(st.text)}${ansTag}
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            `;
+          } else if (isPart3) {
+            if (isIncludeAnswers) {
+              optHtml = `
+                <div style="margin-top: 5px; margin-left: 15px; font-weight: bold; color: #059669; font-size: 12pt;">
+                  Đáp số chuẩn: ${q.shortAnswer || "Chưa có đáp án"}
+                </div>
+              `;
             } else {
-              optHtml = `<div style="margin-top: 6px; margin-left: 20px; font-style: italic;">Đáp số: ....................................................</div>`;
+              optHtml = `
+                <div style="margin-top: 5px; margin-left: 15px; font-style: italic; color: #475569; font-size: 12pt;">
+                  Đáp án: ................................................................
+                </div>
+              `;
             }
           }
 
@@ -1931,14 +2090,31 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
               </div>`
             : "";
 
-          const expHtml = (includeAnswers && q.explanation) ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${convertMarkdownToExportHtml(q.explanation)}</div>` : "";
+          const expHtml = (isIncludeAnswers && q.explanation)
+            ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${convertMarkdownToExportHtml(q.explanation)}</div>`
+            : "";
 
-          return `<div class="question-block">
-            ${groupHtml}
-            <div class="question-title">Câu ${idx + 1}: ${convertMarkdownToExportHtml(q.content, q.diagramUrl)}</div>
-            ${optHtml}
-            ${expHtml}
-          </div>`;
+          // Clean question content
+          const cleanQuestionContent = (q.content || "")
+            .replace(/^\s*(?:Câu|Bài|Question)\s*\d+[\s:.)\-\/]*(?:\([^)]*\))?[:.\-\s]*/i, "")
+            .replace(/\*\*+$/, "")
+            .trim();
+
+          const partQuestionLabel = (q as any).partQuestionIndex
+            ? ` (Phần ${q.part === 1 ? 'I' : q.part === 2 ? 'II' : 'III'} - Câu ${(q as any).partQuestionIndex})`
+            : "";
+
+          return `
+            ${sectionHeaderHtml}
+            <div class="question-block">
+              ${groupHtml}
+              <div class="question-title">
+                <strong>Câu ${idx + 1}${partQuestionLabel}:</strong> ${convertMarkdownToExportHtml(cleanQuestionContent, q.diagramUrl)}
+              </div>
+              ${optHtml}
+              ${expHtml}
+            </div>
+          `;
         }).join("")}
       </div>
       ${answerKeyTableHtml}
@@ -1952,38 +2128,75 @@ export function exportQuestionsToWordDoc(questions: Question[], title: string = 
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  const fileSuffix = includeAnswers ? "_kem_dap_an" : "";
-  link.download = `${title.replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF]/g, "_")}${fileSuffix}.doc`;
+  const fileSuffix = isIncludeAnswers ? "_kem_dap_an" : "";
+  const cleanFileName = (opts.title || `De_Thi_${subject}_ma_${examCode}`).replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF]/g, "_");
+  link.download = `${cleanFileName}${fileSuffix}.doc`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
-/**
- * Tự động chuyển đổi và xuất danh sách câu hỏi đã số hóa từ Ảnh/File sang bản in PDF (.pdf)
- */
-export function exportQuestionsToPrintablePdf(questions: Question[], title: string = "De_Thi_Chuyen_Doi_Tu_Anh", includeAnswers: boolean = false) {
+export function exportQuestionsToPrintablePdf(
+  questions: Question[],
+  titleOrOptions: string | WordExportOptions = "De_Thi_Chuyen_Doi_Tu_Anh",
+  includeAnswers: boolean = false,
+  config?: Partial<ExamConfig>,
+  variantCode?: string
+) {
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     alert("Vui lòng cho phép mở cửa sổ popup để in/lưu PDF.");
     return;
   }
 
-  const answerTitle = includeAnswers ? `${title} (Kèm Đáp Án & Lời Giải Chi Tiết)` : title;
+  let opts: WordExportOptions = {};
+  if (typeof titleOrOptions === "object" && titleOrOptions !== null) {
+    opts = { ...titleOrOptions };
+  } else {
+    opts = {
+      title: typeof titleOrOptions === "string" ? titleOrOptions : "De_Thi_Chuyen_Doi_Tu_Anh",
+      includeAnswers,
+      department: config?.department,
+      school: config?.school,
+      examPeriod: config?.examPeriod,
+      subject: config?.subject,
+      duration: config?.duration,
+      examCode: variantCode || config?.originalExamCode,
+      grade: config?.grade,
+    };
+  }
+
+  const department = opts.department || "SỞ GIÁO DỤC VÀ ĐÀO TẠO";
+  const school = opts.school || "TRƯỜNG THPT BÌNH PHÚ";
+  const examPeriod = opts.examPeriod || "KỲ THI TỐT NGHIỆP TRUNG HỌC PHỔ THÔNG NĂM 2026";
+  const subject = opts.subject || "ĐỊA LÝ";
+  const duration = opts.duration || 50;
+  const examCode = opts.examCode || opts.originalExamCode || "101";
+  const rawTitle = opts.title || `ĐỀ THI THỬ TỐT NGHIỆP THPT 2026 - CHUẨN CẤU TRÚC BỘ GD&ĐT`;
+  const isIncludeAnswers = opts.includeAnswers ?? includeAnswers;
+  const answerTitle = isIncludeAnswers ? `${rawTitle} (Kèm Đáp Án & Lời Giải Chi Tiết)` : rawTitle;
+
+  const p1Questions = questions.filter((q) => q.part === 1 || (!q.part && (q.options?.length ?? 0) >= 2));
+  const p2Questions = questions.filter((q) => q.part === 2 || q.questionType === "true_false");
+  const p3Questions = questions.filter((q) => q.part === 3 || q.questionType === "short_answer");
+
+  const p1End = p1Questions.length > 0 ? p1Questions.length : 18;
+  const p2End = p2Questions.length > 0 ? p2Questions.length : 4;
+  const p3End = p3Questions.length > 0 ? p3Questions.length : 6;
 
   let answerKeyTableHtml = "";
-  if (includeAnswers) {
+  if (isIncludeAnswers) {
     answerKeyTableHtml = `
-      <div style="margin-top: 24px; page-break-before: always;">
-        <h3 style="text-align: center; color: #1e3a8a; font-weight: bold; border-bottom: 2px solid #1e3a8a; padding-bottom: 6px;">
-          BẢNG ĐÁP ÁN VÀ MA TRẬN CHUẨN BỘ GIÁO DỤC & ĐÀO TẠO
+      <div style="margin-top: 28px; page-break-before: always;">
+        <h3 style="text-align: center; color: #1e3a8a; font-weight: bold; border-bottom: 2px solid #1e3a8a; padding-bottom: 6px; text-transform: uppercase;">
+          BẢNG ĐÁP ÁN VÀ MA TRẬN CHUẨN BỘ GIÁO DỤC & ĐÀO TẠO (MÃ ĐỀ ${examCode})
         </h3>
         <table style="width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11pt;" border="1">
           <thead>
             <tr style="background-color: #f1f5f9; font-weight: bold;">
-              <th style="padding: 6px; text-align: center; width: 80px;">Câu</th>
-              <th style="padding: 6px; text-align: center; width: 140px;">Phần / Dạng</th>
+              <th style="padding: 6px; text-align: center; width: 70px;">Câu</th>
+              <th style="padding: 6px; text-align: center; width: 150px;">Phần / Dạng</th>
               <th style="padding: 6px; text-align: center;">Đáp Án Chuẩn</th>
             </tr>
           </thead>
@@ -2020,19 +2233,20 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
       <meta charset="utf-8">
       <title>${answerTitle}</title>
       <style>
-        @page { size: A4; margin: 15mm 15mm; }
-        body { font-family: 'Times New Roman', serif; font-size: 12.5pt; line-height: 1.4; color: #000; margin: 0; padding: 20px; }
-        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        @page { size: A4; margin: 12mm 15mm; }
+        body { font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.38; color: #000; margin: 0; padding: 15px; }
+        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
         .header-table td { border: none; vertical-align: top; }
-        .question-block { margin-bottom: 12px; page-break-inside: avoid; }
-        .question-title { font-weight: bold; }
-        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; margin-left: 15px; }
-        .option-item { font-size: 12pt; }
+        .section-header { margin-top: 14px; margin-bottom: 6px; border-bottom: 1.5px solid #000; padding-bottom: 3px; page-break-after: avoid; }
+        .section-title { font-weight: bold; font-size: 11.5pt; text-transform: uppercase; margin: 0 0 2px 0; }
+        .section-desc { font-style: italic; font-size: 10pt; color: #333; margin: 0; }
+        .question-block { margin-bottom: 10px; page-break-inside: avoid; }
+        .question-title { font-size: 12pt; margin-bottom: 3px; }
         .correct-badge { font-weight: bold; color: #047857; }
         .tf-true { font-weight: bold; color: #059669; }
         .tf-false { font-weight: bold; color: #dc2626; }
-        .explanation-box { margin-top: 4px; padding: 4px 8px; background-color: #f8fafc; border-left: 3px solid #2563eb; font-size: 11pt; color: #1e293b; font-style: italic; }
-        img { max-width: 450px; max-height: 300px; display: block; margin: 8px auto; border: 1px solid #e2e8f0; }
+        .explanation-box { margin-top: 4px; padding: 4px 8px; background-color: #f8fafc; border-left: 3px solid #2563eb; font-size: 10.5pt; color: #1e293b; font-style: italic; }
+        img { max-width: 450px; max-height: 300px; display: block; margin: 6px auto; border: 1px solid #e2e8f0; }
         @media print {
           body { padding: 0; }
         }
@@ -2041,35 +2255,126 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
     <body>
       <table class="header-table">
         <tr>
-          <td style="width: 48%; text-align: center;">
-            <strong>BỘ GIÁO DỤC VÀ ĐÀO TẠO</strong><br/>
-            <strong>TRƯỜNG THPT</strong>
+          <td style="width: 50%; text-align: center; vertical-align: top;">
+            <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">${department}</div>
+            <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase;">${school}</div>
           </td>
-          <td style="width: 52%; text-align: center;">
-            <strong>KỲ THI TỐT NGHIỆP THPT 2026</strong><br/>
-            <strong>${answerTitle}</strong><br/>
-            <em>(Thời gian làm bài: 50 phút - Đề gồm ${questions.length} câu)</em>
+          <td style="width: 50%; text-align: center; vertical-align: top;">
+            <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">${examPeriod}</div>
+            <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase;">MÔN: ${subject}</div>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="text-align: center; padding-top: 6px;">
+            <div style="font-size: 12.5pt; font-weight: bold; text-transform: uppercase;">
+              ${rawTitle} ${isIncludeAnswers ? "(HƯỚNG DẪN GIẢI & ĐÁP ÁN)" : ""}
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="text-align: left; font-style: italic; font-size: 10pt; padding-top: 3px;">
+            Thời gian: ${duration} phút (Không kể phát đề)
+          </td>
+          <td style="text-align: right; font-weight: bold; font-size: 10.5pt; padding-top: 3px; font-family: 'Courier New', monospace;">
+            MÃ ĐỀ THI: ${examCode}
           </td>
         </tr>
       </table>
-      <div style="border-bottom: 1.5px solid #000; margin-bottom: 16px;"></div>
+      <div style="border-bottom: 1.5px solid #000; margin-bottom: 12px;"></div>
+
       <div class="content">
         ${questions.map((q, idx) => {
-          const isP2 = q.part === 2 || q.questionType === "true_false";
-          const isP3 = q.part === 3 || q.questionType === "short_answer";
-          const isP1 = !isP2 && !isP3;
+          const isPart2 = q.part === 2 || q.questionType === "true_false" || (q.statements && q.statements.length > 0);
+          const isPart3 = q.part === 3 || q.questionType === "short_answer" || (!isPart2 && (q.options?.length ?? 0) === 0);
+          const isPart1 = !isPart2 && !isPart3;
+
+          const currentPart = isPart2 ? 2 : isPart3 ? 3 : 1;
+          const prevPart = idx > 0 ? (questions[idx - 1].part === 2 || questions[idx - 1].questionType === "true_false" ? 2 : questions[idx - 1].part === 3 || questions[idx - 1].questionType === "short_answer" ? 3 : 1) : 0;
+          const isFirstInPart = idx === 0 || currentPart !== prevPart;
+
+          let sectionHeaderHtml = "";
+          if (isFirstInPart) {
+            if (currentPart === 1) {
+              sectionHeaderHtml = `
+                <div class="section-header">
+                  <p class="section-title">PHẦN I. CÂU TRẮC NGHIỆM NHIỀU PHƯƠNG ÁN LỰA CHỌN.</p>
+                  <p class="section-desc">Thí sinh trả lời từ câu 1 đến câu ${p1End}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.</p>
+                </div>
+              `;
+            } else if (currentPart === 2) {
+              sectionHeaderHtml = `
+                <div class="section-header">
+                  <p class="section-title">PHẦN II. CÂU TRẮC NGHIỆM ĐÚNG SAI.</p>
+                  <p class="section-desc">Thí sinh trả lời từ câu 1 đến câu ${p2End}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.</p>
+                </div>
+              `;
+            } else if (currentPart === 3) {
+              sectionHeaderHtml = `
+                <div class="section-header">
+                  <p class="section-title">PHẦN III. CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN.</p>
+                  <p class="section-desc">Thí sinh trả lời từ câu 1 đến câu ${p3End}.</p>
+                </div>
+              `;
+            }
+          }
 
           let optHtml = "";
-          if (isP1) {
-            optHtml = `<div class="options-grid">
-              ${(q.options || []).map((opt, oIdx) => {
-                const isCorrect = includeAnswers && oIdx === q.correctIndex;
-                return `<div class="option-item ${isCorrect ? "correct-badge" : ""}">
-                  <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? " ✓ <em>(Đáp án)</em>" : ""}
-                </div>`;
-              }).join("")}
-            </div>`;
-          } else if (isP2) {
+          if (isPart1 && q.options && q.options.length > 0) {
+            const rawOpts = q.options.map((o) => String(o || "").trim());
+            const cleanPlainOpts = rawOpts.map((o) => o.replace(/<[^>]*>?/gm, "").trim());
+            const maxLen = cleanPlainOpts.reduce((acc, str) => Math.max(acc, str.length), 0);
+
+            if (rawOpts.length === 4 && maxLen <= 32) {
+              optHtml = `
+                <table style="width: 100%; border-collapse: collapse; border: none; margin: 3px 0 5px 0;">
+                  <tr>
+                    ${rawOpts.map((opt, oIdx) => {
+                      const isCorrect = isIncludeAnswers && oIdx === q.correctIndex;
+                      return `
+                        <td style="width: 25%; border: none; vertical-align: top; padding: 2px 4px; font-size: 11.5pt; ${isCorrect ? 'font-weight: bold; color: #047857;' : ''}">
+                          <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? "✓" : ""}
+                        </td>
+                      `;
+                    }).join("")}
+                  </tr>
+                </table>
+              `;
+            } else if (rawOpts.length === 4 && maxLen <= 65) {
+              optHtml = `
+                <table style="width: 100%; border-collapse: collapse; border: none; margin: 3px 0 5px 0;">
+                  <tr>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 11.5pt; ${isIncludeAnswers && q.correctIndex === 0 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>A.</strong> ${convertMarkdownToExportHtml(rawOpts[0])} ${isIncludeAnswers && q.correctIndex === 0 ? "✓" : ""}
+                    </td>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 11.5pt; ${isIncludeAnswers && q.correctIndex === 1 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>B.</strong> ${convertMarkdownToExportHtml(rawOpts[1])} ${isIncludeAnswers && q.correctIndex === 1 ? "✓" : ""}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 11.5pt; ${isIncludeAnswers && q.correctIndex === 2 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>C.</strong> ${convertMarkdownToExportHtml(rawOpts[2])} ${isIncludeAnswers && q.correctIndex === 2 ? "✓" : ""}
+                    </td>
+                    <td style="width: 50%; border: none; vertical-align: top; padding: 2px 6px; font-size: 11.5pt; ${isIncludeAnswers && q.correctIndex === 3 ? 'font-weight: bold; color: #047857;' : ''}">
+                      <strong>D.</strong> ${convertMarkdownToExportHtml(rawOpts[3])} ${isIncludeAnswers && q.correctIndex === 3 ? "✓" : ""}
+                    </td>
+                  </tr>
+                </table>
+              `;
+            } else {
+              optHtml = `
+                <div style="margin-left: 15px; margin-top: 3px; margin-bottom: 5px;">
+                  ${rawOpts.map((opt, oIdx) => {
+                    const isCorrect = isIncludeAnswers && oIdx === q.correctIndex;
+                    return `
+                      <div style="margin-bottom: 2px; font-size: 11.5pt; ${isCorrect ? 'font-weight: bold; color: #047857;' : ''}">
+                        <strong>${LETTERS[oIdx]}.</strong> ${convertMarkdownToExportHtml(opt)} ${isCorrect ? " ✓ <em>(Đáp án)</em>" : ""}
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              `;
+            }
+          } else if (isPart2) {
             const stmts = q.statements && q.statements.length > 0 ? q.statements : [
               { id: "a", label: "a)", text: "Ý a", correctValue: true },
               { id: "b", label: "b)", text: "Ý b", correctValue: false },
@@ -2077,41 +2382,67 @@ export function exportQuestionsToPrintablePdf(questions: Question[], title: stri
               { id: "d", label: "d)", text: "Ý d", correctValue: false },
             ];
 
-            optHtml = `<div style="margin-left: 15px; margin-top: 4px;">
-              ${stmts.map((st) => {
-                const ansTag = includeAnswers
-                  ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
-                  : "";
-                return `<div class="option-item" style="margin-bottom: 3px;">
-                  <strong>${st.label || `${st.id})`}</strong> ${convertMarkdownToExportHtml(st.text)}${ansTag}
-                </div>`;
-              }).join("")}
-            </div>`;
-          } else if (isP3) {
-            if (includeAnswers) {
-              optHtml = `<div style="margin-top: 6px; margin-left: 15px; font-weight: bold; color: #059669;">
-                Đáp số chuẩn: ${q.shortAnswer || "Chưa có đáp án"}
-              </div>`;
+            optHtml = `
+              <div style="margin-left: 15px; margin-top: 3px; margin-bottom: 5px;">
+                ${stmts.map((st) => {
+                  const ansTag = isIncludeAnswers
+                    ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
+                    : "";
+                  return `
+                    <div style="margin-bottom: 2px; font-size: 11.5pt;">
+                      <strong>${st.label || `${st.id})`}</strong> ${convertMarkdownToExportHtml(st.text)}${ansTag}
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            `;
+          } else if (isPart3) {
+            if (isIncludeAnswers) {
+              optHtml = `
+                <div style="margin-top: 4px; margin-left: 15px; font-weight: bold; color: #059669; font-size: 11.5pt;">
+                  Đáp số chuẩn: ${q.shortAnswer || "Chưa có đáp án"}
+                </div>
+              `;
             } else {
-              optHtml = `<div style="margin-top: 6px; margin-left: 15px; font-style: italic;">Đáp số: ....................................................</div>`;
+              optHtml = `
+                <div style="margin-top: 4px; margin-left: 15px; font-style: italic; color: #475569; font-size: 11.5pt;">
+                  Đáp án: ................................................................
+                </div>
+              `;
             }
           }
 
           const groupHtml = q.groupTitle
-            ? `<div style="margin: 8px 0; padding: 6px 12px; background-color: #f1f5f9; border-left: 4px solid #4f46e5; font-size: 11pt;">
+            ? `<div style="margin: 6px 0; padding: 5px 10px; background-color: #f1f5f9; border-left: 4px solid #4f46e5; font-size: 10.5pt;">
                 <strong>📌 ${q.groupTitle}</strong>
-                ${q.passageContent ? `<div style="margin-top: 4px;">${convertMarkdownToExportHtml(q.passageContent)}</div>` : ""}
+                ${q.passageContent ? `<div style="margin-top: 3px;">${convertMarkdownToExportHtml(q.passageContent)}</div>` : ""}
               </div>`
             : "";
 
-          const expHtml = (includeAnswers && q.explanation) ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${convertMarkdownToExportHtml(q.explanation)}</div>` : "";
+          const expHtml = (isIncludeAnswers && q.explanation)
+            ? `<div class="explanation-box"><strong>💡 Lời giải chi tiết:</strong> ${convertMarkdownToExportHtml(q.explanation)}</div>`
+            : "";
 
-          return `<div class="question-block">
-            ${groupHtml}
-            <div class="question-title">Câu ${idx + 1}: ${convertMarkdownToExportHtml(q.content, q.diagramUrl)}</div>
-            ${optHtml}
-            ${expHtml}
-          </div>`;
+          const cleanQuestionContent = (q.content || "")
+            .replace(/^\s*(?:Câu|Bài|Question)\s*\d+[\s:.)\-\/]*(?:\([^)]*\))?[:.\-\s]*/i, "")
+            .replace(/\*\*+$/, "")
+            .trim();
+
+          const partQuestionLabel = (q as any).partQuestionIndex
+            ? ` (Phần ${q.part === 1 ? 'I' : q.part === 2 ? 'II' : 'III'} - Câu ${(q as any).partQuestionIndex})`
+            : "";
+
+          return `
+            ${sectionHeaderHtml}
+            <div class="question-block">
+              ${groupHtml}
+              <div class="question-title">
+                <strong>Câu ${idx + 1}${partQuestionLabel}:</strong> ${convertMarkdownToExportHtml(cleanQuestionContent, q.diagramUrl)}
+              </div>
+              ${optHtml}
+              ${expHtml}
+            </div>
+          `;
         }).join("")}
       </div>
       ${answerKeyTableHtml}
