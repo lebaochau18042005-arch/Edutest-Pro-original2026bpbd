@@ -7,6 +7,7 @@ export interface OMRSheetOptions {
   subject?: string;
   grade?: string;
   examCode?: string;
+  examCodeDigits?: number; // 3 or 4 digits (auto-detected if examCode length >= 4)
   prefillExamCode?: boolean; // Mặc định false: để trống các ô mã đề để học sinh tự ghi và tô
   totalPart1?: number; // 12 or 18 or 24 or 40
   totalPart2?: number; // 4
@@ -17,8 +18,10 @@ export interface OMRSheetOptions {
  * Generates an ultra-crisp, high-definition printable OMR Answer Sheet
  * conforming to Ministry of Education & Training (Bộ GD&ĐT) GDPT 2018 standards (A4 single-page).
  * 
- * Mặc định: Để trống các ô Mã đề thi (3 ô vuông) & Số báo danh (6 ô vuông) 
- * để học sinh làm đề nào tự ghi mã đề đó và tô vào các ô tròn bên dưới.
+ * Hỗ trợ linh hoạt:
+ * - Mã đề thi 4 chữ số (VD: 9001, 9002, 1201...)
+ * - Mã đề thi 3 chữ số (VD: 101, 102...)
+ * - Mặc định: Để trống các ô Mã đề thi & Số báo danh để học sinh nhận đề nào tự ghi và tô đề đó.
  */
 export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string {
   const department = options.department || "SỞ GIÁO DỤC VÀ ĐÀO TẠO";
@@ -28,6 +31,9 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
   const grade = options.grade || "Khối 12";
   const examCode = (options.examCode || "101").trim();
   const prefillCode = options.prefillExamCode === true;
+
+  // Tự động nhận diện độ dài mã đề (Nếu mã đề là 9001 -> 4 chữ số, 101 -> 3 chữ số)
+  const defaultCodeDigits = options.examCodeDigits ? options.examCodeDigits : (examCode.length >= 4 ? 4 : 3);
 
   const numPart1 = options.totalPart1 || 18;
   const numPart2 = options.totalPart2 || 4;
@@ -228,14 +234,27 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
   </style>
 </head>
 <body>
-  <!-- Print Tool Bar (Ẩn khi in ấn) -->
+  <!-- Print Tool Bar (Ẩn khi in ấn Ctrl+P) -->
   <div class="no-print" style="background: #0f172a; color: white; padding: 12px 20px; margin-bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15);">
     <div style="display: flex; align-items: center; gap: 10px;">
       <span style="font-weight: 800; font-size: 13px;">📄 Phiếu Trả Lời Trắc Nghiệm Chuẩn Bộ GD&ĐT (Khổ A4)</span>
       <span style="font-size: 11px; background: #334155; padding: 2px 8px; border-radius: 6px; color: #94a3b8;">${subject}</span>
     </div>
 
-    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <!-- Toggle Độ dài mã đề: 3 chữ số vs 4 chữ số -->
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; background: #1e293b; padding: 5px 12px; border-radius: 8px; border: 1px solid #475569;">
+        <span style="color: #94a3b8; font-weight: bold;">Mã đề:</span>
+        <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; color: #fff;">
+          <input type="radio" name="code_digits_rad" value="3" ${defaultCodeDigits === 3 ? "checked" : ""} onchange="changeCodeDigits(this.value)" style="cursor: pointer;" />
+          <span>3 số (101)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; color: #fff; margin-left: 6px;">
+          <input type="radio" name="code_digits_rad" value="4" ${defaultCodeDigits === 4 ? "checked" : ""} onchange="changeCodeDigits(this.value)" style="cursor: pointer;" />
+          <span>4 số (${examCode.length >= 4 ? examCode : "9001"})</span>
+        </label>
+      </div>
+
       <!-- Toggle: Để trống mã đề (Chuẩn) vs Điền sẵn -->
       <label style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #e2e8f0; cursor: pointer; user-select: none; background: #1e293b; padding: 5px 12px; border-radius: 8px; border: 1px solid #475569;">
         <input type="checkbox" id="chk-prefill-code" ${prefillCode ? "checked" : ""} onchange="togglePrefillCode(this.checked)" style="width: 15px; height: 15px; cursor: pointer;" />
@@ -299,11 +318,13 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
 
         <td style="width: 4%;"></td>
 
-        <td style="width: 48%; vertical-align: top; border: 1px solid #000; padding: 4px;">
-          <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px; display: flex; justify-content: space-between;">
-            <span>MÃ ĐỀ THI (3 chữ số)</span>
+        <td id="exam-code-container" style="width: 48%; vertical-align: top; border: 1px solid #000; padding: 4px;">
+          <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+            <span>MÃ ĐỀ THI (${defaultCodeDigits} chữ số)</span>
             <div>
-              <span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[0] || "") : ""}</span><span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[1] || "") : ""}</span><span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[2] || "") : ""}</span>
+              ${Array.from({ length: defaultCodeDigits })
+                .map((_, i) => `<span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[i] || "") : ""}</span>`)
+                .join("")}
             </div>
           </div>
           <table class="code-grid" style="width: 100%;">
@@ -311,7 +332,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
               .map(
                 (digit) => `
               <tr>
-                ${[0, 1, 2]
+                ${Array.from({ length: defaultCodeDigits })
                   .map(
                     () =>
                       `<td><span class="bubble">${digit}</span></td>`
@@ -441,12 +462,47 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
   </div>
 
   <script>
+    let currentDigits = ${defaultCodeDigits};
+    let currentPrefill = ${prefillCode ? "true" : "false"};
+    const examCode = '${examCode}';
+
+    function renderExamCodeSection() {
+      const container = document.getElementById('exam-code-container');
+      if (!container) return;
+
+      let boxesHtml = '';
+      for (let i = 0; i < currentDigits; i++) {
+        const val = currentPrefill ? (examCode[i] || '') : '';
+        boxesHtml += '<span class="sbd-digit-box code-digit-box">' + val + '</span>';
+      }
+
+      let gridRows = '';
+      for (let d = 0; d <= 9; d++) {
+        let cells = '';
+        for (let c = 0; c < currentDigits; c++) {
+          cells += '<td><span class="bubble">' + d + '</span></td>';
+        }
+        gridRows += '<tr>' + cells + '</tr>';
+      }
+
+      container.innerHTML = 
+        '<div style="font-weight: bold; font-size: 10px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">' +
+          '<span>MÃ ĐỀ THI (' + currentDigits + ' chữ số)</span>' +
+          '<div>' + boxesHtml + '</div>' +
+        '</div>' +
+        '<table class="code-grid" style="width: 100%;">' +
+          gridRows +
+        '</table>';
+    }
+
     function togglePrefillCode(checked) {
-      const boxes = document.querySelectorAll('.code-digit-box');
-      const code = '${examCode}';
-      boxes.forEach(function(box, i) {
-        box.textContent = checked ? (code[i] || '') : '';
-      });
+      currentPrefill = checked;
+      renderExamCodeSection();
+    }
+
+    function changeCodeDigits(digits) {
+      currentDigits = parseInt(digits, 10);
+      renderExamCodeSection();
     }
   </script>
 </body>
