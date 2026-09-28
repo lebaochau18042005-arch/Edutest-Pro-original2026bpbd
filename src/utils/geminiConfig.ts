@@ -11,29 +11,33 @@ export const OFFICIAL_AI_STUDIO_KEY_URL = "https://aistudio.google.com/apikey";
 
 // 4 model mặc định hiện hành theo thứ tự fallback ưu tiên
 export const FALLBACK_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-lite",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
 ] as const;
 
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 
 // Danh sách các model tùy chọn hợp lệ
 export const OPTIONAL_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-lite",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
 ] as const;
 
-// Danh sách model đã bị shutdown / cần tránh
+// Danh sách model đã bị shutdown / cần tránh (dưới 3.0)
 export const DEPRECATED_MODELS = [
   "gemini-1.5-pro",
-  "gemini-3-flash-preview",
-  "gemini-3-pro-preview",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite-preview-09-2025",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
 ] as const;
 
 export const GEMINI_ERROR_MESSAGES = {

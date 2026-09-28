@@ -8,10 +8,12 @@ import { Question, QuestionType, TrueFalseStatement } from "../types";
 import { normalizeExamQuestions3Parts } from "./examHelpers";
 
 export const FALLBACK_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-lite",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
 ];
 
 function getAI(apiKey?: string): GoogleGenAI | null {
@@ -37,7 +39,7 @@ export async function generateWithFallback(
     throw new Error("Vui lòng cấu hình Google Gemini API Key trong phần Cài Đặt (nút đỏ trên Header).");
   }
 
-  const selectedModel = preferredModel || getStoredSelectedModel() || "gemini-2.5-flash";
+  const selectedModel = preferredModel || getStoredSelectedModel() || "gemini-3.5-flash";
   const modelsToTry = [
     selectedModel,
     ...FALLBACK_MODELS.filter((m) => m !== selectedModel),

@@ -49,41 +49,50 @@ export interface ModelCardInfo {
 
 export const AVAILABLE_MODELS: ModelCardInfo[] = [
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    badge: "Khuyên Dùng (Default)",
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash",
+    badge: "Thế Hệ 3.5 (Tối Tân Nhất)",
     badgeColor: "bg-blue-100 text-blue-800 border-blue-200",
-    description: "Tốc độ xử lý siêu nhanh, tối ưu bóc tách ảnh chụp đề thi, nhận diện công thức và chấm trắc nghiệm.",
-    speed: "Rất nhanh (~1s)",
-    accuracy: "Xuất sắc",
+    description: "Model thế hệ mới nhất với tốc độ xử lý siêu nhanh, tối ưu bóc tách đề thi THPT, công thức toán LaTeX và biểu đồ.",
+    speed: "Siêu tốc (~0.8s)",
+    accuracy: "Xuất sắc (SOTA)",
     isDefault: true,
   },
   {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
+    id: "gemini-3-flash-preview",
+    name: "Gemini 3.0 Flash",
+    badge: "Thế Hệ 3.0 Flash",
+    badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    description: "Kiến trúc Gemini 3.0 đa phương thức nhận diện nhanh hình ảnh bài làm và đề thi GDPT 2018.",
+    speed: "Rất nhanh (~1s)",
+    accuracy: "Xuất sắc",
+  },
+  {
+    id: "gemini-3.1-pro-preview",
+    name: "Gemini 3.1 Pro",
     badge: "Chuyên Sâu & Tự Luận",
     badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200",
-    description: "Suy luận logic cực mạnh, phân tích đề thi nâng cao và chấm bài tự luận chi tiết.",
+    description: "Suy luận logic cực mạnh, phân tích đề thi nâng cao, trích xuất ma trận và chấm tự luận chi tiết.",
     speed: "Tiêu chuẩn (~2-3s)",
     accuracy: "Tối cao (SOTA)",
   },
   {
-    id: "gemini-2.0-flash",
-    name: "Gemini 2.0 Flash",
-    badge: "Đa Phương Thức Ổn Định",
-    badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    description: "Kiến trúc đa phương thức thế hệ mới nhận diện hình ảnh đề thi và OCR chính xác.",
-    speed: "Rất nhanh (~1s)",
-    accuracy: "Xuất sắc",
-  },
-  {
-    id: "gemini-1.5-flash",
-    name: "Gemini 1.5 Flash",
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
     badge: "Dự Phòng Ổn Định",
     badgeColor: "bg-amber-100 text-amber-800 border-amber-200",
-    description: "Model dự phòng với độ trễ thấp và tính ổn định cao.",
-    speed: "Siêu nhanh (~0.8s)",
+    description: "Model dự phòng tốc độ cao hỗ trợ toàn diện các tài khoản Google AI Studio chuẩn.",
+    speed: "Rất nhanh (~1s)",
     accuracy: "Rất tốt",
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    badge: "Dự Phòng Chuyên Sâu",
+    badgeColor: "bg-purple-100 text-purple-800 border-purple-200",
+    description: "Phiên bản Pro dự phòng phục vụ giải toán và phân tích câu hỏi phức tạp.",
+    speed: "Tiêu chuẩn (~2s)",
+    accuracy: "Xuất sắc",
   },
 ];
 
@@ -97,12 +106,12 @@ export const getStoredApiKey = (): string => {
 };
 
 export const getStoredSelectedModel = (): string => {
-  if (typeof window === "undefined") return "gemini-2.5-flash";
+  if (typeof window === "undefined") return "gemini-3.5-flash";
   const stored = (localStorage.getItem("gemini_selected_model") || "").trim();
   const validIds = AVAILABLE_MODELS.map((m) => m.id);
-  if (!stored || !validIds.includes(stored as any) || stored.includes("1.5-pro") || stored.includes("preview")) {
-    localStorage.setItem("gemini_selected_model", "gemini-2.5-flash");
-    return "gemini-2.5-flash";
+  if (!stored || !validIds.includes(stored as any) || stored.includes("1.5-") || stored.includes("2.0-")) {
+    localStorage.setItem("gemini_selected_model", "gemini-3.5-flash");
+    return "gemini-3.5-flash";
   }
   return stored;
 };
@@ -114,7 +123,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"ai" | "cloud">("ai");
   const [apiKey, setApiKey] = useState("");
-  const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-3.5-flash");
   const [showKey, setShowKey] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [validationError, setValidationError] = useState("");
