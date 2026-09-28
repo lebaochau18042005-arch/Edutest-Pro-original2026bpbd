@@ -653,22 +653,52 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
   const total = rawQuestions.length;
   return rawQuestions.map((q, idx) => {
     let part: ExamPart = 1;
-    if (q.part === 1 || q.part === 2 || q.part === 3) {
-      part = q.part;
-    } else if (q.questionType === "true_false" || (q.statements && q.statements.length >= 2)) {
-      part = 2;
-    } else if (q.questionType === "short_answer" || (q.shortAnswer && (!q.options || q.options.length === 0))) {
+
+    // Check if real options (not synthetic placeholders) exist
+    const rawOpts = Array.isArray(q.options)
+      ? q.options.map((o) => String(o || "").trim()).filter((o) => Boolean(o) && !/^Phương án\s*[A-F]?$/i.test(o))
+      : [];
+    const hasRealOptions = rawOpts.length >= 2;
+
+    // Check if real statements exist
+    const rawStmts = Array.isArray(q.statements)
+      ? q.statements.filter((s) => s?.text && String(s.text).trim().length > 0 && !/^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(String(s.text).trim()))
+      : [];
+    const hasRealStatements = rawStmts.length >= 2;
+
+    const rawPartNum = Number(q.part);
+    if (rawPartNum === 3 || q.questionType === "short_answer") {
       part = 3;
-    } else if (q.options && q.options.length >= 2) {
+    } else if (rawPartNum === 2 || q.questionType === "true_false" || hasRealStatements) {
+      part = 2;
+    } else if (hasRealOptions) {
       part = 1;
-    } else if (total === 28 && !rawQuestions.some((rq) => rq.part !== undefined)) {
+    } else if (q.shortAnswer && !hasRealOptions && !hasRealStatements) {
+      part = 3;
+    } else if (rawPartNum === 1 && !hasRealOptions && !hasRealStatements) {
+      if (total === 28) {
+        if (idx < 18) part = 1;
+        else if (idx < 22) part = 2;
+        else part = 3;
+      } else if (total === 22) {
+        if (idx < 12) part = 1;
+        else if (idx < 16) part = 2;
+        else part = 3;
+      } else {
+        part = 3;
+      }
+    } else if (total === 28) {
       if (idx < 18) part = 1;
       else if (idx < 22) part = 2;
       else part = 3;
-    } else if (total === 22 && !rawQuestions.some((rq) => rq.part !== undefined)) {
+    } else if (total === 22) {
       if (idx < 12) part = 1;
       else if (idx < 16) part = 2;
       else part = 3;
+    } else if (!hasRealOptions && !hasRealStatements) {
+      part = 3;
+    } else {
+      part = 1;
     }
 
     const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
@@ -678,39 +708,37 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
     // XỬ LÝ VÀ BÓC TÁCH TOÀN BỘ PHƯƠNG ÁN PHẦN I ĐẢM BẢO 100% NGUYÊN FILE GỐC
     let finalOptions: string[] = [];
     if (part === 1) {
-      let rawOpts = Array.isArray(q.options)
-        ? q.options.map((o) => String(o || "").trim()).filter((o) => Boolean(o) && !/^Phương án\s*[A-F]?$/i.test(o))
-        : [];
+      let candidateOpts = [...rawOpts];
 
       // Kiểm tra nếu các phương án bị gộp vào bên trong 1 phần tử (VD: options[0] chứa "B. ... C. ... D. ...")
-      const isMergedInOption = rawOpts.some((opt) =>
+      const isMergedInOption = candidateOpts.some((opt) =>
         /(?:[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?[B-D]\]?|\([B-D]\))[.)/:]\*{0,2})\s+/i.test(opt)
       );
 
-      if (rawOpts.length === 1 || isMergedInOption) {
-        const combined = rawOpts.join(" \n ");
+      if (candidateOpts.length === 1 || isMergedInOption) {
+        const combined = candidateOpts.join(" \n ");
         const splitted = splitRawTextIntoOptions(combined);
         if (splitted.length >= 2) {
-          rawOpts = splitted;
+          candidateOpts = splitted;
         }
       }
 
       // Kiểm tra nếu nội dung câu hỏi (content) chứa luôn các phương án A. B. C. D. ở cuối
-      const isPlaceholderOnly = rawOpts.length === 0 || rawOpts.every((opt) => /^Phương án [A-D]$/i.test(opt.trim()));
-      if (isPlaceholderOnly || rawOpts.length < 2) {
+      const isPlaceholderOnly = candidateOpts.length === 0 || candidateOpts.every((opt) => /^Phương án [A-D]$/i.test(opt.trim()));
+      if (isPlaceholderOnly || candidateOpts.length < 2) {
         const optionStartMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:\[?A\]?|\(A\))[.)/:]\*{0,2})\s+/i);
         if (optionStartMatch !== -1) {
           const optSection = cleanContent.substring(optionStartMatch);
           const splitted = splitRawTextIntoOptions(optSection);
           if (splitted.length >= 2) {
-            rawOpts = splitted;
+            candidateOpts = splitted;
             cleanContent = cleanContent.substring(0, optionStartMatch).trim();
           }
         }
       }
 
       // Làm sạch tiền tố A., B., C., D. thừa ở từng phần tử nếu còn sót
-      finalOptions = rawOpts.map((opt, oIdx) => {
+      finalOptions = candidateOpts.map((opt, oIdx) => {
         const letter = ["A", "B", "C", "D", "E", "F"][oIdx];
         return opt
           .replace(new RegExp(`^(?:\\*{0,2}\\[?${letter}\\]?[.)/:]\\*{0,2})\\s*`, "i"), "")
@@ -831,7 +859,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
     // XỬ LÝ PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
     let finalShortAnswer = q.shortAnswer || "";
     if (part === 3 && !finalShortAnswer) {
-      const ansMatch = cleanContent.match(/(?:Đáp án|Kết quả|Key|Answer)[\s.:]+([-+]?\d*[.,]?\d+|[A-Za-z0-9_+\-/]+)/i);
+      const ansMatch = cleanContent.match(/(?:Đáp án|Đáp số|Kết quả|KQ|Key|Answer|Điền số)[\s.:]+([-+]?\d*(?:[.,]\d+)?(?:\/\d+)?|[A-Za-z0-9_+\-/^]+)/i);
       if (ansMatch) {
         finalShortAnswer = ansMatch[1].replace(",", ".").trim();
         cleanContent = cleanContent.replace(ansMatch[0], "").trim();
@@ -845,7 +873,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       questionType,
       options: part === 1 ? finalOptions.slice(0, 4) : [],
       statements: part === 2 ? statements : undefined,
-      needsReview: Boolean(q.needsReview || hasMissingSourceData),
+      needsReview: Boolean(q.needsReview || (part !== 3 && hasMissingSourceData)),
       shortAnswer: part === 3 ? (q.shortAnswer || finalShortAnswer || "") : undefined,
     };
   });

@@ -477,32 +477,60 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
 
   let mainBody = text;
   const answerKeyMap: Record<number, { choice?: number; tf?: Record<string, boolean>; shortAns?: string }> = {};
+  const answerKeyMapByPart: Record<1 | 2 | 3, Record<number, { choice?: number; tf?: Record<string, boolean>; shortAns?: string }>> = {
+    1: {},
+    2: {},
+    3: {},
+  };
 
-  const bottomKeyIndex = text.search(/(?:BẢNG ĐÁP ÁN|ĐÁP ÁN VÀ LỜI GIẢI|HƯỚNG DẪN CHẤM|BẢNG TRẢ LỜI)/i);
+  const bottomKeyIndex = text.search(/(?:BẢNG ĐÁP ÁN|ĐÁP ÁN VÀ LỜI GIẢI|HƯỚNG DẪN CHẤM|BẢNG TRẢ LỜI|HƯỚNG DẪN GIẢI)/i);
   if (bottomKeyIndex !== -1 && bottomKeyIndex > 100) {
     mainBody = text.substring(0, bottomKeyIndex);
     const keySection = text.substring(bottomKeyIndex);
 
-    const keyItemRegex = /(?:Câu\s*)?(\d+)[\s.:-]+([A-D]|(?:[a-d][\s.:-]+[ĐSđsTrueFalse]+[\s,;]*)+|[-+]?\d*[.,]?\d+)/gi;
-    let match;
-    while ((match = keyItemRegex.exec(keySection)) !== null) {
-      const qNum = parseInt(match[1], 10);
-      const rawAns = match[2].trim();
+    // Split key section into parts if present
+    const keyLines = keySection.split("\n");
+    let keyCurrentPart: 1 | 2 | 3 = 1;
 
-      if (/^[A-D]$/i.test(rawAns)) {
-        const letterIdx = ["A", "B", "C", "D"].indexOf(rawAns.toUpperCase());
-        answerKeyMap[qNum] = { choice: letterIdx !== -1 ? letterIdx : 0 };
-      } else if (/[a-d][\s.:-]+[ĐSđs]/i.test(rawAns)) {
-        const tfObj: Record<string, boolean> = {};
-        const subMatches = rawAns.matchAll(/([a-d])[\s.:-]+([ĐSđsTrueFalse])/gi);
-        for (const sm of subMatches) {
-          const subL = sm[1].toLowerCase();
-          const isT = /[ĐđTrue]/i.test(sm[2]);
-          tfObj[subL] = isT;
+    const keyPart1Reg = /(?:PHẦN|Phần|PART|Part|DẠNG|Dạng)\s*(?:I|1)\b/i;
+    const keyPart2Reg = /(?:PHẦN|Phần|PART|Part|DẠNG|Dạng)\s*(?:II|2)\b/i;
+    const keyPart3Reg = /(?:PHẦN|Phần|PART|Part|DẠNG|Dạng)\s*(?:III|3)\b|\bTRẢ LỜI NGẮN\b|\bĐIỀN SỐ\b|\bĐIỀN KHUYẾT\b/i;
+
+    for (const kl of keyLines) {
+      const klt = kl.trim();
+      if (!klt) continue;
+      if (keyPart1Reg.test(klt)) { keyCurrentPart = 1; continue; }
+      if (keyPart2Reg.test(klt)) { keyCurrentPart = 2; continue; }
+      if (keyPart3Reg.test(klt)) { keyCurrentPart = 3; continue; }
+
+      // Look for matches on this line
+      const itemRegex = /(?:Câu\s*)?(\d+)[\s.:-]+([A-D]|(?:[a-d][\s.:-]+[ĐSđsTrueFalse]+[\s,;]*)+|[-+]?\d*(?:[.,]\d+)?(?:\/\d+)?|[A-Za-z0-9_+\-/^]+)/gi;
+      let match;
+      while ((match = itemRegex.exec(klt)) !== null) {
+        const qNum = parseInt(match[1], 10);
+        const rawAns = match[2].trim();
+
+        if (/^[A-D]$/i.test(rawAns)) {
+          const letterIdx = ["A", "B", "C", "D"].indexOf(rawAns.toUpperCase());
+          const info = { choice: letterIdx !== -1 ? letterIdx : 0 };
+          answerKeyMap[qNum] = info;
+          answerKeyMapByPart[1][qNum] = info;
+        } else if (/[a-d][\s.:-]+[ĐSđsTrueFalse]/i.test(rawAns)) {
+          const tfObj: Record<string, boolean> = {};
+          const subMatches = rawAns.matchAll(/([a-d])[\s.:-]+([ĐSđsTrueFalse])/gi);
+          for (const sm of subMatches) {
+            const subL = sm[1].toLowerCase();
+            const isT = /[ĐđTrue]/i.test(sm[2]);
+            tfObj[subL] = isT;
+          }
+          const info = { tf: tfObj };
+          answerKeyMap[qNum] = info;
+          answerKeyMapByPart[2][qNum] = info;
+        } else if (/^[-+]?\d*(?:[.,]\d+)?(?:\/\d+)?$/i.test(rawAns) || keyCurrentPart === 3) {
+          const info = { shortAns: rawAns.replace(",", ".") };
+          answerKeyMap[qNum] = info;
+          answerKeyMapByPart[3][qNum] = info;
         }
-        answerKeyMap[qNum] = { tf: tfObj };
-      } else if (/^[-+]?\d*[.,]?\d+$/.test(rawAns)) {
-        answerKeyMap[qNum] = { shortAns: rawAns.replace(",", ".") };
       }
     }
   }
@@ -512,18 +540,19 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
   let currentQ: any = null;
   let questionCounter = 0;
 
-  const part1Regex = /(?:\*{0,2}(?:PHẦN|Phần|PART|DẠNG|Dạng)\s*(?:I|1|THỨ NHẤT|MỘT)\b|\bTRẮC NGHIỆM NHIỀU PHƯƠNG ÁN\b|\bTRẮC NGHIỆM 4 LỰA CHỌN\b)/i;
-  const part2Regex = /(?:\*{0,2}(?:PHẦN|Phần|PART|DẠNG|Dạng)\s*(?:II|2|THỨ HAI|HAI)\b|\bTRẮC NGHIỆM ĐÚNG\s*[\/\-]?\s*SAI\b|\bĐÚNG SAI\b)/i;
-  const part3Regex = /(?:\*{0,2}(?:PHẦN|Phần|PART|DẠNG|Dạng)\s*(?:III|3|THỨ BA|BA)\b|\bTRẢ LỜI NGẮN\b|\bĐIỀN KHUYẾT\b|\bĐIỀN SỐ\b)/i;
+  const part1Regex = /(?:^|\b)(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:I|1|THỨ\s*NHẤT|THỨ\s*1|MỘT)\b|\bI\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*(?:NHIỀU\s*PHƯƠNG\s*ÁN|4\s*LỰA\s*CHỌN|4\s*PHƯƠNG\s*ÁN|NHIỀU\s*LỰA\s*CHỌN)\b|\bCÂU\s*TRẮC\s*NGHIỆM\s*NHIỀU\s*PHƯƠNG\s*ÁN\b)/i;
+  const part2Regex = /(?:^|\b)(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:II|2|THỨ\s*HAI|THỨ\s*2|HAI)\b|\bII\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|ĐÚNG\s*SAI|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*ĐÚNG\s*[\/\-]?\s*SAI\b|\bĐÚNG\s*[\/\-]?\s*SAI\b|\bCÂU\s*TRẮC\s*NGHIỆM\s*ĐÚNG\s*SAI\b)/i;
+  const part3Regex = /(?:^|\b)(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:III|3|THỨ\s*BA|THỨ\s*3|BA)\b|\bIII\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|TRẢ\s*LỜI|ĐIỀN|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*TRẢ\s*LỜI\s*NGẮN\b|\bTRẢ\s*LỜI\s*NGẮN\b|\bCÂU\s*(?:TRẮC\s*NGHIỆM\s*)?(?:HỎI\s*)?TRẢ\s*LỜI\s*NGẮN\b|\bĐIỀN\s*KHUYẾT\b|\bĐIỀN\s*SỐ\b|\bĐIỀN\s*ĐÁP\s*ÁN\b|\bĐIỀN\s*KẾT\s*QUẢ\b|\bTRẢ\s*LỜI\s*CÂU\s*HỎI\s*NGẮN\b|\bTHÍ\s*SINH\s*TRẢ\s*LỜI\s*TỪ\s*CÂU\b)/i;
 
-  const questionRegex = /^(?:\*{0,2}(?:Câu|Bài|Question)\s*(\d+)|\*{0,2}(\d+)[.)/:]|\[Câu\s*(\d+)\])(?:\s*[\(\[][^\)\]]+[\)\]])?[\s.:-]/i;
+  const questionRegex = /^(?:[#*_\s-]*)(?:(?:Câu|Bài|Question)\s*(\d+)|\*{0,2}(\d+)[.)/:]|\[Câu\s*(\d+)\])(?:\s*[\(\[][^\)\]]+[\)\]])?[\s.:-]/i;
   const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/i;
   const subStatementRegex = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i;
-  const answerLineRegex = /^(?:Đáp án|Kết quả|Đ\/A|Key|Answer)[\s.:]+(.*)/i;
+  const answerLineRegex = /^(?:[#*_\s-]*)(?:Đáp án|Đáp số|Kết quả|Đ\/A|Key|Answer|Điền số|ĐA|KQ|Kết luận)[\s.:]+(.*)/i;
 
   const finalizeCurrentQ = () => {
     if (!currentQ) return;
 
+    // 1. Recover Part 2 statements if current question is Part 2
     if (currentQ.part === 2) {
       const mergedText = [
         currentQ.content || "",
@@ -566,7 +595,8 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       }
     }
 
-    if (currentQ.part !== 2 && (!currentQ.options || currentQ.options.length < 2) && currentQ.content) {
+    // 2. Only check statements conversion for Part 1 questions that have NO options
+    if (currentQ.part === 1 && (!currentQ.options || currentQ.options.length === 0) && currentQ.content) {
       const extracted = splitRawTextIntoStatements(currentQ.content);
       if (extracted.length >= 2) {
         currentQ.part = 2;
@@ -580,23 +610,35 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       }
     }
 
-    if (currentQ.statements && currentQ.statements.length >= 2) {
-      currentQ.part = 2;
-      currentQ.questionType = "true_false";
-      currentQ.options = [];
-    } else if (currentQ.part === 3 || (!currentQ.options.length && currentQ.shortAnswer)) {
+    // 3. Finalize part and questionType
+    if (currentQ.part === 3 || currentQ.questionType === "short_answer") {
       currentQ.part = 3;
       currentQ.questionType = "short_answer";
       currentQ.options = [];
-    } else if (currentQ.options.length >= 2) {
+      currentQ.statements = undefined;
+    } else if (currentQ.part === 2 || (currentQ.statements && currentQ.statements.length >= 2)) {
+      currentQ.part = 2;
+      currentQ.questionType = "true_false";
+      currentQ.options = [];
+    } else if (currentQ.options && currentQ.options.length >= 2) {
+      currentQ.part = 1;
+      currentQ.questionType = "multiple_choice";
+    } else if (currentQ.shortAnswer || (!currentQ.options?.length && (!currentQ.statements || currentQ.statements.length < 2))) {
+      // Questions without options and statements are Part 3 (Short Answer)
+      currentQ.part = 3;
+      currentQ.questionType = "short_answer";
+      currentQ.options = [];
+      currentQ.statements = undefined;
+    } else {
       currentQ.part = 1;
       currentQ.questionType = "multiple_choice";
     }
 
+    // 4. Structure completion per part
     if (currentQ.part === 2) {
       const requiredLetters = ["a", "b", "c", "d"];
       const existingMap: Record<string, any> = {};
-      currentQ.statements.forEach((s: any) => {
+      (currentQ.statements || []).forEach((s: any) => {
         existingMap[s.id] = s;
       });
       currentQ.statements = requiredLetters.map((l, lIdx) => {
@@ -632,27 +674,17 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
         };
       });
       currentQ.options = [];
-    }
-
-    const keyInfo = answerKeyMap[currentQ.qNumber];
-    if (keyInfo) {
-      if (keyInfo.choice !== undefined && currentQ.part === 1) {
-        currentQ.correctIndex = keyInfo.choice;
-      }
-      if (keyInfo.tf && currentQ.part === 2 && currentQ.statements) {
-        currentQ.statements.forEach((st: any) => {
-          if (keyInfo.tf![st.id] !== undefined) {
-            st.correctValue = keyInfo.tf![st.id];
-          }
-        });
-      }
-      if (keyInfo.shortAns && currentQ.part === 3) {
-        currentQ.shortAnswer = keyInfo.shortAns;
-      }
-    }
-
-    if (currentQ.part === 3) {
+    } else if (currentQ.part === 3) {
       currentQ.options = [];
+      currentQ.statements = undefined;
+      // Extract shortAnswer from content if not yet found
+      if (!currentQ.shortAnswer && currentQ.content) {
+        const ansMatch = currentQ.content.match(/(?:Đáp án|Đáp số|Kết quả|KQ|Key|Answer|Điền số)[\s.:]+([-+]?\d*(?:[.,]\d+)?(?:\/\d+)?|[A-Za-z0-9_+\-/^]+)/i);
+        if (ansMatch) {
+          currentQ.shortAnswer = ansMatch[1].replace(",", ".").trim();
+          currentQ.content = currentQ.content.replace(ansMatch[0], "").trim();
+        }
+      }
     } else if (currentQ.part === 1) {
       const isMerged = currentQ.options.some((opt: string) =>
         /(?:[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?[B-D]\]?|\(B\))[.)/:]\*{0,2})\s+/i.test(opt)
@@ -706,6 +738,24 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       }
     }
 
+    // Apply answer key lookup
+    const keyInfo = (answerKeyMapByPart[currentQ.part as 1 | 2 | 3] && answerKeyMapByPart[currentQ.part as 1 | 2 | 3][currentQ.qNumber]) || answerKeyMap[currentQ.qNumber];
+    if (keyInfo) {
+      if (keyInfo.choice !== undefined && currentQ.part === 1) {
+        currentQ.correctIndex = keyInfo.choice;
+      }
+      if (keyInfo.tf && currentQ.part === 2 && currentQ.statements) {
+        currentQ.statements.forEach((st: any) => {
+          if (keyInfo.tf![st.id] !== undefined) {
+            st.correctValue = keyInfo.tf![st.id];
+          }
+        });
+      }
+      if (keyInfo.shortAns && currentQ.part === 3) {
+        currentQ.shortAnswer = keyInfo.shortAns;
+      }
+    }
+
     questions.push(currentQ);
     currentQ = null;
   };
@@ -737,8 +787,21 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       const qNum = parseInt(qMatch[1] || qMatch[2] || qMatch[3], 10) || questionCounter;
 
       let inferredPart: 1 | 2 | 3 = currentPart;
-      if (qNum >= 23 && qNum <= 28) inferredPart = 3;
-      else if (qNum >= 19 && qNum <= 22 && currentPart === 1) inferredPart = 2;
+      if (qNum >= 23 && qNum <= 28) {
+        inferredPart = 3;
+        currentPart = 3;
+      } else if (qNum >= 19 && qNum <= 22 && currentPart === 1) {
+        inferredPart = 2;
+        currentPart = 2;
+      } else if (qNum === 1 && questionCounter > 1) {
+        if (currentPart === 1) {
+          inferredPart = 2;
+          currentPart = 2;
+        } else if (currentPart === 2) {
+          inferredPart = 3;
+          currentPart = 3;
+        }
+      }
 
       const contentText = trimmed.replace(questionRegex, "").trim() || trimmed;
       currentQ = {
@@ -753,7 +816,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
         content: contentText,
         options: [],
         correctIndex: 0,
-        statements: [],
+        statements: inferredPart === 2 ? [] : undefined,
         shortAnswer: "",
         explanation: "",
         hasTableOrDiagram: trimmed.includes("|"),
@@ -769,7 +832,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       const ansMatch = trimmed.match(answerLineRegex);
       if (ansMatch) {
         const val = ansMatch[1].trim();
-        if (/^[A-D]$/i.test(val)) {
+        if (/^[A-D]$/i.test(val) && currentQ.part === 1) {
           const letterIdx = ["A", "B", "C", "D"].indexOf(val.toUpperCase());
           if (letterIdx !== -1) currentQ.correctIndex = letterIdx;
         } else {
@@ -777,6 +840,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
           if (currentQ.part !== 2) {
             currentQ.part = 3;
             currentQ.questionType = "short_answer";
+            currentQ.options = [];
           }
         }
         continue;
@@ -811,6 +875,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       } else if (currentQ.part === 2) {
         const subMatch = trimmed.match(subStatementRegex);
         if (subMatch) {
+          if (!currentQ.statements) currentQ.statements = [];
           const subLetter = (subMatch[1] || subMatch[2] || subMatch[3] || subMatch[4] || subMatch[5] || "a").toLowerCase();
           const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(trimmed);
           const subText = (subMatch[6] || "").replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
@@ -820,16 +885,20 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
             text: subText,
             correctValue: isCorrect,
           });
-        } else if (currentQ.statements.length === 0) {
+        } else if (!currentQ.statements || currentQ.statements.length === 0) {
           currentQ.content += "\n" + trimmed;
         } else {
           currentQ.statements[currentQ.statements.length - 1].text += " " + trimmed;
         }
       } else {
+        // PART 3: Short Answer / Numeric Fill
         if (currentQ.shortAnswer) {
-          currentQ.explanation += " " + trimmed;
-        } else if (/^[-+]?\d*[.,]?\d+$/.test(trimmed)) {
-          currentQ.shortAnswer = trimmed.replace(",", ".");
+          currentQ.explanation += (currentQ.explanation ? "\n" : "") + trimmed;
+        } else if (/^(?:Đáp án|Đáp số|Kết quả|KQ|ĐA|Key|Answer)?[\s.:]*([-+]?\d*(?:[.,]\d+)?(?:\/\d+)?)$/i.test(trimmed)) {
+          const numMatch = trimmed.match(/([-+]?\d*(?:[.,]\d+)?(?:\/\d+)?)/);
+          if (numMatch && numMatch[1]) {
+            currentQ.shortAnswer = numMatch[1].replace(",", ".");
+          }
         } else {
           currentQ.content += "\n" + trimmed;
         }
@@ -1045,6 +1114,9 @@ export function mergeParsedQuestionsWithSource(
     if (!source) {
       return {
         ...question,
+        options: part === 1 ? (question.options || []) : [],
+        statements: part === 2 ? question.statements : undefined,
+        shortAnswer: part === 3 ? (question.shortAnswer || "") : undefined,
         needsReview: Boolean(
           question.needsReview ||
             (part === 1 && question.options.filter((o) => !isSyntheticPlaceholder(o)).length !== 4) ||
@@ -1103,8 +1175,8 @@ export function mergeParsedQuestionsWithSource(
     return {
       ...question,
       content,
-      options,
-      statements,
+      options: part === 1 ? options : [],
+      statements: part === 2 ? statements : undefined,
       shortAnswer: part === 3 ? (question.shortAnswer || source.shortAnswer || "") : undefined,
       passageContent: source.passageContent || question.passageContent,
       hasTableOrDiagram: Boolean(
@@ -1154,34 +1226,39 @@ export async function clientParseExam(payload: {
 
   try {
     const prompt = `Bạn là chuyên gia phân tích và bóc tách đề thi Tốt nghiệp THPT chuẩn Bộ GD&ĐT Việt Nam (Chương trình GDPT 2018 mới nhất).
-Hãy đọc kỹ toàn bộ văn bản đề thi dưới đây và trích xuất TOÀN BỘ CÁC CÂU HỎI VÀ ĐỦ 100% CÁC LỆNH HỎI, KHÔNG ĐƯỢC BỎ SÓT NỘI DUNG NÀO!
+Hãy đọc kỹ toàn bộ văn bản đề thi dưới đây và trích xuất TOÀN BỘ CÁC CÂU HỎI VÀ ĐỦ 100% CÁC LỆNH HỎI CẢ 3 PHẦN, KHÔNG ĐƯỢC BỎ SÓT NỘI DUNG NÀO!
 
-QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, BIỂU ĐỒ & BẢNG SỐ LIỆU (BẮT BUỘC TUÂN THỦ 100%):
-1. CÔNG THỨC TOÁN HỌC, VẬT LÝ, HÓA HỌC & SINH HỌC:
-   - Giữ NGUYÊN từng chuỗi LaTeX đã có, kể cả cặp dấu $...$ hoặc $$...$$; không đổi thành ảnh hoặc văn bản thường.
-   - Công thức mới phải dùng LaTeX: phân số, căn, tích phân, đạo hàm, véc-tơ, chỉ số/đơn vị vật lý, công thức phân tử, điện tích ion, đồng vị và mũi tên phản ứng.
-   - Bảo toàn chính xác chữ hoa/thường khoa học như f(x), pH, DNA, mRNA và tên gene/protein.
-   - Ví dụ định dạng: $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$, $A \\rightleftharpoons B$.
-2. HÌNH VẼ, BIỂU ĐỒ, ĐỒ THỊ (CHARTS & DIAGRAMS):
-   - BẢO TOÀN 100% mọi token hình ảnh Markdown dạng ![Alt](url) hoặc __IMG_TOKEN_X__ hoặc diagramUrl trong "content".
-   - TUYỆT ĐỐI KHÔNG ĐƯỢC XÓA BỎ TOKEN HÌNH ẢNH, KHÔNG ĐƯỢC THAY THẾ BIỂU ĐỒ BẰNG ĐOẠN VĂN MÔ TẢ TÙY TIỆN!
-   - Luôn gán "hasTableOrDiagram": true cho mọi câu hỏi có hình vẽ, biểu đồ hoặc đồ thị.
-3. BẢNG SỐ LIỆU / BẢNG THỐNG KÊ / BẢNG BIẾN THIÊN / BẢNG PHÂN BỐ TẦN SỐ (BẮT BUỘC):
-   - MỌI BẢNG SỐ LIỆU (nhất là môn Địa lý, Kinh tế, Sinh học, Hóa học, Toán thống kê) PHẢI ĐƯỢC GIỮ NGUYÊN 100% Ở ĐỊNH DẠNG BẢNG MARKDOWN CHUẨN:
-     | Tiêu đề 1 | Tiêu đề 2 | Tiêu đề 3 |
-     | :--- | :--- | :--- |
-     | Dòng 1 | Dòng 2 | Dòng 3 |
-   - NGHIÊM CẤM TUYỆT ĐỐI việc biến bảng số liệu thành dạng câu văn xuôi, đoạn văn hay kể lể số liệu (Ví dụ cấm viết: "Năm 2010 là 15%, năm 2020 là 20%...")!
-   - Toàn bộ các giá trị, số liệu, năm, tỷ lệ, đơn vị phải nằm nguyên vẹn trong các ô của Bảng Markdown.
-   - Bảng số liệu thuộc câu nào phải nằm đúng trong thuộc tính "content" của câu đó, và đặt "hasTableOrDiagram": true.
-4. PHẦN I: Trắc nghiệm 4 lựa chọn (part: 1, questionType: "multiple_choice") -> "options": ["A...", "B...", "C...", "D..."], "correctIndex": 0..3. TUYỆT ĐỐI KHÔNG gộp phương án.
-5. PHẦN II: Trắc nghiệm Đúng/Sai (part: 2, questionType: "true_false"):
+CẤU TRÚC ĐỀ THI 3 PHẦN GDPT 2018 BẮT BUỘC:
+1. PHẦN I: Trắc nghiệm 4 lựa chọn (part: 1, questionType: "multiple_choice") -> "options": ["A...", "B...", "C...", "D..."], "correctIndex": 0..3. TUYỆT ĐỐI KHÔNG gộp phương án.
+2. PHẦN II: Trắc nghiệm Đúng/Sai (part: 2, questionType: "true_false"):
    - "content": CHỈ chứa phần thân/dẫn/đề bài chung của câu hỏi (kể cả Bảng số liệu nếu có). TUYỆT ĐỐI KHÔNG để các ý a, b, c, d trong "content".
    - "statements": MỖI CÂU BẮT BUỘC ĐỦ 4 MỆNH ĐỀ a, b, c, d. Thuộc tính "text" của mỗi statement BẮT BUỘC PHẢI CHỨA 100% NGUYÊN VĂN NỘI DUNG CỦA MỆNH ĐỀ ĐÓ từ file gốc (kể cả công thức LaTeX).
    - TUYỆT ĐỐI KHÔNG ĐƯỢC để "text" rỗng hoặc ghi placeholder như "Ý a", "Khẳng định ý a"!
    - "correctValue": true nếu mệnh đề đó đúng, false nếu mệnh đề đó sai.
    - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
-6. PHẦN III: Trả lời ngắn / Điền số (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả ngắn dạng số hoặc text. "options": [].
+3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (part: 3, questionType: "short_answer"):
+   - Thí sinh tự tính toán và điền kết quả dạng số hoặc biểu thức ngắn.
+   - "shortAnswer": kết quả ngắn dạng số hoặc text (nếu có trong đề bài/đáp án) hoặc để trống "" nếu chưa có đáp án.
+   - "options": BẮT BUỘC LÀ MẢNG RỖNG []. TUYỆT ĐỐI KHÔNG gán phương án A, B, C, D cho câu hỏi Phần III!
+
+QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, BIỂU ĐỒ & BẢNG SỐ LIỆU (BẮT BUỘC TUÂN THỦ 100%):
+4. CÔNG THỨC TOÁN HỌC, VẬT LÝ, HÓA HỌC & SINH HỌC:
+   - Giữ NGUYÊN từng chuỗi LaTeX đã có, kể cả cặp dấu $...$ hoặc $$...$$; không đổi thành ảnh hoặc văn bản thường.
+   - Công thức mới phải dùng LaTeX: phân số, căn, tích phân, đạo hàm, véc-tơ, chỉ số/đơn vị vật lý, công thức phân tử, điện tích ion, đồng vị và mũi tên phản ứng.
+   - Bảo toàn chính xác chữ hoa/thường khoa học như f(x), pH, DNA, mRNA và tên gene/protein.
+   - Ví dụ định dạng: $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$, $A \\rightleftharpoons B$.
+5. HÌNH VẼ, BIỂU ĐỒ, ĐỒ THỊ (CHARTS & DIAGRAMS):
+   - BẢO TOÀN 100% mọi token hình ảnh Markdown dạng ![Alt](url) hoặc __IMG_TOKEN_X__ hoặc diagramUrl trong "content".
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC XÓA BỎ TOKEN HÌNH ẢNH, KHÔNG ĐƯỢC THAY THẾ BIỂU ĐỒ BẰNG ĐOẠN VĂN MÔ TẢ TÙY TIỆN!
+   - Luôn gán "hasTableOrDiagram": true cho mọi câu hỏi có hình vẽ, biểu đồ hoặc đồ thị.
+6. BẢNG SỐ LIỆU / BẢNG THỐNG KÊ / BẢNG BIẾN THIÊN / BẢNG PHÂN BỐ TẦN SỐ (BẮT BUỘC):
+   - MỌI BẢNG SỐ LIỆU (nhất là môn Địa lý, Kinh tế, Sinh học, Hóa học, Toán thống kê) PHẢI ĐƯỢC GIỮ NGUYÊN 100% Ở ĐỊNH DẠNG BẢNG MARKDOWN CHUẨN:
+     | Tiêu đề 1 | Tiêu đề 2 | Tiêu đề 3 |
+     | :--- | :--- | :--- |
+     | Dòng 1 | Dòng 2 | Dòng 3 |
+   - NGHIÊM CẤM TUYỆT ĐỐI việc biến bảng số liệu thành dạng câu văn xuôi, đoạn văn hay kể lể số liệu!
+   - Toàn bộ các giá trị, số liệu, năm, tỷ lệ, đơn vị phải nằm nguyên vẹn trong các ô của Bảng Markdown.
+   - Bảng số liệu thuộc câu nào phải nằm đúng trong thuộc tính "content" của câu đó, và đặt "hasTableOrDiagram": true.
 
 Văn bản đề thi:
 """
@@ -1241,8 +1318,16 @@ ${rawText.slice(0, 50000)}
     const totalRaw = parsed.length;
     const formatted: Question[] = parsed.map((item: any, idx: number) => {
       let part: 1 | 2 | 3 = 1;
-      if (item.part === 1 || item.part === 2 || item.part === 3) {
-        part = item.part;
+      const rawPartNum = Number(item.part);
+      const hasRealOpts = Array.isArray(item.options) && item.options.filter((o: any) => o && !isSyntheticPlaceholder(o)).length >= 2;
+      const hasRealStmts = Array.isArray(item.statements) && item.statements.filter((s: any) => s && !isSyntheticPlaceholder(s.text)).length >= 2;
+
+      if (rawPartNum === 3 || item.questionType === "short_answer" || item.shortAnswer) {
+        part = 3;
+      } else if (rawPartNum === 2 || item.questionType === "true_false" || hasRealStmts) {
+        part = 2;
+      } else if (rawPartNum === 1 || item.questionType === "multiple_choice" || hasRealOpts) {
+        part = 1;
       } else if (totalRaw === 28) {
         if (idx < 18) part = 1;
         else if (idx < 22) part = 2;
@@ -1251,10 +1336,10 @@ ${rawText.slice(0, 50000)}
         if (idx < 12) part = 1;
         else if (idx < 16) part = 2;
         else part = 3;
-      } else if (item.statements && item.statements.length > 0) {
-        part = 2;
-      } else if (item.shortAnswer && (!item.options || item.options.length === 0)) {
+      } else if (!hasRealOpts && !hasRealStmts) {
         part = 3;
+      } else {
+        part = 1;
       }
 
       const questionType: QuestionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
@@ -1539,7 +1624,7 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
    - "content": CHỈ chứa phần dẫn chung của câu hỏi. TUYỆT ĐỐI KHÔNG để các ý a, b, c, d trong "content".
    - "statements": BẮT BUỘC ĐỦ 4 phần tử a, b, c, d. Thuộc tính "text" BẮT BUỘC PHẢI CHỨA 100% NGUYÊN VĂN NỘI DUNG CỦA MỆNH ĐỀ ĐÓ (kể cả công thức LaTeX). TUYỆT ĐỐI KHÔNG ĐƯỢC để trống "text" hay ghi "Ý a", "Khẳng định ý a".
    - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
-3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (Học sinh tự tính toán và điền kết quả số) -> (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số ngắn. "options": [].
+3. PHẦN III: Trắc nghiệm Trả lời ngắn / Điền số (part: 3, questionType: "short_answer") -> "shortAnswer": kết quả số hoặc biểu thức ngắn, "options": []. TUYỆT ĐỐI KHÔNG gán phương án A, B, C, D cho câu hỏi Phần III.
 
 QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN THỦ 100%):
 4. BẢNG SỐ LIỆU / BẢNG THỐNG KÊ / BẢNG BIẾN THIÊN:
@@ -1621,14 +1706,17 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN TH
     const formatted: Question[] = parsed.map((item: any, idx: number) => {
       // Strict Part Classification
       let part: 1 | 2 | 3 = 1;
-      const hasFourOptions = Array.isArray(item.options) && item.options.length >= 2;
-      const hasStatements = Array.isArray(item.statements) && item.statements.length >= 2;
+      const rawPartNum = Number(item.part);
+      const hasRealOptions = Array.isArray(item.options) && item.options.filter((o: any) => o && !isSyntheticPlaceholder(o)).length >= 2;
+      const hasStatements = Array.isArray(item.statements) && item.statements.filter((s: any) => s && !isSyntheticPlaceholder(s.text)).length >= 2;
 
-      if (hasFourOptions) {
-        part = 1;
-      } else if (hasStatements || item.part === 2 || item.questionType === "true_false") {
+      if (rawPartNum === 3 || item.questionType === "short_answer" || item.shortAnswer) {
+        part = 3;
+      } else if (rawPartNum === 2 || item.questionType === "true_false" || hasStatements) {
         part = 2;
-      } else if (item.part === 3 || item.questionType === "short_answer" || item.shortAnswer) {
+      } else if (rawPartNum === 1 || item.questionType === "multiple_choice" || hasRealOptions) {
+        part = 1;
+      } else if (!hasRealOptions && !hasStatements) {
         part = 3;
       } else {
         part = 1;
@@ -1664,7 +1752,7 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN TH
         options: part === 1 ? finalOptions.slice(0, 4) : [],
         correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
         statements: part === 2 ? item.statements : undefined,
-        shortAnswer: part === 3 ? item.shortAnswer : undefined,
+        shortAnswer: part === 3 ? (item.shortAnswer || "") : undefined,
         explanation: item.explanation || "",
         needsReview: true,
         isAiGenerated: true,
