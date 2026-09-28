@@ -43,6 +43,8 @@ import {
   FileDown,
   FilePlus,
   QrCode,
+  Search,
+  Users,
 } from "lucide-react";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
@@ -207,6 +209,8 @@ function restoreMarkdownImagesInQuestions(
 
 interface ExamShufflerProps {
   questionBank: Question[];
+  exams?: ExamPackage[];
+  initialExamToLoad?: ExamPackage | null;
   onPublishExam: (exam: ExamPackage) => void;
   onOpenStudentExam: (examId: string, examCode: string) => void;
   onAddQuestion?: (q: Question) => void;
@@ -216,6 +220,8 @@ interface ExamShufflerProps {
 
 export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   questionBank,
+  exams = [],
+  initialExamToLoad,
   onPublishExam,
   onOpenStudentExam,
   onAddQuestion,
@@ -246,8 +252,8 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   const [accessCode, setAccessCode] = useState("THPT2026");
   const [newExamCodeInput, setNewExamCodeInput] = useState("");
 
-  // Input source mode: "paste" | "bank" | "upload"
-  const [inputMode, setInputMode] = useState<"paste" | "bank" | "upload">("paste");
+  // Input source mode: "paste" | "bank" | "upload" | "bank_exams"
+  const [inputMode, setInputMode] = useState<"paste" | "bank" | "upload" | "bank_exams">("paste");
   const [rawText, setRawText] = useState(SAMPLE_EXAM_TEXT);
   const [uploadedImageMap, setUploadedImageMap] = useState<Record<string, string>>({});
   const [isParsing, setIsParsing] = useState(false);
@@ -259,6 +265,33 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   const [activeVariantTab, setActiveVariantTab] = useState<string>("student");
   const [publishedExam, setPublishedExam] = useState<ExamPackage | null>(null);
   const [parseSuccessMsg, setParseSuccessMsg] = useState("");
+
+  // Save confirmation notification modal
+  const [savedExamNotification, setSavedExamNotification] = useState<{
+    exam: ExamPackage;
+    message: string;
+  } | null>(null);
+
+  // Exam Bank search query for "bank_exams" mode
+  const [examBankSearch, setExamBankSearch] = useState("");
+
+  // Load initialExamToLoad if provided
+  React.useEffect(() => {
+    if (initialExamToLoad) {
+      setSelectedQuestions(initialExamToLoad.originalQuestions || []);
+      setConfig(initialExamToLoad.config);
+      setExamTitle(initialExamToLoad.title);
+      setAccessCode(initialExamToLoad.accessCode);
+      setGeneratedVariants(initialExamToLoad.variants || []);
+      setPublishedExam(initialExamToLoad);
+      setParseSuccessMsg(
+        `✅ Đã nạp thành công đề thi "${initialExamToLoad.title}" (${initialExamToLoad.originalQuestions?.length || 0} câu) từ Ngân Hàng Đề Thi!`
+      );
+      setTimeout(() => {
+        document.getElementById("extracted-questions-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 200);
+    }
+  }, [initialExamToLoad]);
 
   // Answer Moderation Modal / State
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -381,6 +414,10 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         };
         setPublishedExam(autoPkg);
         onPublishExam(autoPkg);
+        setSavedExamNotification({
+          exam: autoPkg,
+          message: "Đề thi đã được trích xuất và lưu vĩnh viễn vào Ngân Hàng Đề Thi!",
+        });
         setExtractedViewMode("list");
         setExtractedPartFilter("all");
         setShowMissingAnswersPrompt(false);
@@ -829,6 +866,10 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         };
         setPublishedExam(batchPkg);
         onPublishExam(batchPkg);
+        setSavedExamNotification({
+          exam: batchPkg,
+          message: "Đã tải lên và lưu trữ thành công đề thi vào Ngân Hàng Đề Thi!",
+        });
 
         setExtractedViewMode("list");
         setShowMissingAnswersPrompt(false);
@@ -1568,11 +1609,11 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                 <FileText className="w-4 h-4 text-indigo-600" />
                 Nhập Đề Thi & Trích Xuất Câu Hỏi
               </h3>
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg">
                 <button
                   type="button"
                   onClick={() => setInputMode("paste")}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
                     inputMode === "paste" ? "bg-white text-indigo-700 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
@@ -1581,20 +1622,29 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                 <button
                   type="button"
                   onClick={() => setInputMode("upload")}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
                     inputMode === "upload" ? "bg-white text-indigo-700 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  Tải file đề
+                  Tải file đề (Word/PDF/Ảnh)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode("bank_exams")}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                    inputMode === "bank_exams" ? "bg-white text-blue-700 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  📚 Ngân Hàng Đề ({exams.length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setInputMode("bank")}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
                     inputMode === "bank" ? "bg-white text-indigo-700 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  Chọn từ Ngân hàng ({questionBank.length})
+                  Chọn từng câu ({questionBank.length})
                 </button>
               </div>
             </div>
@@ -1936,6 +1986,87 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Mode: Exam Bank (Load whole Exam Package) */}
+            {inputMode === "bank_exams" && (
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100 text-xs">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={examBankSearch}
+                      onChange={(e) => setExamBankSearch(e.target.value)}
+                      placeholder="Tìm đề thi đã lưu theo tên, môn, mã..."
+                      className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs"
+                    />
+                  </div>
+                  <span className="text-slate-500 shrink-0 font-medium">
+                    Tổng cộng: <strong>{exams.length}</strong> đề trong ngân hàng
+                  </span>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                  {exams.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-slate-400 space-y-2">
+                      <BookOpen className="w-8 h-8 mx-auto text-slate-300 stroke-1" />
+                      <p>Ngân hàng đề thi đang trống. Hãy tải file đề hoặc dán đề để hệ thống tự động lưu trữ.</p>
+                    </div>
+                  ) : (
+                    exams
+                      .filter((ex) =>
+                        ex.title.toLowerCase().includes(examBankSearch.toLowerCase()) ||
+                        ex.accessCode.toLowerCase().includes(examBankSearch.toLowerCase()) ||
+                        ex.config.subject.toLowerCase().includes(examBankSearch.toLowerCase())
+                      )
+                      .map((ex) => (
+                        <div
+                          key={ex.id}
+                          className="p-3 bg-white hover:bg-blue-50/50 border border-slate-200 hover:border-blue-300 rounded-xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="space-y-1 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                {ex.config.subject}
+                              </span>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                                {ex.config.grade}
+                              </span>
+                              <span className="font-mono text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                                Mã: {ex.accessCode}
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-slate-900 line-clamp-1">{ex.title}</h4>
+                            <p className="text-[11px] text-slate-500">
+                              {ex.originalQuestions?.length || 0} câu hỏi • {ex.variants?.length || 0} mã đề hoán vị ({ex.variants?.map(v => v.examCode).join(", ")})
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedQuestions(ex.originalQuestions || []);
+                              setConfig(ex.config);
+                              setExamTitle(ex.title);
+                              setAccessCode(ex.accessCode);
+                              setGeneratedVariants(ex.variants || []);
+                              setPublishedExam(ex);
+                              setParseSuccessMsg(`✅ Đã nạp thành công đề thi "${ex.title}" (${ex.originalQuestions?.length || 0} câu) từ Ngân Hàng Đề Thi!`);
+                              setTimeout(() => {
+                                document.getElementById("extracted-questions-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                              }, 150);
+                            }}
+                            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-1 shrink-0 cursor-pointer"
+                          >
+                            <Shuffle className="w-3.5 h-3.5" />
+                            <span>Nạp Đề Này Vào Trộn Đề</span>
+                          </button>
+                        </div>
+                      ))
+                  )}
                 </div>
               </div>
             )}
@@ -4370,6 +4501,87 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         questions={selectedQuestions.length > 0 ? selectedQuestions : []}
         config={config}
       />
+
+      {/* Save to Exam Bank Confirmation Modal */}
+      {savedExamNotification && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4 animate-scale-up">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold uppercase tracking-wider">
+                Xác Nhận Lưu Trữ Thành Công
+              </span>
+              <h3 className="text-lg font-black text-slate-900 pt-1">
+                Đề Thi Đã Được Lưu Vào Ngân Hàng Đề Thi
+              </h3>
+              <p className="text-xs text-slate-500">
+                Đề thi <strong>"{savedExamNotification.exam.title}"</strong> đã được lưu vĩnh viễn vào Ngân Hàng Đề Thi & Cloud Database. Bạn có thể mở lại bất cứ khi nào mà không lo mất dữ liệu.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-left text-xs space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Mã phòng thi:</span>
+                <span className="font-mono font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  {savedExamNotification.exam.accessCode}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Môn học & Khối:</span>
+                <span className="font-semibold text-slate-800">
+                  {savedExamNotification.exam.config.subject} • {savedExamNotification.exam.config.grade}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Số câu & Mã đề:</span>
+                <span className="font-semibold text-slate-800">
+                  {savedExamNotification.exam.originalQuestions.length} câu • {savedExamNotification.exam.variants.length} mã đề ({savedExamNotification.exam.variants.map((v) => v.examCode).join(", ")})
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+              {onAssignToClass && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ex = savedExamNotification.exam;
+                    setSavedExamNotification(null);
+                    onAssignToClass(ex);
+                  }}
+                  className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Giao Cho Lớp Ngay</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSavedExamNotification(null);
+                  setIsShareModalOpen(true);
+                }}
+                className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer"
+              >
+                <QrCode className="w-4 h-4" />
+                <span>Lấy Link & QR Cho HS</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSavedExamNotification(null)}
+              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+            >
+              Đóng & Tiếp Tục Chỉnh Sửa
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 1-Click Instant Share & QR Code Modal */}
       <InstantShareModal

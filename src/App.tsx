@@ -25,6 +25,10 @@ import {
   publishExamToCloud,
   submitExamToCloud,
   fetchSubmissionsFromCloud,
+  fetchClassroomsFromCloud,
+  fetchAssignmentsFromCloud,
+  syncClassroomsToCloud,
+  syncAssignmentsToCloud,
 } from "./utils/cloudExamDatabase";
 import { syncSubmissionToGoogleSheetsWebhook } from "./utils/googleSheetsSync";
 import { Sparkles, Send, GraduationCap, UserCheck, Menu, X, ShieldAlert, Layers, Key, Settings2, Gamepad2, Cloud, Download, Upload } from "lucide-react";
@@ -681,11 +685,13 @@ export default function App() {
   // Load from backend & Cloud DB on start and periodically
   const refreshData = async () => {
     try {
-      const [resQ, resExams, resSubs, cloudSubs] = await Promise.all([
+      const [resQ, resExams, resSubs, cloudSubs, cloudClasses, cloudAssigns] = await Promise.all([
         fetch("/api/questions").catch(() => null),
         fetch("/api/exams").catch(() => null),
         fetch("/api/submissions").catch(() => null),
         fetchSubmissionsFromCloud().catch(() => []),
+        fetchClassroomsFromCloud().catch(() => null),
+        fetchAssignmentsFromCloud().catch(() => null),
       ]);
 
       if (resQ && resQ.ok && resQ.headers.get("content-type")?.includes("application/json")) {
@@ -711,6 +717,36 @@ export default function App() {
           const merged = [...newOnes, ...prev];
           try {
             localStorage.setItem("edutest_submissions", JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
+
+      // Merge realtime Cloud Database Classrooms
+      if (cloudClasses && Array.isArray(cloudClasses) && cloudClasses.length > 0) {
+        setClassrooms((prev) => {
+          const prevMap = new Map(prev.map((c) => [c.id, c]));
+          for (const c of cloudClasses) {
+            prevMap.set(c.id, c);
+          }
+          const merged = Array.from(prevMap.values());
+          try {
+            localStorage.setItem("edutest_classrooms", JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
+
+      // Merge realtime Cloud Database Assignments
+      if (cloudAssigns && Array.isArray(cloudAssigns) && cloudAssigns.length > 0) {
+        setAssignments((prev) => {
+          const prevMap = new Map(prev.map((a) => [a.id, a]));
+          for (const a of cloudAssigns) {
+            prevMap.set(a.id, a);
+          }
+          const merged = Array.from(prevMap.values());
+          try {
+            localStorage.setItem("edutest_class_assignments", JSON.stringify(merged));
           } catch (e) {}
           return merged;
         });
@@ -760,6 +796,20 @@ export default function App() {
     setQuestionBank((prev) => prev.filter((q) => q.id !== id));
     try {
       await fetch(`/api/questions/${id}`, { method: "DELETE" });
+    } catch (e) {}
+  };
+
+  // Delete Exam from Exam Bank
+  const handleDeleteExam = async (id: string) => {
+    setActiveExams((prev) => {
+      const updated = prev.filter((e) => e.id !== id && e.accessCode !== id);
+      try {
+        localStorage.setItem("edutest_active_exams", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+    try {
+      await fetch(`/api/exams/${id}`, { method: "DELETE" });
     } catch (e) {}
   };
 
@@ -1076,10 +1126,17 @@ export default function App() {
                 questionBank={questionBank}
                 submissions={submissions}
                 exams={activeExams}
+                onDeleteExam={handleDeleteExam}
                 classrooms={classrooms}
-                onSaveClassrooms={setClassrooms}
+                onSaveClassrooms={(classes) => {
+                  setClassrooms(classes);
+                  syncClassroomsToCloud(classes).catch(() => {});
+                }}
                 assignments={assignments}
-                onSaveAssignments={setAssignments}
+                onSaveAssignments={(assigns) => {
+                  setAssignments(assigns);
+                  syncAssignmentsToCloud(assigns).catch(() => {});
+                }}
                 onAddQuestion={handleAddQuestion}
                 onAddMultipleQuestions={handleAddMultipleQuestions}
                 onDeleteQuestion={handleDeleteQuestion}

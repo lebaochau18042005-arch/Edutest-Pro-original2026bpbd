@@ -408,6 +408,78 @@ export async function buildClassExamShareLink(
 }
 
 /**
+ * Builds share links + QR code for a class assignment
+ */
+export async function buildClassExamShareLinks(
+  pkg: ExamPackage,
+  classroomId: string,
+  classroomName: string,
+  assignmentId?: string,
+  customOrigin?: string
+): Promise<{
+  directLink: string;
+  simpleCodeLink: string;
+  qrCodeUrl: string;
+  isSelfContained: boolean;
+}> {
+  let origin = customOrigin;
+  if (!origin) {
+    if (typeof window !== "undefined") {
+      origin = window.location.origin;
+    } else {
+      origin = "https://edutest-pro-original2026bpbd.vercel.app";
+    }
+  }
+  origin = origin.replace(/\/+$/, "");
+
+  const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
+  const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&classId=${encodeURIComponent(classroomId)}&className=${encodeURIComponent(classroomName)}&role=student&auto=1${assignmentId ? `&assignId=${encodeURIComponent(assignmentId)}` : ""}`;
+
+  const compressed = await compressExamForSharing(pkg);
+  let directLink = simpleCodeLink;
+  let isSelfContained = false;
+
+  if (compressed && compressed.length > 0) {
+    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&classId=${encodeURIComponent(classroomId)}&className=${encodeURIComponent(classroomName)}&role=student&auto=1${assignmentId ? `&assignId=${encodeURIComponent(assignmentId)}` : ""}#exam=${compressed}`;
+    isSelfContained = true;
+  }
+
+  let qrCodeUrl = "";
+  try {
+    qrCodeUrl = await QRCode.toDataURL(directLink, {
+      margin: 1,
+      width: 450,
+      errorCorrectionLevel: "L",
+      color: {
+        dark: "#0f172a",
+        light: "#ffffff",
+      },
+    });
+  } catch {
+    try {
+      qrCodeUrl = await QRCode.toDataURL(simpleCodeLink, {
+        margin: 1,
+        width: 450,
+        errorCorrectionLevel: "M",
+        color: {
+          dark: "#0f172a",
+          light: "#ffffff",
+        },
+      });
+    } catch {
+      qrCodeUrl = "";
+    }
+  }
+
+  return {
+    directLink,
+    simpleCodeLink,
+    qrCodeUrl,
+    isSelfContained,
+  };
+}
+
+/**
  * Robust extractor for exam payloads and query parameters from current window URL.
  */
 export function extractExamPayloadFromUrl(): {
@@ -442,4 +514,5 @@ export function extractExamPayloadFromUrl(): {
     return { examPayload: "", code: "" };
   }
 }
+
 

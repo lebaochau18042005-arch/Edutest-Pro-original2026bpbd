@@ -313,6 +313,48 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     "entry" | "exam_room" | "result" | "paper_result" | "review_submission"
   >("entry");
   const [activeExam, setActiveExam] = useState<ExamPackage | null>(null);
+
+  // Virtual / Dynamic Fallback Classroom & Assignments to ensure student links ALWAYS work
+  const effectiveClassrooms: Classroom[] = React.useMemo(() => {
+    const list = [...classrooms];
+    if (chosenClassId && !list.some((c) => c.id === chosenClassId)) {
+      list.unshift({
+        id: chosenClassId,
+        name: studentClass || "Lớp của bạn",
+        grade: grade || "Khối 12",
+        schoolYear: "2025-2026",
+        subject: activeExam?.config?.subject || "Toán học",
+        homeroomTeacher: "Giáo viên bộ môn",
+        createdAt: new Date().toISOString(),
+        students: [],
+      });
+    }
+    return list;
+  }, [classrooms, chosenClassId, studentClass, grade, activeExam]);
+
+  const effectiveAssignments: ClassAssignment[] = React.useMemo(() => {
+    const list = [...assignments];
+    if (chosenClassId) {
+      const hasAssignForClass = list.some((a) => a.classroomId === chosenClassId);
+      if (!hasAssignForClass && activeExam) {
+        list.unshift({
+          id: chosenAssignmentId || `assign-virtual-${activeExam.id}`,
+          examId: activeExam.id,
+          examTitle: activeExam.title,
+          accessCode: activeExam.accessCode,
+          classroomId: chosenClassId,
+          classroomName: studentClass || "Lớp của bạn",
+          assignedAt: new Date().toISOString(),
+          duration: activeExam.config?.duration || 45,
+          shuffleVariants: true,
+          allowReviewAfterSubmit: true,
+          status: "active",
+        });
+      }
+    }
+    return list;
+  }, [assignments, chosenClassId, chosenAssignmentId, activeExam, studentClass]);
+
   const [currentSubmission, setCurrentSubmission] = useState<StudentSubmission | null>(null);
   const [gradedPaperResult, setGradedPaperResult] = useState<GradedPaperResult | null>(null);
   const [entryError, setEntryError] = useState("");
@@ -901,7 +943,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               )}
 
               {/* Entry Method Selector: Vào thi theo Lớp vs Nhập mã tự do */}
-              {classrooms.length > 0 && (
+              {effectiveClassrooms.length > 0 && (
                 <div className="flex p-1 bg-slate-100 rounded-2xl gap-1">
                   <button
                     type="button"
@@ -931,11 +973,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               )}
 
               {/* Khi chọn hình thức Vào thi theo Lớp */}
-              {entryMethod === "class" && classrooms.length > 0 && (
+              {entryMethod === "class" && effectiveClassrooms.length > 0 && (
                 <div className="p-4 bg-gradient-to-br from-blue-50/70 to-indigo-50/70 border border-blue-200 rounded-2xl space-y-4 text-xs animate-fade-in">
                   <div className="flex items-center gap-2 text-blue-900 font-bold">
                     <Users className="w-4 h-4 text-blue-600" />
-                    <span>Học sinh chọn Lớp và chọn Tên của mình để nhận bài thi:</span>
+                    <span>Học sinh chọn Lớp và xác nhận thông tin để nhận bài thi:</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -948,7 +990,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         onChange={(e) => {
                           const newCId = e.target.value;
                           setChosenClassId(newCId);
-                          const cls = classrooms.find((c) => c.id === newCId);
+                          const cls = effectiveClassrooms.find((c) => c.id === newCId);
                           if (cls) {
                             setStudentClass(cls.name);
                             if (cls.students.length > 0) {
@@ -957,7 +999,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               setChosenStudentRosterId(cls.students[0].id);
                             }
                           }
-                          const cAssigns = assignments.filter((a) => a.classroomId === newCId);
+                          const cAssigns = effectiveAssignments.filter((a) => a.classroomId === newCId);
                           if (cAssigns.length > 0) {
                             setChosenAssignmentId(cAssigns[0].id);
                             const matchedExam = exams.find((x) => x.id === cAssigns[0].examId);
@@ -969,9 +1011,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         }}
                         className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       >
-                        {classrooms.map((cls) => (
+                        {effectiveClassrooms.map((cls) => (
                           <option key={cls.id} value={cls.id}>
-                            Lớp {cls.name} ({cls.grade} • Sĩ số: {cls.students.length} HS)
+                            Lớp {cls.name} ({cls.grade} • Sĩ số: {cls.students?.length || 0} HS)
                           </option>
                         ))}
                       </select>
@@ -979,33 +1021,55 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
                     <div>
                       <label className="block font-bold text-slate-700 mb-1">
-                        2. Chọn Tên bạn trong danh sách lớp <span className="text-rose-500">*</span>:
+                        2. Chọn Tên bạn trong danh sách lớp:
                       </label>
-                      <select
-                        value={chosenStudentRosterId}
-                        onChange={(e) => {
-                          const sId = e.target.value;
-                          setChosenStudentRosterId(sId);
-                          const currentCls = classrooms.find((c) => c.id === chosenClassId) || classrooms[0];
-                          const foundStu = currentCls?.students.find((s) => s.id === sId);
-                          if (foundStu) {
-                            setStudentName(foundStu.name);
-                            setStudentId(foundStu.studentId);
-                            setStudentClass(currentCls.name);
-                          }
-                        }}
-                        className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      >
-                        <option value="">-- Bấm để chọn tên của em --</option>
-                        {(() => {
-                          const currentCls = classrooms.find((c) => c.id === chosenClassId) || classrooms[0];
-                          return (currentCls?.students || []).map((stu) => (
-                            <option key={stu.id} value={stu.id}>
-                              {stu.studentId} - {stu.name} {stu.gender ? `(${stu.gender})` : ""}
-                            </option>
-                          ));
-                        })()}
-                      </select>
+                      {(() => {
+                        const currentCls = effectiveClassrooms.find((c) => c.id === chosenClassId) || effectiveClassrooms[0];
+                        const hasRoster = currentCls && currentCls.students && currentCls.students.length > 0;
+                        if (hasRoster) {
+                          return (
+                            <select
+                              value={chosenStudentRosterId}
+                              onChange={(e) => {
+                                const sId = e.target.value;
+                                setChosenStudentRosterId(sId);
+                                const foundStu = currentCls?.students.find((s) => s.id === sId);
+                                if (foundStu) {
+                                  setStudentName(foundStu.name);
+                                  setStudentId(foundStu.studentId);
+                                  setStudentClass(currentCls.name);
+                                }
+                              }}
+                              className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            >
+                              <option value="">-- Bấm để chọn tên của em --</option>
+                              {currentCls.students.map((stu) => (
+                                <option key={stu.id} value={stu.id}>
+                                  {stu.studentId} - {stu.name} {stu.gender ? `(${stu.gender})` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          );
+                        }
+                        return (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={studentName}
+                              onChange={(e) => setStudentName(e.target.value)}
+                              placeholder="Nhập họ và tên của em..."
+                              className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowEditProfileModal(true)}
+                              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl font-semibold text-slate-700 text-xs shrink-0"
+                            >
+                              SBD & Lớp
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -1015,7 +1079,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       3. Bài kiểm tra đang được giao cho Lớp:
                     </label>
                     {(() => {
-                      const classAssigns = assignments.filter((a) => a.classroomId === chosenClassId);
+                      const classAssigns = effectiveAssignments.filter((a) => a.classroomId === chosenClassId);
                       if (classAssigns.length === 0) {
                         return (
                           <div className="p-3 bg-white rounded-xl border border-dashed border-slate-300 text-center text-slate-500">
@@ -1026,13 +1090,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       return (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {classAssigns.map((assign) => {
-                            const isChosen = assign.id === chosenAssignmentId;
+                            const isChosen = assign.id === chosenAssignmentId || classAssigns.length === 1;
                             return (
                               <div
                                 key={assign.id}
                                 onClick={() => {
                                   setChosenAssignmentId(assign.id);
-                                  const matchedExam = exams.find((x) => x.id === assign.examId);
+                                  const matchedExam = exams.find((x) => x.id === assign.examId || x.accessCode === assign.accessCode) || activeExam;
                                   if (matchedExam) {
                                     setActiveExam(matchedExam);
                                     setAccessCodeInput(matchedExam.accessCode);

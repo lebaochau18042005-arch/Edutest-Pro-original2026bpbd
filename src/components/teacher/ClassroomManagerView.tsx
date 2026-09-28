@@ -31,6 +31,9 @@ import {
   UserCheck,
   Share2,
   Copy,
+  QrCode,
+  Smartphone,
+  Maximize2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -41,7 +44,8 @@ import {
   StudentSubmission,
   GradeType,
 } from "../../types";
-import { buildClassExamShareLink } from "../../utils/shareUrlHelper";
+import { buildClassExamShareLink, buildClassExamShareLinks } from "../../utils/shareUrlHelper";
+import { syncClassroomsToCloud, syncAssignmentsToCloud } from "../../utils/cloudExamDatabase";
 
 interface ClassroomManagerViewProps {
   classrooms: Classroom[];
@@ -86,6 +90,12 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
   const [showAssignExamModal, setShowAssignExamModal] = useState(Boolean(defaultSelectedExam));
   const [selectedSubmissionForDetail, setSelectedSubmissionForDetail] = useState<StudentSubmission | null>(null);
 
+  // Class QR Code modal state
+  const [selectedClassForQr, setSelectedClassForQr] = useState<{
+    assign: ClassAssignment;
+    links: { directLink: string; simpleCodeLink: string; qrCodeUrl: string; isSelfContained: boolean };
+  } | null>(null);
+
   // New class form
   const [newClassName, setNewClassName] = useState("");
   const [newClassGrade, setNewClassGrade] = useState<GradeType>("Khối 12");
@@ -102,13 +112,16 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
   // Paste students raw text
   const [rawStudentsText, setRawStudentsText] = useState("");
 
-  // Assign exam form
+  // Assign exam form - MULTI-CLASS SELECTION
   const [assignExamId, setAssignExamId] = useState<string>(
     defaultSelectedExam?.id || (exams.length > 0 ? exams[0].id : "")
   );
-  const [assignClassroomId, setAssignClassroomId] = useState<string>(
-    selectedClassId || (classrooms.length > 0 ? classrooms[0].id : "")
-  );
+  const [assignClassroomIds, setAssignClassroomIds] = useState<string[]>(() => {
+    if (classrooms.length > 0) {
+      return selectedClassId ? [selectedClassId] : [classrooms[0].id];
+    }
+    return [];
+  });
   const [assignDuration, setAssignDuration] = useState<number>(
     defaultSelectedExam?.config?.duration || 45
   );
@@ -146,7 +159,7 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
         );
       } else {
         const origin = window.location.origin;
-        link = `${origin}/?code=${encodeURIComponent(assign.accessCode)}&classId=${encodeURIComponent(assign.classroomId)}&className=${encodeURIComponent(assign.classroomName)}&role=student&auto=1`;
+        link = `${origin}/?code=${encodeURIComponent(assign.accessCode)}&classId=${encodeURIComponent(assign.classroomId)}&className=${encodeURIComponent(assign.classroomName)}&role=student&auto=1${assign.id ? `&assignId=${encodeURIComponent(assign.id)}` : ""}`;
       }
 
       await navigator.clipboard.writeText(link);
@@ -157,6 +170,44 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
       console.error("Failed to copy assignment share link:", err);
       showToast("Không thể sao chép link, vui lòng thử lại.");
     }
+  };
+
+  const handleOpenClassQrModal = async (assign: ClassAssignment) => {
+    const matchingExam = exams.find(
+      (e) => e.id === assign.examId || e.accessCode === assign.accessCode
+    ) || exams[0];
+    if (!matchingExam) {
+      showToast("Không tìm thấy dữ liệu đề thi.");
+      return;
+    }
+    const links = await buildClassExamShareLinks(
+      matchingExam,
+      assign.classroomId,
+      assign.classroomName,
+      assign.id
+    );
+    setSelectedClassForQr({ assign, links });
+  };
+
+  const handleCopyAllClassLinks = async () => {
+    if (assignments.length === 0) {
+      showToast("Chưa có bài kiểm tra nào được giao.");
+      return;
+    }
+    const lines: string[] = [];
+    lines.push(`📚 DANH SÁCH LINK LÀM BÀI THI CỦA CÁC LỚP:`);
+    for (const a of assignments) {
+      const matchingExam = exams.find((e) => e.id === a.examId || e.accessCode === a.accessCode);
+      let link = "";
+      if (matchingExam) {
+        link = await buildClassExamShareLink(matchingExam, a.classroomId, a.classroomName, a.id);
+      } else {
+        link = `${window.location.origin}/?code=${encodeURIComponent(a.accessCode)}&classId=${encodeURIComponent(a.classroomId)}&className=${encodeURIComponent(a.classroomName)}&role=student&auto=1${a.id ? `&assignId=${encodeURIComponent(a.id)}` : ""}`;
+      }
+      lines.push(`🔹 Lớp ${a.classroomName} (${a.examTitle}):\n👉 ${link}`);
+    }
+    await navigator.clipboard.writeText(lines.join("\n\n"));
+    showToast("Đã sao chép danh sách link làm bài của tất cả các lớp!");
   };
 
   const currentClass = classrooms.find((c) => c.id === selectedClassId) || classrooms[0];
@@ -515,23 +566,28 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
     reader.readAsBinaryString(file);
   };
 
-  // Helper: Create new assignment
+  // Helper: Create new assignment (Supports multiple selected classes)
   const handleAssignExamToClass = (e: React.FormEvent) => {
     e.preventDefault();
     const targetExam = exams.find((ex) => ex.id === assignExamId);
-    const targetClass = classrooms.find((c) => c.id === assignClassroomId);
 
     if (!targetExam) {
       showToast("Vui lòng chọn đề thi để giao bài.");
       return;
     }
-    if (!targetClass) {
-      showToast("Vui lòng chọn lớp học nhận đề.");
+    if (assignClassroomIds.length === 0) {
+      showToast("Vui lòng chọn ít nhất một lớp học nhận đề.");
       return;
     }
 
-    const newAssignment: ClassAssignment = {
-      id: `assign_${Date.now()}`,
+    const selectedTargetClasses = classrooms.filter((c) => assignClassroomIds.includes(c.id));
+    if (selectedTargetClasses.length === 0) {
+      showToast("Không tìm thấy thông tin các lớp đã chọn.");
+      return;
+    }
+
+    const newAssignments: ClassAssignment[] = selectedTargetClasses.map((targetClass) => ({
+      id: `assign_${Date.now()}_${targetClass.id}_${Math.random().toString(36).slice(2, 6)}`,
       examId: targetExam.id,
       examTitle: targetExam.title,
       accessCode: targetExam.accessCode,
@@ -544,14 +600,19 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
       shuffleVariants: assignShuffleVariants,
       allowReviewAfterSubmit: assignAllowReview,
       status: "active",
-    };
+    }));
 
-    const updated = [newAssignment, ...assignments];
+    const updated = [...newAssignments, ...assignments];
     onSaveAssignments(updated);
-    setSelectedAssignmentId(newAssignment.id);
+    syncAssignmentsToCloud(updated).catch(() => {});
+    syncClassroomsToCloud(classrooms).catch(() => {});
+
+    if (newAssignments.length > 0) {
+      setSelectedAssignmentId(newAssignments[0].id);
+    }
     setShowAssignExamModal(false);
     setActiveTab("assignments");
-    showToast(`Đã giao đề "${targetExam.title}" cho lớp ${targetClass.name} thành công!`);
+    showToast(`Đã giao đề "${targetExam.title}" thành công cho ${newAssignments.length} lớp (${selectedTargetClasses.map(c => c.name).join(", ")})!`);
   };
 
   // Helper: Delete assignment
@@ -941,7 +1002,7 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setAssignClassroomId(currentClass.id);
+                      setAssignClassroomIds([currentClass.id]);
                       setShowAssignExamModal(true);
                     }}
                     className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -1087,24 +1148,46 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
       {/* ============================================================== */}
       {activeTab === "assignments" && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
             <div>
-              <h2 className="text-lg font-black text-slate-900">
-                Danh Sách Bài Thi / Đề Kiểm Tra Đã Giao Cho Các Lớp
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-blue-600" />
+                <span>Danh Sách Bài Thi / Đề Kiểm Tra Đã Giao Cho Các Lớp ({assignments.length})</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Các bài thi đang mở hoặc đã giao cho từng lớp học. Học sinh lớp đó sẽ tự động nhìn thấy đề để làm bài.
+                Các bài thi đang mở theo từng lớp học. Học sinh chỉ cần quét mã QR hoặc bấm link là vào thi ngay.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowAssignExamModal(true)}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>Giao Bài Mới Cho Lớp</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              {assignments.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleCopyAllClassLinks}
+                  className="px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                  title="Sao chép toàn bộ danh sách link bài thi của tất cả các lớp"
+                >
+                  <Copy className="w-4 h-4 text-indigo-600" />
+                  <span>Sao Chép Link Tất Cả Các Lớp</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (exams.length === 0) {
+                    showToast("Thầy/Cô chưa có đề thi nào trong hệ thống. Hãy sang tab 'Trộn Đề' để tạo đề trước.");
+                    return;
+                  }
+                  setAssignClassroomIds(classrooms.map((c) => c.id));
+                  setShowAssignExamModal(true);
+                }}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                <span>Giao Đề Cho Nhiều Lớp</span>
+              </button>
+            </div>
           </div>
 
           {assignments.length === 0 ? (
@@ -1113,12 +1196,15 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
               <div>
                 <h4 className="text-sm font-bold text-slate-800">Chưa có bài thi nào được giao cho lớp</h4>
                 <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Hãy chọn một đề thi đã tạo và giao cho lớp học để các em học sinh có thể truy cập làm bài ngay lập tức.
+                  Hãy chọn một đề thi đã tạo và giao đồng thời cho một hoặc nhiều lớp học để học sinh có thể truy cập làm bài ngay lập tức.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowAssignExamModal(true)}
+                onClick={() => {
+                  setAssignClassroomIds(classrooms.map((c) => c.id));
+                  setShowAssignExamModal(true);
+                }}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer"
               >
                 Tiến Hành Giao Đề Ngay
@@ -1215,8 +1301,39 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                       </div>
                     </div>
 
-                    {/* 1-Click Link Copy for Class */}
-                    <div className="pt-2">
+                    {/* Quick Action Links & QR Code */}
+                    <div className="space-y-2 pt-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenClassQrModal(assign)}
+                          className="py-2 px-3 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+                          title="Hiển thị mã QR phòng thi của lớp này để chiếu máy chiếu"
+                        >
+                          <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Mã QR Lớp</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const matchingExam = exams.find((e) => e.id === assign.examId || e.accessCode === assign.accessCode);
+                            let link = "";
+                            if (matchingExam) {
+                              link = await buildClassExamShareLink(matchingExam, assign.classroomId, assign.classroomName, assign.id);
+                            } else {
+                              link = `${window.location.origin}/?code=${encodeURIComponent(assign.accessCode)}&classId=${encodeURIComponent(assign.classroomId)}&className=${encodeURIComponent(assign.classroomName)}&role=student&auto=1${assign.id ? `&assignId=${encodeURIComponent(assign.id)}` : ""}`;
+                            }
+                            window.open(link, "_blank");
+                          }}
+                          className="py-2 px-3 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                          title="Mở thử link học sinh của lớp này trong tab mới"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Mở Thử Link</span>
+                        </button>
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => handleCopyClassAssignmentLink(assign)}
@@ -1235,7 +1352,7 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                         ) : (
                           <>
                             <Share2 className="w-4 h-4 text-emerald-600" />
-                            <span>Copy Link Giao Cho Lớp (Gửi Zalo)</span>
+                            <span>Copy Link Lớp (Gửi Zalo)</span>
                           </>
                         )}
                       </button>
@@ -1859,21 +1976,81 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Chọn Lớp Nhận Đề <span className="text-rose-500">*</span>:
-                </label>
-                <select
-                  required
-                  value={assignClassroomId}
-                  onChange={(e) => setAssignClassroomId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                >
-                  {classrooms.map((cls) => (
-                    <option key={cls.id} value={cls.id}>
-                      Lớp {cls.name} ({cls.grade} • Sĩ số: {cls.students.length} học sinh)
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="font-bold text-slate-700">
+                    Chọn Các Lớp Nhận Đề <span className="text-rose-500">*</span>:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAssignClassroomIds(classrooms.map((c) => c.id))}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+                    >
+                      Chọn tất cả ({classrooms.length})
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setAssignClassroomIds([])}
+                      className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 cursor-pointer"
+                    >
+                      Bỏ chọn
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-2xl p-2.5 bg-slate-50/50 max-h-48 overflow-y-auto space-y-2">
+                  {classrooms.map((cls) => {
+                    const isSelected = assignClassroomIds.includes(cls.id);
+                    return (
+                      <div
+                        key={cls.id}
+                        onClick={() => {
+                          if (isSelected) {
+                            setAssignClassroomIds(assignClassroomIds.filter((id) => id !== cls.id));
+                          } else {
+                            setAssignClassroomIds([...assignClassroomIds, cls.id]);
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                          isSelected
+                            ? "bg-blue-50/90 border-blue-400 text-blue-900 shadow-2xs font-bold"
+                            : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="w-4 h-4 text-blue-600 rounded-md focus:ring-blue-500 pointer-events-none"
+                          />
+                          <div>
+                            <span className="font-black text-xs">Lớp {cls.name}</span>
+                            <span className="text-[11px] text-slate-500 font-normal ml-2">
+                              ({cls.grade} • Sĩ số: {cls.students.length} HS)
+                            </span>
+                          </div>
+                        </div>
+
+                        {cls.homeroomTeacher && (
+                          <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">
+                            GVCN: {cls.homeroomTeacher}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1 px-1">
+                  <span>
+                    Đã chọn: <strong className="text-blue-700 font-bold">{assignClassroomIds.length}</strong> / {classrooms.length} lớp học
+                  </span>
+                  {assignClassroomIds.length === 0 && (
+                    <span className="text-rose-500 font-bold">Vui lòng chọn ít nhất 1 lớp</span>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1929,7 +2106,7 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-[11px] text-emerald-800 font-medium flex items-start gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                 <span>
-                  Sau khi giao bài, học sinh lớp này chỉ cần mở trang kiểm tra, chọn lớp của mình và chọn tên để vào làm bài ngay lập tức.
+                  Sau khi giao bài, toàn bộ học sinh các lớp được chọn chỉ cần mở trang kiểm tra, chọn lớp của mình và chọn tên để vào làm bài ngay lập tức.
                 </span>
               </div>
 
@@ -1943,12 +2120,120 @@ export const ClassroomManagerView: React.FC<ClassroomManagerViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all cursor-pointer"
+                  disabled={assignClassroomIds.length === 0}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md transition-all cursor-pointer"
                 >
-                  Xác Nhận Giao Bài
+                  Xác Nhận Giao Cho {assignClassroomIds.length} Lớp
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL 6: MÃ QR & LINK GIAO ĐỀ CHO LỚP */}
+      {/* ============================================================== */}
+      {selectedClassForQr && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-sm">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    Mã QR & Link Làm Bài: Lớp {selectedClassForQr.assign.classroomName}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Học sinh quét mã QR hoặc bấm link là mở bài thi ngay lập tức!
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedClassForQr(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+              {selectedClassForQr.links.qrCodeUrl ? (
+                <div
+                  onClick={() => window.open(selectedClassForQr.links.directLink || selectedClassForQr.links.simpleCodeLink, "_blank")}
+                  className="bg-white p-3 rounded-2xl border-2 border-emerald-300 hover:border-emerald-500 shadow-md cursor-pointer transition-all hover:scale-[1.02] group relative overflow-hidden"
+                  title="Bấm vào mã QR để mở bài thi thử trong tab mới"
+                >
+                  <img
+                    src={selectedClassForQr.links.qrCodeUrl}
+                    alt={`Mã QR lớp ${selectedClassForQr.assign.classroomName}`}
+                    className="w-52 h-52 object-contain rounded-xl"
+                  />
+                  <div className="absolute inset-0 bg-emerald-950/75 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex flex-col items-center justify-center text-white p-2">
+                    <ExternalLink className="w-6 h-6 text-emerald-300 mb-1 animate-bounce" />
+                    <span className="font-bold text-xs">Bấm để mở thi thử</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-52 h-52 flex items-center justify-center text-slate-400">Đang tạo mã QR...</div>
+              )}
+
+              <div className="space-y-1">
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
+                  Lớp: {selectedClassForQr.assign.classroomName} • Mã đề: {selectedClassForQr.assign.accessCode}
+                </span>
+                <p className="text-xs font-bold text-slate-800 mt-1">{selectedClassForQr.assign.examTitle}</p>
+              </div>
+
+              <div className="w-full space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const link = selectedClassForQr.links.directLink || selectedClassForQr.links.simpleCodeLink;
+                    window.open(link, "_blank");
+                  }}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>🚀 Mở Bài Thi Thử Nghiệm (Tab Mới)</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={selectedClassForQr.links.directLink || selectedClassForQr.links.simpleCodeLink}
+                    className="flex-1 text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-slate-700 select-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const link = selectedClassForQr.links.directLink || selectedClassForQr.links.simpleCodeLink;
+                      await navigator.clipboard.writeText(link);
+                      showToast(`Đã sao chép link cho lớp ${selectedClassForQr.assign.classroomName}!`);
+                    }}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Sao Chép</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedClassForQr(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

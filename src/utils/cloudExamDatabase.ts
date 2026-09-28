@@ -1,4 +1,4 @@
-import { ExamPackage, StudentSubmission } from "../types";
+import { ExamPackage, StudentSubmission, Classroom, ClassAssignment } from "../types";
 
 export interface CloudDatabaseConfig {
   provider: "firebase_rtdb" | "custom_rest";
@@ -56,6 +56,25 @@ function sanitizeKey(code: string): string {
 }
 
 /**
+ * Helper to fetch with a timeout
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 6000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+/**
  * Publishes/Uploads an Exam Package to the Cloud Database.
  * Allows students everywhere (4G/Wi-Fi) to retrieve the exam instantly.
  */
@@ -71,13 +90,12 @@ export async function publishExamToCloud(
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
 
   let cloudSuccess = false;
-  let errorMsg = "";
 
-  // 1. Try Custom/Configured Cloud Database if available
-  if (baseUrl && !baseUrl.includes("edutest-pro-cloud-default-rtdb")) {
+  // 1. Try Cloud Database if configured
+  if (baseUrl) {
     try {
       const targetUrl = `${baseUrl}/exams/${cleanCode}.json`;
-      const res = await fetch(targetUrl, {
+      const res = await fetchWithTimeout(targetUrl, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -86,15 +104,13 @@ export async function publishExamToCloud(
           ...pkg,
           cloudUpdatedAt: new Date().toISOString(),
         }),
-      });
+      }, 5000);
 
       if (res.ok) {
         cloudSuccess = true;
-      } else {
-        errorMsg = `Cloud DB HTTP ${res.status}`;
       }
     } catch (err: any) {
-      errorMsg = err?.message || "Lỗi kết nối Đám mây";
+      console.warn("Cloud DB publish notice:", err?.message || err);
     }
   }
 
@@ -135,26 +151,28 @@ export async function fetchExamFromCloud(accessCode: string): Promise<ExamPackag
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
 
   // Strategy 1: Fetch from Cloud Database
-  try {
-    const targetUrl = `${baseUrl}/exams/${cleanKey}.json`;
-    const res = await fetch(targetUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && (data.accessCode || data.title || data.originalQuestions)) {
-        // Cache to localStorage
-        try {
-          const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
-          const filtered = saved.filter(
-            (e: any) => e.accessCode?.toUpperCase() !== upperCode && e.id !== data.id
-          );
-          localStorage.setItem("edutest_active_exams", JSON.stringify([data, ...filtered]));
-        } catch (e) {}
+  if (baseUrl) {
+    try {
+      const targetUrl = `${baseUrl}/exams/${cleanKey}.json`;
+      const res = await fetchWithTimeout(targetUrl, {}, 4000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && (data.accessCode || data.title || data.originalQuestions)) {
+          // Cache to localStorage
+          try {
+            const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+            const filtered = saved.filter(
+              (e: any) => e.accessCode?.toUpperCase() !== upperCode && e.id !== data.id
+            );
+            localStorage.setItem("edutest_active_exams", JSON.stringify([data, ...filtered]));
+          } catch (e) {}
 
-        return data as ExamPackage;
+          return data as ExamPackage;
+        }
       }
+    } catch (err) {
+      console.warn("Cloud DB fetch notice:", err);
     }
-  } catch (err) {
-    console.warn("Cloud DB fetch failed, trying fallbacks...", err);
   }
 
   // Strategy 2: Check Local Backend API (/api/exams/:code)
@@ -196,22 +214,24 @@ export async function submitExamToCloud(
   let cloudOk = false;
 
   // 1. Upload to Cloud Database
-  try {
-    const targetUrl = `${baseUrl}/submissions/${examKey}/${subKey}.json`;
-    const res = await fetch(targetUrl, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...submission,
-        cloudSubmittedAt: new Date().toISOString(),
-      }),
-    });
+  if (baseUrl) {
+    try {
+      const targetUrl = `${baseUrl}/submissions/${examKey}/${subKey}.json`;
+      const res = await fetchWithTimeout(targetUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...submission,
+          cloudSubmittedAt: new Date().toISOString(),
+        }),
+      }, 5000);
 
-    if (res.ok) {
-      cloudOk = true;
+      if (res.ok) {
+        cloudOk = true;
+      }
+    } catch (err) {
+      console.warn("Failed to upload submission to cloud DB:", err);
     }
-  } catch (err) {
-    console.warn("Failed to upload submission to cloud DB:", err);
   }
 
   // 2. Also try local backend endpoint
@@ -241,7 +261,7 @@ export async function submitExamToCloud(
 
   return {
     success: false,
-    message: "Bài thi đã được lưu tạm trên thiết bị do mạng yếu và sẽ tự động đồng bộ lại khi có kết nối.",
+    message: "Bài thi đã được lưu trên thiết bị và sẽ tự động đồng bộ lại khi có kết nối.",
   };
 }
 
@@ -255,6 +275,7 @@ export async function fetchSubmissionsFromCloud(
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
 
   const results: StudentSubmission[] = [];
+  if (!baseUrl) return results;
 
   try {
     let targetUrl = `${baseUrl}/submissions.json`;
@@ -263,17 +284,15 @@ export async function fetchSubmissionsFromCloud(
       targetUrl = `${baseUrl}/submissions/${cleanKey}.json`;
     }
 
-    const res = await fetch(targetUrl);
+    const res = await fetchWithTimeout(targetUrl, {}, 4000);
     if (res.ok) {
       const data = await res.json();
       if (data && typeof data === "object") {
         if (examCodeOrId) {
-          // Data is map of { [subKey]: StudentSubmission }
           Object.values(data).forEach((sub: any) => {
             if (sub && sub.studentName) results.push(sub as StudentSubmission);
           });
         } else {
-          // Data is map of { [examKey]: { [subKey]: StudentSubmission } }
           Object.values(data).forEach((examMap: any) => {
             if (examMap && typeof examMap === "object") {
               Object.values(examMap).forEach((sub: any) => {
@@ -292,6 +311,82 @@ export async function fetchSubmissionsFromCloud(
 }
 
 /**
+ * Syncs Classrooms to Cloud Database so student devices can load class roster.
+ */
+export async function syncClassroomsToCloud(classrooms: Classroom[]): Promise<boolean> {
+  const config = getCloudDatabaseConfig();
+  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
+  if (!baseUrl) return false;
+
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/classrooms.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(classrooms),
+    }, 4000);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetches Classrooms from Cloud Database.
+ */
+export async function fetchClassroomsFromCloud(): Promise<Classroom[] | null> {
+  const config = getCloudDatabaseConfig();
+  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
+  if (!baseUrl) return null;
+
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/classrooms.json`, {}, 4000);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data as Classroom[];
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Syncs Class Assignments to Cloud Database.
+ */
+export async function syncAssignmentsToCloud(assignments: ClassAssignment[]): Promise<boolean> {
+  const config = getCloudDatabaseConfig();
+  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
+  if (!baseUrl) return false;
+
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/assignments.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(assignments),
+    }, 4000);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetches Class Assignments from Cloud Database.
+ */
+export async function fetchAssignmentsFromCloud(): Promise<ClassAssignment[] | null> {
+  const config = getCloudDatabaseConfig();
+  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
+  if (!baseUrl) return null;
+
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/assignments.json`, {}, 4000);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data as ClassAssignment[];
+    }
+  } catch {}
+  return null;
+}
+
+/**
  * Tests connection to the Cloud Database.
  */
 export async function testCloudDatabaseConnection(): Promise<{
@@ -305,11 +400,11 @@ export async function testCloudDatabaseConnection(): Promise<{
 
   try {
     const testUrl = `${baseUrl}/health.json`;
-    const res = await fetch(testUrl, {
+    const res = await fetchWithTimeout(testUrl, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ping: Date.now() }),
-    });
+    }, 5000);
 
     const elapsed = Math.round(performance.now() - start);
 

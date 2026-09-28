@@ -7,6 +7,7 @@ export interface OMRSheetOptions {
   subject?: string;
   grade?: string;
   examCode?: string;
+  prefillExamCode?: boolean; // Mặc định false: để trống các ô mã đề để học sinh tự ghi và tô
   totalPart1?: number; // 12 or 18 or 24 or 40
   totalPart2?: number; // 4
   totalPart3?: number; // 6
@@ -15,6 +16,9 @@ export interface OMRSheetOptions {
 /**
  * Generates an ultra-crisp, high-definition printable OMR Answer Sheet
  * conforming to Ministry of Education & Training (Bộ GD&ĐT) GDPT 2018 standards (A4 single-page).
+ * 
+ * Mặc định: Để trống các ô Mã đề thi (3 ô vuông) & Số báo danh (6 ô vuông) 
+ * để học sinh làm đề nào tự ghi mã đề đó và tô vào các ô tròn bên dưới.
  */
 export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string {
   const department = options.department || "SỞ GIÁO DỤC VÀ ĐÀO TẠO";
@@ -22,7 +26,8 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
   const examPeriod = options.examPeriod || "BÀI KIỂM TRA ĐỊNH KỲ - NĂM HỌC 2025-2026";
   const subject = options.subject || "ĐỊA LÝ & KHOA HỌC TỔNG HỢP";
   const grade = options.grade || "Khối 12";
-  const examCode = options.examCode || "101";
+  const examCode = (options.examCode || "101").trim();
+  const prefillCode = options.prefillExamCode === true;
 
   const numPart1 = options.totalPart1 || 18;
   const numPart2 = options.totalPart2 || 4;
@@ -32,7 +37,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Phiếu Trả Lời Trắc Nghiệm - ${subject}</title>
+  <title>Phiếu Trả Lời Trắc Nghiệm Chuẩn Bộ GD&ĐT - ${subject}</title>
   <style>
     @page {
       size: A4 portrait;
@@ -105,6 +110,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       margin: 0 1px;
       display: inline-block;
       line-height: 18px;
+      background: #fff;
     }
     .part-title {
       font-size: 11.5px;
@@ -222,12 +228,24 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
   </style>
 </head>
 <body>
-  <!-- Print Tool Bar -->
-  <div class="no-print" style="background: #1e293b; color: white; padding: 10px 20px; text-align: center; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 16px;">
-    <span style="font-weight: bold;">Phiếu Trả Lời Trắc Nghiệm Chuẩn Bộ GD&ĐT (Khổ A4)</span>
-    <button onclick="window.print()" style="background: #059669; color: white; border: none; padding: 6px 16px; border-radius: 8px; font-weight: bold; cursor: pointer;">
-      🖨️ In Phiếu (Ctrl + P)
-    </button>
+  <!-- Print Tool Bar (Ẩn khi in ấn) -->
+  <div class="no-print" style="background: #0f172a; color: white; padding: 12px 20px; margin-bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15);">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-weight: 800; font-size: 13px;">📄 Phiếu Trả Lời Trắc Nghiệm Chuẩn Bộ GD&ĐT (Khổ A4)</span>
+      <span style="font-size: 11px; background: #334155; padding: 2px 8px; border-radius: 6px; color: #94a3b8;">${subject}</span>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+      <!-- Toggle: Để trống mã đề (Chuẩn) vs Điền sẵn -->
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #e2e8f0; cursor: pointer; user-select: none; background: #1e293b; padding: 5px 12px; border-radius: 8px; border: 1px solid #475569;">
+        <input type="checkbox" id="chk-prefill-code" ${prefillCode ? "checked" : ""} onchange="togglePrefillCode(this.checked)" style="width: 15px; height: 15px; cursor: pointer;" />
+        <span>Ghi sẵn mã đề (${examCode})</span>
+      </label>
+
+      <button onclick="window.print()" style="background: #059669; hover:background: #047857; color: white; border: none; padding: 7px 18px; border-radius: 8px; font-weight: bold; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+        🖨️ In Phiếu (Ctrl + P)
+      </button>
+    </div>
   </div>
 
   <div class="sheet-wrapper">
@@ -285,7 +303,7 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
           <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px; display: flex; justify-content: space-between;">
             <span>MÃ ĐỀ THI (3 chữ số)</span>
             <div>
-              <span class="sbd-digit-box">${examCode[0] || ""}</span><span class="sbd-digit-box">${examCode[1] || ""}</span><span class="sbd-digit-box">${examCode[2] || ""}</span>
+              <span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[0] || "") : ""}</span><span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[1] || "") : ""}</span><span class="sbd-digit-box code-digit-box">${prefillCode ? (examCode[2] || "") : ""}</span>
             </div>
           </div>
           <table class="code-grid" style="width: 100%;">
@@ -328,15 +346,15 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
             colsHtml += `<div class="p1-col">`;
             for (let q = startQ; q <= endQ; q++) {
               colsHtml += `
-                <div class="p1-row">
-                  <span class="p1-qnum">Câu ${q}:</span>
-                  <div>
-                    <span class="bubble">A</span>
-                    <span class="bubble">B</span>
-                    <span class="bubble">C</span>
-                    <span class="bubble">D</span>
-                  </div>
-                </div>`;
+              <div class="p1-row">
+                <span class="p1-qnum">Câu ${q}:</span>
+                <div>
+                  <span class="bubble">A</span>
+                  <span class="bubble">B</span>
+                  <span class="bubble">C</span>
+                  <span class="bubble">D</span>
+                </div>
+              </div>`;
             }
             colsHtml += `</div>`;
           }
@@ -345,24 +363,24 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       })()}
     </div>
 
-    <!-- PART II: TRUE / FALSE -->
+    <!-- PART II: TRUE / FALSE (4 SUB-ITEMS PER QUESTION) -->
     <div class="part-title">
       <span>PHẦN II: Trắc nghiệm Đúng / Sai (Mỗi câu tô [Đ] hoặc [S] cho 4 ý a, b, c, d)</span>
-      <span>${numPart2} CÂU (16 Ý)</span>
+      <span>${numPart2} CÂU (${numPart2 * 4} Ý)</span>
     </div>
-    <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+    <div style="margin-bottom: 6px; display: flex; justify-content: space-between;">
       ${Array.from({ length: numPart2 }).map((_, idx) => {
         const qNum = idx + 1;
         return `
-        <div style="flex: 1;" class="tf-box">
-          <div style="font-weight: 900; font-size: 10.5px; border-bottom: 1px solid #999; margin-bottom: 2px; padding-bottom: 1px; text-align: center;">
+        <div style="width: ${numPart2 === 4 ? "24%" : "48%"};" class="tf-box">
+          <div style="font-weight: bold; font-size: 10px; border-bottom: 1px solid #000; padding-bottom: 2px; text-align: center;">
             CÂU ${qNum}
           </div>
-          ${["a", "b", "c", "d"].map((st) => `
+          ${["a", "b", "c", "d"].map((sub) => `
             <div class="tf-subrow">
-              <span style="font-weight: bold; font-size: 10px;">${st})</span>
+              <span style="font-weight: bold; font-size: 9.5px;">${sub})</span>
               <div>
-                <span class="bubble">Đ</span>
+                <span class="bubble" style="margin-right: 2px;">Đ</span>
                 <span class="bubble">S</span>
               </div>
             </div>
@@ -371,12 +389,12 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       }).join("")}
     </div>
 
-    <!-- PART III: SHORT ANSWER - 4 COLUMNS MATRIX ACCORDING TO MOET STANDARD -->
+    <!-- PART III: SHORT ANSWER GRID -->
     <div class="part-title">
-      <span>PHẦN III: CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN (Thí sinh viết kết quả vào 4 ô vuông và tô các ô tròn tương ứng ở cột phía dưới)</span>
+      <span>PHẦN III: Câu trắc nghiệm trả lời ngắn (Thí sinh viết kết quả vào 4 ô vuông và tô các ô tròn tương ứng)</span>
       <span>${numPart3} CÂU</span>
     </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
       ${Array.from({ length: numPart3 }).map((_, idx) => {
         const qNum = idx + 1;
         return `
@@ -421,6 +439,16 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
       <span>Tác giả: Cô Lê Thị Thái (GV Môn Địa Lý) • Zalo: 0916.791.779</span>
     </div>
   </div>
+
+  <script>
+    function togglePrefillCode(checked) {
+      const boxes = document.querySelectorAll('.code-digit-box');
+      const code = '${examCode}';
+      boxes.forEach(function(box, i) {
+        box.textContent = checked ? (code[i] || '') : '';
+      });
+    }
+  </script>
 </body>
 </html>`;
 }

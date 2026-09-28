@@ -20,6 +20,7 @@ interface TeacherDashboardProps {
   questionBank: Question[];
   submissions: StudentSubmission[];
   exams?: ExamPackage[];
+  onDeleteExam?: (id: string) => void;
   classrooms?: Classroom[];
   onSaveClassrooms?: (classes: Classroom[]) => void;
   assignments?: ClassAssignment[];
@@ -39,6 +40,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   questionBank,
   submissions,
   exams = [],
+  onDeleteExam,
   classrooms = [],
   onSaveClassrooms = () => {},
   assignments = [],
@@ -52,10 +54,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onRefreshData,
 }) => {
   const [selectedExamForAssign, setSelectedExamForAssign] = useState<ExamPackage | null>(null);
+  const [examToLoadInShuffler, setExamToLoadInShuffler] = useState<ExamPackage | null>(null);
 
   const handleAssignToClassFromShuffler = (exam: ExamPackage) => {
     setSelectedExamForAssign(exam);
     setTeacherTab("classes");
+  };
+
+  const handleLoadExamToShuffler = (exam: ExamPackage) => {
+    setExamToLoadInShuffler(exam);
+    setTeacherTab("shuffler");
   };
 
   return (
@@ -63,6 +71,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {currentTab === "shuffler" && (
         <ExamShuffler
           questionBank={questionBank}
+          exams={exams}
+          initialExamToLoad={examToLoadInShuffler}
           onPublishExam={onPublishExam}
           onOpenStudentExam={onOpenStudentExam}
           onAddQuestion={onAddQuestion}
@@ -88,6 +98,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {currentTab === "bank" && (
         <QuestionBankView
           questions={questionBank}
+          exams={exams}
+          onDeleteExam={onDeleteExam}
+          onLoadExamToShuffler={handleLoadExamToShuffler}
+          onAssignToClass={handleAssignToClassFromShuffler}
+          onOpenStudentExam={onOpenStudentExam}
           onAddQuestion={onAddQuestion}
           onAddMultipleQuestions={onAddMultipleQuestions}
           onDeleteQuestion={onDeleteQuestion}
@@ -121,4 +136,3 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     </main>
   );
 };
-
