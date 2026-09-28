@@ -77,22 +77,13 @@ export const AVAILABLE_MODELS: ModelCardInfo[] = [
     accuracy: "Tối cao (SOTA)",
   },
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    badge: "Dự Phòng Ổn Định",
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash Lite",
+    badge: "Siêu Nhẹ & Tối Ưu Quota",
     badgeColor: "bg-amber-100 text-amber-800 border-amber-200",
-    description: "Model dự phòng tốc độ cao hỗ trợ toàn diện các tài khoản Google AI Studio chuẩn.",
-    speed: "Rất nhanh (~1s)",
+    description: "Model thế hệ 3.1 tối ưu tốc độ phản hồi nhanh, tiêu thụ ít tài nguyên và độ trễ cực thấp.",
+    speed: "Siêu tốc (~0.5s)",
     accuracy: "Rất tốt",
-  },
-  {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
-    badge: "Dự Phòng Chuyên Sâu",
-    badgeColor: "bg-purple-100 text-purple-800 border-purple-200",
-    description: "Phiên bản Pro dự phòng phục vụ giải toán và phân tích câu hỏi phức tạp.",
-    speed: "Tiêu chuẩn (~2s)",
-    accuracy: "Xuất sắc",
   },
 ];
 
@@ -109,7 +100,13 @@ export const getStoredSelectedModel = (): string => {
   if (typeof window === "undefined") return "gemini-3.5-flash";
   const stored = (localStorage.getItem("gemini_selected_model") || "").trim();
   const validIds = AVAILABLE_MODELS.map((m) => m.id);
-  if (!stored || !validIds.includes(stored as any) || stored.includes("1.5-") || stored.includes("2.0-")) {
+  if (
+    !stored ||
+    !validIds.includes(stored as any) ||
+    stored.includes("1.5") ||
+    stored.includes("2.0") ||
+    stored.includes("2.5")
+  ) {
     localStorage.setItem("gemini_selected_model", "gemini-3.5-flash");
     return "gemini-3.5-flash";
   }

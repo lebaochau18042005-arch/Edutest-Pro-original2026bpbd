@@ -9,35 +9,34 @@ export const isValidGoogleAiApiKey = (key: string): boolean => {
 
 export const OFFICIAL_AI_STUDIO_KEY_URL = "https://aistudio.google.com/apikey";
 
-// 4 model mặc định hiện hành theo thứ tự fallback ưu tiên
+// 4 model mặc định hiện hành thế hệ 3.x theo thứ tự fallback ưu tiên
 export const FALLBACK_MODELS = [
   "gemini-3.5-flash",
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3.1-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
 ] as const;
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 
-// Danh sách các model tùy chọn hợp lệ
+// Danh sách các model tùy chọn hợp lệ (Thế hệ 3.x)
 export const OPTIONAL_MODELS = [
   "gemini-3.5-flash",
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3.1-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
 ] as const;
 
-// Danh sách model đã bị shutdown / cần tránh (dưới 3.0)
+// Danh sách model cũ / đã bị loại bỏ (dưới 3.0 bao gồm 1.5, 2.0, 2.5)
 export const DEPRECATED_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
   "gemini-1.5-pro",
   "gemini-1.5-flash",
   "gemini-1.5-flash-8b",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
 ] as const;
 
 export const GEMINI_ERROR_MESSAGES = {

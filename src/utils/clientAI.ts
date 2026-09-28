@@ -12,8 +12,6 @@ export const FALLBACK_MODELS = [
   "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3.1-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
 ];
 
 function getAI(apiKey?: string): GoogleGenAI | null {
@@ -72,10 +70,16 @@ export async function generateWithFallback(
     }
   } catch (e) {}
 
-  if (cleanMsg.includes("is not found for API version") || cleanMsg.includes("NOT_FOUND") || cleanMsg.includes("gemini-1.5-pro")) {
-    cleanMsg = "Model AI hiện tại không khả dụng hoặc đã được nâng cấp. Hệ thống đã tự động chuyển sang Gemini 2.5 Flash.";
+  if (
+    cleanMsg.includes("is not found for API version") ||
+    cleanMsg.includes("NOT_FOUND") ||
+    cleanMsg.includes("gemini-1.5") ||
+    cleanMsg.includes("gemini-2.0") ||
+    cleanMsg.includes("gemini-2.5")
+  ) {
+    cleanMsg = "Model AI hiện tại không khả dụng hoặc đã được nâng cấp. Hệ thống đã tự động chuyển sang Gemini 3.5 Flash.";
     if (typeof window !== "undefined") {
-      localStorage.setItem("gemini_selected_model", "gemini-2.5-flash");
+      localStorage.setItem("gemini_selected_model", "gemini-3.5-flash");
     }
   }
 
