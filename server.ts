@@ -965,10 +965,10 @@ app.post("/api/submissions/:id/unlock", (req, res) => {
 
 // Fallback Models for resilient Gemini API calls across models
 export const FALLBACK_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-3.1-pro-preview",
-  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
 ];
 
 export const GOOGLE_AI_API_KEY_PATTERN = /^(?:AIzaSy|AQ)\S{8,}$/;
@@ -1138,7 +1138,7 @@ async function generateContentWithModelFallback(
 app.post("/api/ai/test-key", async (req, res) => {
   try {
     const customKey = (req.headers["x-gemini-api-key"] as string) || req.body.apiKey;
-    const requestedModel = (req.headers["x-gemini-model"] as string) || req.body.model || "gemini-3-flash-preview";
+    const requestedModel = (req.headers["x-gemini-model"] as string) || req.body.model || "gemini-2.5-flash";
     const ai = getGenAI(customKey);
     if (!ai) {
       return res.status(400).json({ success: false, error: "Vui lòng nhập Google Gemini API Key để kiểm tra." });

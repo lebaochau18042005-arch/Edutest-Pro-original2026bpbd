@@ -24,16 +24,16 @@ export interface GeminiCallResult {
 
 /**
  * Standard fallback model sequence:
- * 1. gemini-3.5-flash (Default)
- * 2. gemini-3.1-flash-lite
- * 3. gemini-3.1-pro-preview
- * 4. gemini-2.5-flash-lite
+ * 1. gemini-2.5-flash (Default)
+ * 2. gemini-2.5-pro
+ * 3. gemini-2.0-flash
+ * 4. gemini-1.5-flash
  */
 export const STANDARD_FALLBACK_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-3.1-pro-preview",
-  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
 ] as const;
 
 /**
@@ -52,7 +52,7 @@ export async function callGeminiWithFallback(
     );
   }
 
-  const selectedModel = options.model || getStoredSelectedModel() || "gemini-3-flash-preview";
+  const selectedModel = options.model || getStoredSelectedModel() || "gemini-2.5-flash";
 
   // Build model priority list starting with the selected model
   const modelList: string[] = [

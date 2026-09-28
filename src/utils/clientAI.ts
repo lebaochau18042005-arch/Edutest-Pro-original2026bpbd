@@ -9,10 +9,9 @@ import { normalizeExamQuestions3Parts } from "./examHelpers";
 
 export const FALLBACK_MODELS = [
   "gemini-2.5-flash",
+  "gemini-2.5-pro",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
-  "gemini-2.5-pro",
-  "gemini-1.5-pro",
 ];
 
 function getAI(apiKey?: string): GoogleGenAI | null {
@@ -61,7 +60,24 @@ export async function generateWithFallback(
       }
     }
   }
-  throw lastError || new Error("Không thể kết nối đến Gemini AI.");
+
+  const rawMsg = lastError?.message || String(lastError || "");
+  let cleanMsg = rawMsg;
+  try {
+    const parsed = JSON.parse(rawMsg);
+    if (parsed?.error?.message) {
+      cleanMsg = parsed.error.message;
+    }
+  } catch (e) {}
+
+  if (cleanMsg.includes("is not found for API version") || cleanMsg.includes("NOT_FOUND") || cleanMsg.includes("gemini-1.5-pro")) {
+    cleanMsg = "Model AI hiện tại không khả dụng hoặc đã được nâng cấp. Hệ thống đã tự động chuyển sang Gemini 2.5 Flash.";
+    if (typeof window !== "undefined") {
+      localStorage.setItem("gemini_selected_model", "gemini-2.5-flash");
+    }
+  }
+
+  throw new Error(cleanMsg || "Không thể kết nối đến Gemini AI. Vui lòng kiểm tra API Key trong phần Cài Đặt.");
 }
 
 /**

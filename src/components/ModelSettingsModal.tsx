@@ -98,10 +98,13 @@ export const getStoredApiKey = (): string => {
 
 export const getStoredSelectedModel = (): string => {
   if (typeof window === "undefined") return "gemini-2.5-flash";
-  return (
-    localStorage.getItem("gemini_selected_model") ||
-    "gemini-2.5-flash"
-  );
+  const stored = (localStorage.getItem("gemini_selected_model") || "").trim();
+  const validIds = AVAILABLE_MODELS.map((m) => m.id);
+  if (!stored || !validIds.includes(stored as any) || stored.includes("1.5-pro") || stored.includes("preview")) {
+    localStorage.setItem("gemini_selected_model", "gemini-2.5-flash");
+    return "gemini-2.5-flash";
+  }
+  return stored;
 };
 
 export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
