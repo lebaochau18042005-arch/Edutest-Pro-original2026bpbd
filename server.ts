@@ -1618,20 +1618,22 @@ ${sanitizedText.substring(0, 150000)}
       let part: 1 | 2 | 3 = 1;
       const rawPartNum = Number(item.part);
 
-      // 1. ƯU TIÊN TUYỆT ĐỐI CHO PHẦN II (ĐÚNG / SAI)
-      if (hasRealStmts || hasStmtsFromContent || (rawPartNum === 2 && !hasRealOpts && !hasOptsFromContent)) {
-        part = 2;
-      }
-      // 2. PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN)
-      else if (hasRealOpts || hasOptsFromContent || (rawPartNum === 1 && !item.shortAnswer)) {
+      // 1. KHÓA CHẶT 100% THEO ĐỀ GỐC NẾU ĐÃ CÓ TIÊU ĐỀ PHẦN HOẶC QUESTION_TYPE:
+      if (rawPartNum === 1 || item.questionType === "multiple_choice") {
         part = 1;
-      }
-      // 3. PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
-      else if (rawPartNum === 3 || item.questionType === "short_answer" || item.shortAnswer) {
+      } else if (rawPartNum === 2 || item.questionType === "true_false") {
+        part = 2;
+      } else if (rawPartNum === 3 || item.questionType === "short_answer") {
         part = 3;
       }
-      // 4. FALLBACK THEO SỐ CÂU CHUẨN BGD
-      else if (totalRaw === 28) {
+      // 2. FALLBACK THEO DỮ LIỆU ĐẶC TRƯNG & MA TRẬN BGD NẾU CHƯA CÓ PART:
+      else if (hasRealStmts) {
+        part = 2;
+      } else if (hasRealOpts) {
+        part = 1;
+      } else if (item.shortAnswer) {
+        part = 3;
+      } else if (totalRaw === 28) {
         if (idx < 18) part = 1;
         else if (idx < 22) part = 2;
         else part = 3;
@@ -1640,7 +1642,7 @@ ${sanitizedText.substring(0, 150000)}
         else if (idx < 16) part = 2;
         else part = 3;
       } else {
-        part = 3;
+        part = 1;
       }
 
       const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";

@@ -686,23 +686,22 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
     let part: ExamPart = 1;
     const rawPartNum = Number(q.part);
 
-    // 1. NGUYÊN TẮC ƯU TIÊN TUYỆT ĐỐI CHO PHẦN II (TRẮC NGHIỆM ĐÚNG / SAI):
-    // Bất kỳ câu hỏi nào có chứa 4 mệnh đề a, b, c, d (trong statements hoặc trong content/passage/explanation)
-    // BẮT BUỘC 100% PHẢI LÀ PHẦN II (ĐÚNG / SAI), KHÔNG ĐƯỢC ĐỂ NHẢY SANG PHẦN III HOẶC PHẦN I!
-    if (hasAnyTrueFalseStatements || (rawPartNum === 2 && !hasRealOptions && !hasOptionsInContent)) {
-      part = 2;
-    }
-    // 2. NGUYÊN TẮC CHO PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN):
-    else if (hasRealOptions || hasOptionsInContent || (rawPartNum === 1 && !q.shortAnswer)) {
+    // 1. KHÓA CHẶT 100% THEO ĐỀ GỐC NẾU ĐÃ CÓ TIÊU ĐỀ PHẦN HOẶC QUESTION_TYPE:
+    if (rawPartNum === 1 || q.questionType === "multiple_choice") {
       part = 1;
-    }
-    // 3. NGUYÊN TẮC CHO PHẦN III (TRẮC NGHIỆM TRẢ LỜI NGẮN / ĐIỀN SỐ):
-    // Chỉ khi KHÔNG CÓ mệnh đề a, b, c, d và KHÔNG CÓ các phương án A, B, C, D
-    else if (rawPartNum === 3 || q.questionType === "short_answer" || q.shortAnswer) {
+    } else if (rawPartNum === 2 || q.questionType === "true_false") {
+      part = 2;
+    } else if (rawPartNum === 3 || q.questionType === "short_answer") {
       part = 3;
     }
-    // 4. FALLBACK THEO CẤU TRÚC SỐ CÂU CHUẨN CỦA BỘ GD&ĐT:
-    else if (total === 28) {
+    // 2. NẾU CHƯA CÓ PART XÁC ĐỊNH RÕ RÀNG -> DỰA VÀO DỮ LIỆU ĐẶC TRƯNG & MA TRẬN BGD:
+    else if (hasRealStatements) {
+      part = 2;
+    } else if (hasRealOptions) {
+      part = 1;
+    } else if (q.shortAnswer) {
+      part = 3;
+    } else if (total === 28) {
       if (idx < 18) part = 1;
       else if (idx < 22) part = 2;
       else part = 3;
@@ -710,8 +709,12 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       if (idx < 12) part = 1;
       else if (idx < 16) part = 2;
       else part = 3;
+    } else if (hasStatementsInContent) {
+      part = 2;
+    } else if (hasOptionsInContent) {
+      part = 1;
     } else {
-      part = 3;
+      part = 1;
     }
 
     const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
