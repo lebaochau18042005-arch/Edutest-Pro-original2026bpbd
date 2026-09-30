@@ -1542,10 +1542,14 @@ QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH & ĐỒ THỊ (CỰC KỲ 
    - "correctValue": true (Đúng) hoặc false (Sai).
    - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
 
-5. PHẦN III: Câu trắc nghiệm Trả lời ngắn / Điền số (Gồm 6 CÂU - 6 LỆNH HỎI, từ Câu 1 đến 6 hoặc 23 đến 28).
+5. PHẦN III: Câu trắc nghiệm Trả lời ngắn / Điền số (Thí sinh điền đáp án số hoặc biểu thức).
    - "part": 3, "questionType": "short_answer".
    - "shortAnswer": Kết quả ngắn dạng số hoặc text (VD: "28.3", "-1.5", "800", "64").
    - "options": BẮT BUỘC LÀ MẢNG RỖNG [].
+
+6. BẢO TOÀN CHÍNH XÁC 100% SỐ LƯỢNG CÂU HỎI (QUAN TRỌNG):
+   - Đề bài tải lên có bao nhiêu câu hỏi thì trích xuất ĐÚNG VÀ ĐỦ 100% bấy nhiêu câu hỏi.
+   - TUYỆT ĐỐI KHÔNG tự ý bỏ bớt câu hỏi, không gộp câu, và KHÔNG tự ý sinh thêm câu hỏi thừa!
 
 Văn bản đề thi:
 """

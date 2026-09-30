@@ -1355,6 +1355,9 @@ QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, BIỂU ĐỒ & BẢNG S�
    - NGHIÊM CẤM TUYỆT ĐỐI việc biến bảng số liệu thành dạng câu văn xuôi, đoạn văn hay kể lể số liệu!
    - Toàn bộ các giá trị, số liệu, năm, tỷ lệ, đơn vị phải nằm nguyên vẹn trong các ô của Bảng Markdown.
    - Bảng số liệu thuộc câu nào phải nằm đúng trong thuộc tính "content" của câu đó, và đặt "hasTableOrDiagram": true.
+7. BẢO TOÀN CHÍNH XÁC SỐ LƯỢNG CÂU HỎI (QUAN TRỌNG):
+   - Đề bài tải lên có bao nhiêu câu hỏi thì trích xuất ĐÚNG VÀ ĐỦ 100% bấy nhiêu câu hỏi.
+   - TUYỆT ĐỐI KHÔNG tự ý bỏ bớt câu hỏi, không gộp câu hỏi độc lập lại với nhau, và KHÔNG tự ý sinh thêm câu hỏi giả lập/dư thừa!
 
 Văn bản đề thi:
 """
@@ -1765,7 +1768,10 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN TH
 6. CÔNG THỨC TOÁN/LÝ/HÓA/SINH: Dùng LaTeX kẹp trong $...$ hoặc $$...$$ cho phân số, véc-tơ, chỉ số, đơn vị, công thức phân tử, ion, đồng vị và phản ứng hóa học.
    - Không làm mất chỉ số trên/dưới; ví dụ $H_2SO_4$, $Ca^{2+}$, $\\,{}^{14}_{6}C$, $m/s^2$, $10^{-3}$.
    - Bảo toàn chính xác chữ hoa/thường như f(x), pH, DNA, mRNA, tên gene và protein.
-   - Không thay công thức bằng ký tự đại diện hoặc ảnh trắng.`;
+   - Không thay công thức bằng ký tự đại diện hoặc ảnh trắng.
+7. BẢO TOÀN CHÍNH XÁC SỐ LƯỢNG CÂU HỎI (QUAN TRỌNG):
+   - Tài liệu/ảnh đề tải lên có bao nhiêu câu hỏi thì trích xuất ĐÚNG VÀ ĐỦ 100% bấy nhiêu câu hỏi.
+   - TUYỆT ĐỐI KHÔNG tự ý bỏ bớt câu hỏi hoặc sinh thêm câu hỏi thừa!`;
 
     const contents = [
       {
