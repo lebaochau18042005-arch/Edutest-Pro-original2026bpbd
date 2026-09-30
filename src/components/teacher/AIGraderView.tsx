@@ -214,8 +214,8 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     const isMath = (exam.config.subject || "").toLowerCase().includes("toán");
     const items: RubricItem[] = variant.questions.map((q) => {
       let points = 0.25;
-      if (q.part === 2) points = 1.0;
-      else if (q.part === 3) points = isMath ? 0.5 : 0.25;
+      if (q.part === 2 || q.questionType === "true_false") points = 1.0;
+      else if (q.part === 3 || q.questionType === "short_answer") points = isMath ? 0.5 : 0.25;
 
       let corAns = "";
       if (q.part === 1 || q.questionType === "multiple_choice") {
@@ -230,11 +230,14 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
       return {
         questionIndex: q.questionIndex,
+        part: q.part || (q.questionType === "multiple_choice" ? 1 : q.questionType === "true_false" ? 2 : 3),
         content: q.content,
         correctAnswer: corAns,
         points,
         criteria: q.explanation || "",
         questionType: q.questionType,
+        statements: q.statements,
+        options: q.options,
       };
     });
 
@@ -440,10 +443,14 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
         });
 
         if (json.success && json.data) {
+          const finalResult = {
+            ...json.data,
+            fileData: json.data.fileData || (base64Data && base64Data.length < 3000000 ? base64Data : undefined),
+          };
           item.status = "success";
-          item.result = json.data;
+          item.result = finalResult;
           // Add to overall graded papers list immediately
-          setGradedPapers((prev) => [json.data, ...prev.filter((p) => p.id !== json.data.id)]);
+          setGradedPapers((prev) => [finalResult, ...prev.filter((p) => p.id !== finalResult.id)]);
         } else {
           item.status = "error";
           item.errorMsg = json.error || "Không thể chấm bài này";

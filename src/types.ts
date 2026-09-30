@@ -345,11 +345,14 @@ export interface GradedPaperResult {
 
 export interface RubricItem {
   questionIndex: number | string;
+  part?: number | string;
   content?: string;
   correctAnswer: string;
   points: number;
   criteria?: string;
   questionType?: QuestionType | "essay" | "fill_in";
+  statements?: any[];
+  options?: string[];
 }
 
 export interface ExamRubric {

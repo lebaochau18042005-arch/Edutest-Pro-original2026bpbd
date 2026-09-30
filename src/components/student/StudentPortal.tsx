@@ -525,10 +525,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         reader.onload = async () => {
           const base64 = reader.result as string;
           const targetVariant = foundExam.variants.find((v) => v.examCode === selectedVariantCode) || foundExam.variants[0];
+          const isMath = (foundExam.config.subject || "").toLowerCase().includes("toán");
           const rubricItems = targetVariant ? targetVariant.questions.map((q) => {
             let points = 0.25;
-            if (q.part === 2) points = 1.0;
-            else if (q.part === 3) points = 0.5;
+            if (q.part === 2 || q.questionType === "true_false") points = 1.0;
+            else if (q.part === 3 || q.questionType === "short_answer") points = isMath ? 0.5 : 0.25;
+            
             let corAns = "";
             if (q.part === 1 || q.questionType === "multiple_choice") {
               const letter = ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A";
@@ -541,11 +543,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             }
             return {
               questionIndex: q.questionIndex,
+              part: q.part || (q.questionType === "multiple_choice" ? 1 : q.questionType === "true_false" ? 2 : 3),
               content: q.content,
               correctAnswer: corAns,
               points,
               criteria: q.explanation || "",
               questionType: q.questionType,
+              statements: q.statements,
+              options: q.options,
             };
           }) : [];
 
@@ -577,6 +582,74 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           if (json.success && json.data) {
             setGradedPaperResult(json.data);
             setPortalState("paper_result");
+
+            // Auto-persist submission to student history and cloud
+            try {
+              const detailMap: Record<number, any> = {};
+              let correctCount = 0;
+              let wrongCount = 0;
+              let p1Score = 0;
+              let p2Score = 0;
+              let p3Score = 0;
+
+              (json.data.details || []).forEach((d: any) => {
+                const qIdx = Number(d.questionIndex) || 1;
+                detailMap[qIdx] = {
+                  questionIndex: qIdx,
+                  isCorrect: d.status === "correct",
+                  studentAnswer: d.studentAnswer,
+                  correctAnswer: d.teacherAnswer,
+                  pointsAwarded: d.pointsAwarded,
+                  maxPoints: d.maxPoints,
+                  feedback: d.feedback,
+                };
+                if (d.status === "correct") correctCount++;
+                else if (d.status === "incorrect") wrongCount++;
+
+                const dPart = d.part;
+                if (dPart === "part1" || dPart === 1 || qIdx <= 12) p1Score += (Number(d.pointsAwarded) || 0);
+                else if (dPart === "part2" || dPart === 2 || (qIdx > 12 && qIdx <= 16)) p2Score += (Number(d.pointsAwarded) || 0);
+                else p3Score += (Number(d.pointsAwarded) || 0);
+              });
+
+              const autoSub: StudentSubmission = {
+                id: json.data.id || `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                examId: foundExam.id,
+                examTitle: foundExam.title,
+                examCode: json.data.examCode || selectedVariantCode || "101",
+                studentName: json.data.studentName || studentName,
+                studentClass: json.data.studentClass || studentClass,
+                school: school || "THPT",
+                grade: foundExam.config.grade || grade || "Khối 12",
+                studentId: json.data.sbd || json.data.studentId || studentId || "",
+                startedAt: new Date(Date.now() - 60000).toISOString(),
+                submittedAt: new Date().toISOString(),
+                durationTakenSeconds: 60,
+                answers: detailMap,
+                correctCount,
+                wrongCount,
+                unansweredCount: Math.max(0, (targetVariant?.questions?.length || 0) - correctCount - wrongCount),
+                totalQuestions: targetVariant?.questions?.length || json.data.details?.length || 0,
+                score: json.data.totalScore,
+                maxScore: json.data.maxScore || foundExam.config.maxScore || 10.0,
+                part1Score: Number(p1Score.toFixed(2)),
+                part2Score: Number(p2Score.toFixed(2)),
+                part3Score: Number(p3Score.toFixed(2)),
+                detailedResults: detailMap,
+                isLockedDueToCheating: false,
+                tabSwitchCount: 0,
+                violationLogs: [],
+                syncedToGoogleSheet: false,
+                status: "submitted",
+                classroomId: chosenClassId,
+                assignmentId: chosenAssignmentId,
+              };
+
+              onSubmissionComplete(autoSub);
+              submitExamToCloud(autoSub).catch(() => {});
+            } catch (syncErr) {
+              console.warn("Could not sync graded paper as submission:", syncErr);
+            }
           } else {
             setEntryError(json.error || "Không thể chấm bài làm này. Vui lòng thử lại.");
           }

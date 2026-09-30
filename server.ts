@@ -3038,13 +3038,87 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC CẤU HÌNH.`;
 
     const parsedResult = JSON.parse(response.text);
 
+    // 1. Re-verify & guarantee all rubric items are in details
+    const rubricItems = resolvedRubric.items || [];
+    const detailsMap = new Map<string, any>();
+    (parsedResult.details || []).forEach((d: any) => {
+      detailsMap.set(String(d.questionIndex), d);
+    });
+
+    const finalizedDetails = rubricItems.map((rItem: any, idx: number) => {
+      const qNum = rItem.questionIndex ?? idx + 1;
+      const matched = detailsMap.get(String(qNum));
+      const maxPts = Number(rItem.points) || (rItem.part === 2 || rItem.questionType === "true_false" ? 1.0 : rItem.part === 3 || rItem.questionType === "short_answer" ? 0.5 : 0.25);
+
+      if (!matched) {
+        return {
+          questionIndex: qNum,
+          part: rItem.part ? `part${rItem.part}` : (idx < 12 ? "part1" : idx < 16 ? "part2" : "part3"),
+          questionContent: rItem.content || `Câu ${qNum}`,
+          studentAnswer: "Chưa làm / Bỏ trống",
+          teacherAnswer: String(rItem.correctAnswer || ""),
+          pointsAwarded: 0,
+          maxPoints: maxPts,
+          status: "ungraded" as const,
+          feedback: "Không tìm thấy câu trả lời trên bài làm.",
+        };
+      }
+
+      let pts = typeof matched.pointsAwarded === "number" ? matched.pointsAwarded : Number(matched.pointsAwarded) || 0;
+      let status = matched.status || (pts >= maxPts ? "correct" : pts > 0 ? "partial" : "incorrect");
+
+      // Auto-validate Part 2 (True/False) score with official MOET formula
+      if (rItem.part === 2 || rItem.questionType === "true_false" || matched.part === "part2") {
+        const studentAnsStr = String(matched.studentAnswer || "");
+        if (rItem.statements && Array.isArray(rItem.statements) && rItem.statements.length > 0) {
+          let subCorrectCount = 0;
+          const totalSubCount = rItem.statements.length;
+          rItem.statements.forEach((stmt: any) => {
+            const label = (stmt.label || stmt.id || "").replace(/[^a-d]/gi, "").toLowerCase();
+            const expectedVal = Boolean(stmt.correctValue);
+            const subRegex = new RegExp(`(?:${label}\\s*[:.)\\-\\s]*|\\b${label}\\b[\\s:.)\\-]*)(Đúng|Sai|Đ|S|True|False|T|F)`, "i");
+            const m = studentAnsStr.match(subRegex);
+            if (m) {
+              const studentVal = /^(?:Đúng|Đ|True|T)$/i.test(m[1]);
+              if (studentVal === expectedVal) subCorrectCount++;
+            }
+          });
+
+          if (subCorrectCount > 0 && subCorrectCount <= totalSubCount) {
+            if (subCorrectCount === 1) pts = 0.1 * (maxPts / 1.0);
+            else if (subCorrectCount === 2) pts = 0.25 * (maxPts / 1.0);
+            else if (subCorrectCount === 3) pts = 0.50 * (maxPts / 1.0);
+            else if (subCorrectCount === 4) pts = 1.00 * (maxPts / 1.0);
+            pts = Number(pts.toFixed(2));
+            status = subCorrectCount === 4 ? "correct" : "partial";
+          }
+        }
+      }
+
+      pts = Math.max(0, Math.min(maxPts, pts));
+
+      return {
+        questionIndex: qNum,
+        part: matched.part || (rItem.part ? `part${rItem.part}` : (idx < 12 ? "part1" : idx < 16 ? "part2" : "part3")),
+        questionContent: matched.questionContent || rItem.content || `Câu ${qNum}`,
+        studentAnswer: matched.studentAnswer || "Chưa làm / Bỏ trống",
+        teacherAnswer: matched.teacherAnswer || String(rItem.correctAnswer || ""),
+        pointsAwarded: pts,
+        maxPoints: maxPts,
+        status,
+        feedback: matched.feedback || (status === "correct" ? "Chính xác." : "Sai hoặc chưa đúng đáp án chuẩn."),
+      };
+    });
+
+    const effectiveDetails = finalizedDetails.length > 0 ? finalizedDetails : (parsedResult.details || []);
+
     // Finalize score and structure
-    const calculatedScore = parsedResult.details.reduce(
+    const calculatedScore = effectiveDetails.reduce(
       (acc: number, d: any) => acc + (Number(d.pointsAwarded) || 0),
       0
     );
-    const maxScore = parsedResult.maxScore || resolvedRubric.maxScore || 10.0;
-    const finalScore = Math.min(maxScore, Math.max(0, Number((parsedResult.totalScore ?? calculatedScore).toFixed(2))));
+    const maxScore = Number(resolvedRubric.maxScore) || 10.0;
+    const finalScore = Math.min(maxScore, Math.max(0, Number(calculatedScore.toFixed(2))));
 
     let classification = parsedResult.gradeClassification;
     if (!classification) {
@@ -3059,8 +3133,8 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC CẤU HÌNH.`;
       id: `graded-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       studentName: studentNameOverride || parsedResult.studentName || "Học sinh",
       studentClass: studentClassOverride || parsedResult.studentClass || "12A",
-      studentId: parsedResult.studentId || `HS${Math.floor(1000 + Math.random() * 9000)}`,
-      sbd: parsedResult.sbd || "100016",
+      studentId: parsedResult.studentId || parsedResult.sbd || `HS${Math.floor(1000 + Math.random() * 9000)}`,
+      sbd: parsedResult.sbd || parsedResult.studentId || "100016",
       examCode: parsedResult.examCode || resolvedRubric.examCode || "108",
       detectedExamCode: parsedResult.examCode || resolvedRubric.examCode || "108",
       examTitle: resolvedRubric.title || "Bài kiểm tra",
@@ -3072,17 +3146,7 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC CẤU HÌNH.`;
       maxScore,
       gradeClassification: classification,
       summaryEvaluation: parsedResult.summaryEvaluation || "Đã hoàn thành chấm điểm chi tiết bằng AI.",
-      details: parsedResult.details.map((d: any) => ({
-        questionIndex: d.questionIndex,
-        part: d.part || (d.questionIndex <= 12 ? "part1" : d.questionIndex <= 16 ? "part2" : "part3"),
-        questionContent: d.questionContent || "",
-        studentAnswer: d.studentAnswer || "Chưa làm / Bỏ trống",
-        teacherAnswer: d.teacherAnswer || "",
-        pointsAwarded: Number(d.pointsAwarded) || 0,
-        maxPoints: Number(d.maxPoints) || (d.part === "part2" ? 1.0 : 0.25),
-        status: d.status || (d.pointsAwarded > 0 ? (d.pointsAwarded === d.maxPoints ? "correct" : "partial") : "incorrect"),
-        feedback: d.feedback || "",
-      })),
+      details: effectiveDetails,
       bubbleCoordinates: parsedResult.bubbleCoordinates || [],
       teacherNotes: "",
       isReviewedByTeacher: false,

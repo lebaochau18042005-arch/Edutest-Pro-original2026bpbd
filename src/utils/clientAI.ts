@@ -2115,27 +2115,80 @@ export async function clientGradePaper(payload: {
     const { paperFile, rubric, studentNameOverride, studentClassOverride, gradingStrictness, apiKey, model } = payload;
     const cleanBase64 = paperFile.data.replace(/^data:[^;]+;base64,/, "");
 
-    const promptText = `Bạn là giám khảo chấm thi AI công tâm, chính xác.
-Hãy đọc ảnh / bài làm của học sinh đính kèm, đối chiếu với Biểu điểm (Rubric) sau đây để chấm điểm chi tiết:
+    const promptText = `Bạn là Chuyên gia Khảo thí và Giám khảo Chấm thi AI Thông minh, cẩn trọng và chuẩn mực của Bộ GD&ĐT Việt Nam (OMR Pro Vision Grader).
+Nhiệm vụ của bạn là đọc và chấm điểm bài làm của học sinh trong tài liệu đính kèm (${paperFile.fileName || "Bài làm"}) dựa trên ĐÁP ÁN & BIỂU ĐIỂM CHUẨN sau đây.
 
-BIỂU ĐIỂM CHUẨN:
-${JSON.stringify(rubric?.items || [], null, 2)}
+THÔNG TIN ĐỀ & ĐÁP ÁN BIỂU ĐIỂM CHUẨN:
+- Tên đề: ${rubric?.title || "Bài kiểm tra"}
+- Môn học: ${rubric?.subject || "Tổng hợp"}
+- Thang điểm tối đa: ${rubric?.maxScore || 10.0}
+- Mã đề chuẩn: ${rubric?.examCode || "101"}
+- Mức độ chấm: ${gradingStrictness === "strict" ? "Nghiêm ngặt, trừ điểm nếu thiếu bước/đơn vị" : "Tiêu chuẩn Bộ GD&ĐT, cho điểm theo ý đúng"}
 
-Mức độ chấm: ${gradingStrictness || "standard"} (linh hoạt cho điểm từng bước theo tiến trình).
+DANH SÁCH CÂU HỎI VÀ ĐÁP ÁN BIỂU ĐIỂM CHUẨN:
+${JSON.stringify(
+  (rubric?.items || []).map((it: any) => ({
+    cau: it.questionIndex,
+    part: it.part || (it.questionType === "multiple_choice" ? 1 : it.questionType === "true_false" ? 2 : it.questionType === "short_answer" ? 3 : 1),
+    noi_dung_cau_hoi: it.content,
+    dap_an_dung_cua_giao_vien: it.correctAnswer,
+    diem_toi_da: it.points,
+    tieu_chi: it.criteria,
+    dang: it.questionType,
+    statements: it.statements,
+    options: it.options,
+  })),
+  null,
+  2
+)}
 
-Yêu cầu:
-1. Nhận diện Họ và tên học sinh, Lớp từ đầu trang bài làm (nếu có).
-2. Chấm từng câu trong biểu điểm:
-   - questionIndex: số thứ tự câu
-   - questionContent: nội dung tóm tắt
-   - studentAnswer: câu trả lời của học sinh đọc được từ bài làm
-   - teacherAnswer: đáp án đúng từ rubric
-   - pointsAwarded: số điểm chấm cho câu này
-   - maxPoints: điểm tối đa câu này
-   - status: "correct" | "partial" | "incorrect"
-   - feedback: nhận xét ngắn gọn tại sao đúng/sai/thiếu ý
-3. Tính totalScore (tổng điểm đạt được) và maxScore (tổng điểm tối đa).
-4. Viết summaryEvaluation (nhận xét tổng thể) và teacherNotes (lời khuyên học sinh).`;
+HƯỚNG DẪN QUY TRÌNH CHẤM BÀI & NHẬN DIỆN PHIẾU TRẮC NGHIỆM (OMR / VIẾT TAY / TỰ LUẬN):
+1. NHẬN DIỆN THÔNG TIN THÍ SINH TỪ ĐẦU BÀI LÀM:
+   - Họ và tên học sinh (studentName): Đọc chữ viết tay hoặc in tên học sinh.
+   - Lớp (studentClass): Nhận diện lớp (ví dụ: 12A1, 12B...).
+   - Số báo danh (sbd / studentId): Đọc 6 chữ số học sinh đã tô đen kín ô tròn ở khung SBD hoặc viết tay (ví dụ: 100016, 012345...).
+   - Mã đề thi (examCode): Đọc 3 hoặc 4 chữ số học sinh đã tô hoặc viết ở khung Mã đề thi (ví dụ: 101, 102, 108, 9001...).
+
+2. TRÍCH XUẤT CÂU TRẢ LỜI CỦA HỌC SINH CHO TỪNG CÂU HỎI THEO 3 DẠNG THỨC CHUẨN CỦA BỘ GD&ĐT:
+   - PHẦN I (Trắc nghiệm 4 lựa chọn A, B, C, D):
+     * Nhận diện chữ cái phương án (A, B, C, D) mà thí sinh đã tô tròn đậm kín ô.
+     * So sánh với đáp án giáo viên: Nếu trùng khớp -> status: "correct", pointsAwarded: maxPoints (thường 0.25đ); nếu sai -> status: "incorrect", pointsAwarded: 0; nếu để trống -> studentAnswer: "Chưa làm / Bỏ trống", status: "ungraded", pointsAwarded: 0.
+   
+   - PHẦN II (Trắc nghiệm Đúng / Sai gồm 4 ý a, b, c, d):
+     * Nhận diện từng ý a, b, c, d thí sinh tô Đúng [Đ] hay Sai [S].
+     * Trả về studentAnswer dưới định dạng rõ: "a: Đ, b: S, c: Đ, d: S" (hoặc "Đ - S - Đ - S").
+     * Đối chiếu từng ý với đáp án chuẩn của giáo viên và ĐẾM SỐ Ý ĐÚNG.
+     * QUY TẮC TÍNH ĐIỂM CHUẨN CỦA BỘ GD&ĐT CHO PHẦN II:
+       - Đúng 1 ý: 0.1 điểm (hoặc 10% điểm tối đa câu)
+       - Đúng 2 ý: 0.25 điểm (hoặc 25% điểm tối đa câu)
+       - Đúng 3 ý: 0.50 điểm (hoặc 50% điểm tối đa câu)
+       - Đúng 4 ý: 1.00 điểm (hoặc 100% điểm tối đa câu)
+       - Đúng 0 ý: 0 điểm
+       - Trạng thái status: Đúng cả 4 ý -> "correct"; Đúng 1, 2, hoặc 3 ý -> "partial"; Đúng 0 ý -> "incorrect".
+
+   - PHẦN III (Trắc nghiệm Trả lời ngắn / Điền số):
+     * Đọc giá trị số thí sinh ghi ở ô trên và tô ở các cột dấu (-, ,) và chữ số (0-9).
+     * Trả về studentAnswer là chuỗi giá trị số (ví dụ: "40", "-2.5", "12", "0.75", "1/2").
+     * So sánh với đáp án giáo viên: Nếu đúng giá trị -> status: "correct", pointsAwarded: maxPoints (thường 0.5đ hoặc 0.25đ); nếu sai -> status: "incorrect", pointsAwarded: 0.
+
+   - PHẦN TỰ LUẬN / BÀI LÀM VIẾT TAY (Nếu có):
+     * Đọc các bước làm, công thức, biến đổi và kết quả cuối cùng.
+     * Chấm điểm từng bước theo tiêu chí và mức độ nghiêm ngặt.
+
+3. TRÍCH XUẤT TỌA ĐỘ Ô BONG BÓNG ĐÃ TÔ (bubbleCoordinates - Dành cho phiếu OMR):
+   - xPercent: Tọa độ ngang (0-100% chiều rộng ảnh).
+   - yPercent: Tọa độ dọc (0-100% chiều cao ảnh).
+   - option: Phương án ("A", "B", "C", "D", "Đ", "S", hoặc chữ số).
+   - part: "part1" | "part2" | "part3" | "sbd" | "code".
+   - questionIndex: Số câu hỏi.
+   - state: "correct" (tô đúng) | "incorrect" (tô sai) | "missed_correct" (đáp án đúng bị bỏ sót).
+
+4. BẢO TOÀN VÀ TỔNG KẾT TOÀN BỘ CÂU HỎI (CRITICAL INTEGRITY):
+   - MẢNG details PHẢI CHỨA ĐỦ TẤT CẢ CÁC CÂU HỎI CÓ TRONG BIỂU ĐIỂM (không được bỏ sót bất kỳ câu nào).
+   - totalScore: Tổng số điểm đạt được của toàn bộ bài thi = tổng các pointsAwarded của từng câu (làm tròn 2 chữ số thập phân, tối đa ${rubric?.maxScore || 10.0}).
+   - gradeClassification: "Xuất sắc" (>= 9.0), "Giỏi" (>= 8.0), "Khá" (>= 6.5), "Trung bình" (>= 5.0), "Yếu" (< 5.0).
+   - summaryEvaluation: Nhận xét tổng quan ưu điểm, nhược điểm và lỗi sai cần khắc phục.
+   - teacherNotes: Lời khuyên cụ thể cho học sinh.`;
 
     const contents = [
       {
@@ -2160,6 +2213,7 @@ Yêu cầu:
           studentName: { type: Type.STRING },
           studentClass: { type: Type.STRING },
           studentId: { type: Type.STRING },
+          sbd: { type: Type.STRING },
           examCode: { type: Type.STRING },
           totalScore: { type: Type.NUMBER },
           maxScore: { type: Type.NUMBER },
@@ -2172,6 +2226,7 @@ Yêu cầu:
               type: Type.OBJECT,
               properties: {
                 questionIndex: { type: Type.INTEGER },
+                part: { type: Type.STRING },
                 questionContent: { type: Type.STRING },
                 studentAnswer: { type: Type.STRING },
                 teacherAnswer: { type: Type.STRING },
@@ -2183,30 +2238,136 @@ Yêu cầu:
               required: ["questionIndex", "pointsAwarded", "maxPoints", "status"],
             },
           },
+          bubbleCoordinates: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                xPercent: { type: Type.NUMBER },
+                yPercent: { type: Type.NUMBER },
+                part: { type: Type.STRING },
+                questionIndex: { type: Type.STRING },
+                option: { type: Type.STRING },
+                state: { type: Type.STRING },
+              },
+              required: ["xPercent", "yPercent", "state", "option"],
+            },
+          },
         },
-        required: ["totalScore", "maxScore", "details"],
+        required: ["totalScore", "summaryEvaluation", "details"],
       },
     };
 
     const text = await generateWithFallback(contents, apiKey, model, config);
     const result = safeJsonParse<any>(text, {});
 
+    // 1. Re-verify & guarantee all rubric items are in details
+    const rubricItems = rubric?.items || [];
+    const detailsMap = new Map<string, any>();
+    (result.details || []).forEach((d: any) => {
+      detailsMap.set(String(d.questionIndex), d);
+    });
+
+    const finalizedDetails = rubricItems.map((rItem: any, idx: number) => {
+      const qNum = rItem.questionIndex ?? idx + 1;
+      const matched = detailsMap.get(String(qNum));
+      const maxPts = Number(rItem.points) || (rItem.part === 2 || rItem.questionType === "true_false" ? 1.0 : rItem.part === 3 || rItem.questionType === "short_answer" ? 0.5 : 0.25);
+
+      if (!matched) {
+        return {
+          questionIndex: qNum,
+          part: rItem.part ? `part${rItem.part}` : (idx < 12 ? "part1" : idx < 16 ? "part2" : "part3"),
+          questionContent: rItem.content || `Câu ${qNum}`,
+          studentAnswer: "Chưa làm / Bỏ trống",
+          teacherAnswer: String(rItem.correctAnswer || ""),
+          pointsAwarded: 0,
+          maxPoints: maxPts,
+          status: "ungraded" as const,
+          feedback: "Không tìm thấy câu trả lời trên bài làm.",
+        };
+      }
+
+      let pts = typeof matched.pointsAwarded === "number" ? matched.pointsAwarded : Number(matched.pointsAwarded) || 0;
+      let status = matched.status || (pts >= maxPts ? "correct" : pts > 0 ? "partial" : "incorrect");
+
+      // Auto-validate Part 2 (True/False) score with official MOET formula
+      if (rItem.part === 2 || rItem.questionType === "true_false" || matched.part === "part2") {
+        const studentAnsStr = String(matched.studentAnswer || "");
+        if (rItem.statements && Array.isArray(rItem.statements) && rItem.statements.length > 0) {
+          let subCorrectCount = 0;
+          const totalSubCount = rItem.statements.length;
+          rItem.statements.forEach((stmt: any) => {
+            const label = (stmt.label || stmt.id || "").replace(/[^a-d]/gi, "").toLowerCase();
+            const expectedVal = Boolean(stmt.correctValue);
+            const subRegex = new RegExp(`(?:${label}\\s*[:.)\\-\\s]*|\\b${label}\\b[\\s:.)\\-]*)(Đúng|Sai|Đ|S|True|False|T|F)`, "i");
+            const m = studentAnsStr.match(subRegex);
+            if (m) {
+              const studentVal = /^(?:Đúng|Đ|True|T)$/i.test(m[1]);
+              if (studentVal === expectedVal) subCorrectCount++;
+            }
+          });
+
+          if (subCorrectCount > 0 && subCorrectCount <= totalSubCount) {
+            if (subCorrectCount === 1) pts = 0.1 * (maxPts / 1.0);
+            else if (subCorrectCount === 2) pts = 0.25 * (maxPts / 1.0);
+            else if (subCorrectCount === 3) pts = 0.50 * (maxPts / 1.0);
+            else if (subCorrectCount === 4) pts = 1.00 * (maxPts / 1.0);
+            pts = Number(pts.toFixed(2));
+            status = subCorrectCount === 4 ? "correct" : "partial";
+          }
+        }
+      }
+
+      pts = Math.max(0, Math.min(maxPts, pts));
+
+      return {
+        questionIndex: qNum,
+        part: matched.part || (rItem.part ? `part${rItem.part}` : (idx < 12 ? "part1" : idx < 16 ? "part2" : "part3")),
+        questionContent: matched.questionContent || rItem.content || `Câu ${qNum}`,
+        studentAnswer: matched.studentAnswer || "Chưa làm / Bỏ trống",
+        teacherAnswer: matched.teacherAnswer || String(rItem.correctAnswer || ""),
+        pointsAwarded: pts,
+        maxPoints: maxPts,
+        status,
+        feedback: matched.feedback || (status === "correct" ? "Chính xác." : "Sai hoặc chưa đúng đáp án chuẩn."),
+      };
+    });
+
+    // If rubric was not pre-populated, use result.details directly
+    const effectiveDetails = finalizedDetails.length > 0 ? finalizedDetails : (result.details || []);
+
+    // Recalculate totalScore precisely
+    const calculatedSum = effectiveDetails.reduce((sum: number, d: any) => sum + (Number(d.pointsAwarded) || 0), 0);
+    const maxScore = Number(rubric?.maxScore) || 10.0;
+    const finalTotalScore = Math.min(maxScore, Math.max(0, Number(calculatedSum.toFixed(2))));
+
+    let classification: "Xuất sắc" | "Giỏi" | "Khá" | "Trung bình" | "Yếu" = "Khá";
+    if (finalTotalScore >= 9.0) classification = "Xuất sắc";
+    else if (finalTotalScore >= 8.0) classification = "Giỏi";
+    else if (finalTotalScore >= 6.5) classification = "Khá";
+    else if (finalTotalScore >= 5.0) classification = "Trung bình";
+    else classification = "Yếu";
+
     const gradedPaper = {
       id: `graded_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       studentName: studentNameOverride || result.studentName || "Học sinh",
       studentClass: studentClassOverride || result.studentClass || "12A",
-      studentId: result.studentId || "",
-      examCode: result.examCode || "101",
+      studentId: result.studentId || result.sbd || "",
+      sbd: result.sbd || result.studentId || "",
+      examCode: result.examCode || rubric?.examCode || "101",
+      detectedExamCode: result.examCode || rubric?.examCode || "101",
       examTitle: rubric?.title || "Bài kiểm tra",
       fileName: paperFile.fileName,
+      fileData: paperFile.data ? (paperFile.data.length < 2000000 ? paperFile.data : undefined) : undefined,
       fileType: paperFile.mimeType?.includes("pdf") ? "pdf" : "image",
       gradedAt: new Date().toISOString(),
-      totalScore: Number(result.totalScore) || 0,
-      maxScore: Number(result.maxScore) || 10,
-      gradeClassification: result.gradeClassification || "Khá",
-      summaryEvaluation: result.summaryEvaluation || "Đã hoàn thành chấm bài bằng AI.",
+      totalScore: finalTotalScore,
+      maxScore,
+      gradeClassification: (result.gradeClassification as any) || classification,
+      summaryEvaluation: result.summaryEvaluation || "Đã hoàn thành chấm điểm chi tiết bằng AI.",
       teacherNotes: result.teacherNotes || "",
-      details: result.details || [],
+      details: effectiveDetails,
+      bubbleCoordinates: result.bubbleCoordinates || [],
       isReviewedByTeacher: false,
     };
 
