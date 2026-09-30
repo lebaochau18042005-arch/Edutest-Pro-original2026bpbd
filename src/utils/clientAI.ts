@@ -1130,6 +1130,85 @@ export function mergeParsedQuestionsWithSource(
   parsedQuestions: Question[],
   sourceQuestions: Question[]
 ): Question[] {
+  if (!sourceQuestions || sourceQuestions.length === 0) return parsedQuestions;
+  if (!parsedQuestions || parsedQuestions.length === 0) return sourceQuestions;
+
+  // Case 1: Exact 1-to-1 matching when question counts match
+  if (parsedQuestions.length === sourceQuestions.length) {
+    return parsedQuestions.map((parsedQ, idx) => {
+      const sourceQ = sourceQuestions[idx];
+      // Authoritative part is determined by the source question's intrinsic format
+      const targetPart = (sourceQ.part as (1 | 2 | 3)) || (parsedQ.part as (1 | 2 | 3)) || 1;
+      const questionType: QuestionType =
+        targetPart === 2 ? "true_false" : targetPart === 3 ? "short_answer" : "multiple_choice";
+
+      // Preserve options if Part 1
+      let options: string[] = [];
+      if (targetPart === 1) {
+        const sourceOpts = (sourceQ.options || []).filter((o) => !isSyntheticPlaceholder(o));
+        const parsedOpts = (parsedQ.options || []).filter((o) => !isSyntheticPlaceholder(o));
+        options = (sourceOpts.length >= 2 ? sourceOpts : parsedOpts).slice(0, 4);
+      }
+
+      // Preserve statements if Part 2
+      let statements: TrueFalseStatement[] | undefined = undefined;
+      if (targetPart === 2) {
+        const sourceStmts = (sourceQ.statements || []).filter((s) => s && !isSyntheticPlaceholder(s.text));
+        const parsedStmts = (parsedQ.statements || []).filter((s) => s && !isSyntheticPlaceholder(s.text));
+
+        // Use source statement text (authoritative verbatim text from Word/doc), enriched with AI correctValue
+        const aiValues: Record<string, boolean> = {};
+        (parsedQ.statements || []).forEach((s) => {
+          if (s.id && typeof s.correctValue === "boolean") {
+            aiValues[s.id.toLowerCase()] = s.correctValue;
+          }
+        });
+
+        const baseStmts = sourceStmts.length >= 2 ? sourceStmts : parsedStmts;
+        if (baseStmts.length >= 2) {
+          statements = baseStmts.map((s) => {
+            const id = (s.id || "a").toLowerCase();
+            return {
+              id,
+              label: `${id})`,
+              text: s.text,
+              correctValue: aiValues[id] !== undefined ? aiValues[id] : Boolean(s.correctValue),
+              explanation: s.explanation,
+            };
+          });
+        }
+      }
+
+      // Merge content preserving tables and diagrams
+      const content = mergeQuestionContentPreservingTablesAndDiagrams(
+        parsedQ.content || "",
+        sourceQ.content || ""
+      );
+
+      return {
+        ...parsedQ,
+        part: targetPart,
+        questionType,
+        content,
+        options: targetPart === 1 ? options : [],
+        statements: targetPart === 2 ? statements : undefined,
+        shortAnswer: targetPart === 3 ? (parsedQ.shortAnswer || sourceQ.shortAnswer || "") : undefined,
+        correctIndex: typeof parsedQ.correctIndex === "number" ? parsedQ.correctIndex : (sourceQ.correctIndex ?? 0),
+        passageContent: sourceQ.passageContent || parsedQ.passageContent,
+        hasTableOrDiagram: Boolean(
+          parsedQ.hasTableOrDiagram ||
+          sourceQ.hasTableOrDiagram ||
+          content.includes("![") ||
+          content.includes("__IMG_TOKEN_") ||
+          content.includes("|")
+        ),
+        diagramUrl: parsedQ.diagramUrl || sourceQ.diagramUrl,
+        needsReview: Boolean(parsedQ.needsReview),
+      };
+    });
+  }
+
+  // Case 2: Different question counts (e.g. AI combined or split questions)
   const sourceByPart: Record<1 | 2 | 3, Question[]> = {
     1: sourceQuestions.filter((q) => q.part === 1),
     2: sourceQuestions.filter((q) => q.part === 2),
@@ -1137,26 +1216,15 @@ export function mergeParsedQuestionsWithSource(
   };
   const partOffsets: Record<1 | 2 | 3, number> = { 1: 0, 2: 0, 3: 0 };
 
-  return parsedQuestions.map((question, qIdx) => {
+  return parsedQuestions.map((question) => {
     const part = question.part === 2 ? 2 : question.part === 3 ? 3 : 1;
-    let source = sourceByPart[part][partOffsets[part]++];
-    if (!source && sourceQuestions.length === parsedQuestions.length) {
-      const candidate = sourceQuestions[qIdx];
-      if (candidate && (candidate.part === part || (!candidate.part && part === 1))) {
-        source = candidate;
-      }
-    }
+    const source = sourceByPart[part][partOffsets[part]++];
     if (!source) {
       return {
         ...question,
         options: part === 1 ? (question.options || []) : [],
         statements: part === 2 ? question.statements : undefined,
         shortAnswer: part === 3 ? (question.shortAnswer || "") : undefined,
-        needsReview: Boolean(
-          question.needsReview ||
-            (part === 1 && question.options.filter((o) => !isSyntheticPlaceholder(o)).length !== 4) ||
-            (part === 2 && (question.statements || []).filter((s) => !isSyntheticPlaceholder(s.text)).length !== 4)
-        ),
       };
     }
 
@@ -1200,13 +1268,7 @@ export function mergeParsedQuestionsWithSource(
       });
     }
 
-    // Preserve data tables and diagrams
     const content = mergeQuestionContentPreservingTablesAndDiagrams(parsedContent, sourceContent);
-    const isIncomplete =
-      !content ||
-      (part === 1 && options.length !== 4) ||
-      (part === 2 && (statements?.length || 0) !== 4);
-
     return {
       ...question,
       content,
@@ -1222,7 +1284,6 @@ export function mergeParsedQuestionsWithSource(
           content.includes("|")
       ),
       diagramUrl: question.diagramUrl || source.diagramUrl,
-      needsReview: Boolean(question.needsReview || isIncomplete),
     };
   });
 }
@@ -1451,7 +1512,8 @@ ${rawText.slice(0, 50000)}
     // This is the most reliable fallback since rawText contains 100% of the original document.
     const sourceMerged = mergeParsedQuestionsWithSource(formatted, fallbackParseExam(rawText, subject, grade));
     const enriched = sourceMerged.map((q) => {
-      if (!rawText) return q;
+      // STRICT GUARD: ONLY apply to Part 2 questions. Never touch Part 1 or Part 3!
+      if (!rawText || q.part !== 2) return q;
 
       const hasInvalidStatements =
         !q.statements ||
@@ -1460,8 +1522,8 @@ ${rawText.slice(0, 50000)}
           (s) =>
             !s.text ||
             !s.text.trim() ||
-            s.text.trim().length < 15 ||
-            /^(?:Khẳng định|Ý|Mệnh đề|Phương án|Câu)/i.test(s.text.trim())
+            s.text.trim().length < 5 ||
+            /^(?:Khẳng định|Ý|Mệnh đề|Phương án|Câu)\s*[a-d]?$/i.test(s.text.trim())
         );
 
       if (!hasInvalidStatements) return q;
@@ -1472,15 +1534,16 @@ ${rawText.slice(0, 50000)}
       if (contentSnippet.length >= 15) {
         idx = rawText.toLowerCase().indexOf(contentSnippet.substring(0, 30));
       }
-
-      // If snippet search failed, try searching for the first 20 chars of content
       if (idx === -1 && contentSnippet.length >= 10) {
         idx = rawText.toLowerCase().indexOf(contentSnippet.substring(0, 20));
       }
 
       let searchWindow = "";
       if (idx !== -1) {
-        searchWindow = rawText.substring(idx, Math.min(rawText.length, idx + 8000));
+        // Cut window before the NEXT question or next section to avoid swallowing next questions
+        const nextQIdx = rawText.substring(idx + 10).search(/(?:^|[\n\r]+)(?:\*{0,2}(?:Câu|Bài|Question)\s*\d+|\*{0,2}\d+[.)/:]|\[Câu\s*\d+\]|PHẦN\s*(?:I|II|III|1|2|3)\b)/i);
+        const winLen = nextQIdx !== -1 ? (nextQIdx + 10) : 3000;
+        searchWindow = rawText.substring(idx, idx + winLen);
       } else {
         searchWindow = q.content || "";
       }
@@ -1837,10 +1900,10 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN TH
         level: item.level || "Thông hiểu",
         part,
         questionType,
-        content: item.content || "",
+        content: cleanContent || item.content || "",
         options: part === 1 ? finalOptions.slice(0, 4) : [],
         correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
-        statements: part === 2 ? item.statements : undefined,
+        statements: part === 2 ? statements : undefined,
         shortAnswer: part === 3 ? (item.shortAnswer || "") : undefined,
         explanation: item.explanation || "",
         needsReview: true,

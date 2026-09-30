@@ -761,10 +761,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             textToUse = raw.value;
           }
 
+          const apiKey = getStoredApiKey();
+          const model = getStoredSelectedModel();
+
           const parsed = await clientParseExam({
             rawText: textToUse,
             subject: config.subject,
             grade: config.grade,
+            apiKey,
+            model,
           });
 
           if (parsed.success && parsed.data && parsed.data.length > 0) {
@@ -791,10 +796,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           const docxResult = convertDocxHtmlToMarkdown(html);
           const finalData = docxResult.markdown && docxResult.markdown.trim() ? docxResult.markdown : XLSX.utils.sheet_to_csv(worksheet);
 
+          const apiKey = getStoredApiKey();
+          const model = getStoredSelectedModel();
+
           const parsed = await clientParseExam({
             rawText: finalData,
             subject: config.subject,
             grade: config.grade,
+            apiKey,
+            model,
           });
 
           if (parsed.success && parsed.data && parsed.data.length > 0) {
@@ -820,10 +830,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             reader.readAsText(file);
           });
 
+          const apiKey = getStoredApiKey();
+          const model = getStoredSelectedModel();
+
           const parsed = await clientParseExam({
             rawText: content,
             subject: config.subject,
             grade: config.grade,
+            apiKey,
+            model,
           });
 
           if (parsed.success && parsed.data && parsed.data.length > 0) {
