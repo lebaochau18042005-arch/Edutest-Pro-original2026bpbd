@@ -10,6 +10,8 @@ import {
   SubjectType,
   ExamStructureType,
   GradedPaperResult,
+  QuestionType,
+  TrueFalseStatement,
 } from "../types";
 
 export const LETTERS = ["A", "B", "C", "D", "E", "F"];
@@ -652,8 +654,57 @@ export function splitRawTextIntoStatements(text: string): { id: string; label: s
  * - BÓC TÁCH NGUYÊN BẢN 100% CÁC PHƯƠNG ÁN A, B, C, D VÀ CÁC MỆNH ĐỀ a, b, c, d TỪ FILE GỐC, KHÔNG ĐỂ RƠI RỚT HOẶC MẤT NỘI DUNG
  */
 export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question[] {
+  if (!rawQuestions || rawQuestions.length === 0) return [];
   const total = rawQuestions.length;
+
+  // PASS 1: Kiểm tra phân bổ toàn cục và sửa triệt để các trường hợp bị dồn nhầm vào Phần II
+  let countPart1 = 0;
+  let countPart2 = 0;
+  let countPart3 = 0;
+
+  rawQuestions.forEach((q) => {
+    if (q.part === 1 || q.questionType === "multiple_choice") countPart1++;
+    else if (q.part === 2 || q.questionType === "true_false") countPart2++;
+    else if (q.part === 3 || q.questionType === "short_answer") countPart3++;
+  });
+
+  const isAllCollapsedIntoPart2 = countPart1 === 0 && countPart2 > 4;
+
+  const resolvedParts: (1 | 2 | 3)[] = rawQuestions.map((q, idx) => {
+    // 1. Chuẩn hóa ma trận 28 câu BGD&ĐT (18 câu Phần I + 4 câu Phần II + 6 câu Phần III)
+    if (total === 28) {
+      if (isAllCollapsedIntoPart2 || countPart1 !== 18 || countPart2 !== 4 || countPart3 !== 6) {
+        if (idx < 18) return 1;
+        if (idx < 22) return 2;
+        return 3;
+      }
+    }
+    // 2. Chuẩn hóa ma trận 22 câu BGD&ĐT (12 câu Phần I + 4 câu Phần II + 6 câu Phần III)
+    else if (total === 22) {
+      if (isAllCollapsedIntoPart2 || countPart1 !== 12 || countPart2 !== 4 || countPart3 !== 6) {
+        if (idx < 12) return 1;
+        if (idx < 16) return 2;
+        return 3;
+      }
+    }
+    // 3. Đề thi ngoại ngữ hoặc 100% trắc nghiệm 40/50 câu
+    else if ((total === 40 || total === 50) && countPart1 === 0) {
+      return 1;
+    }
+
+    // 4. Kiểm tra từng câu theo trường dữ liệu
+    const rawPartNum = Number(q.part);
+    if (rawPartNum === 1 || q.questionType === "multiple_choice") return 1;
+    if (rawPartNum === 3 || q.questionType === "short_answer" || q.shortAnswer) return 3;
+    if (rawPartNum === 2 || q.questionType === "true_false") return 2;
+
+    if (Array.isArray(q.statements) && q.statements.length >= 2 && !q.statements.every(s => !s.text || /^Khẳng định/i.test(s.text))) return 2;
+    return 1;
+  });
+
+  // PASS 2: Xử lý chi tiết từng câu theo resolvedParts[idx]
   return rawQuestions.map((q, idx) => {
+    const targetPart = resolvedParts[idx];
     let cleanContent = q.content || "";
     let hasMissingSourceData = false;
 
@@ -662,99 +713,43 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       ? q.groupTitle.trim()
       : undefined;
 
-    // Check if real options (not synthetic placeholders) exist
-    const rawOpts = Array.isArray(q.options)
-      ? q.options.map((o) => String(o || "").trim()).filter((o) => Boolean(o) && !/^Phương án\s*[A-F]?$/i.test(o))
-      : [];
-    const hasRealOptions = rawOpts.length >= 2;
+    const questionType: QuestionType = targetPart === 2 ? "true_false" : targetPart === 3 ? "short_answer" : "multiple_choice";
 
-    // Check if real statements exist
-    const rawStmts = Array.isArray(q.statements)
-      ? q.statements.filter((s) => s?.text && String(s.text).trim().length > 0 && !/^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(String(s.text).trim()))
-      : [];
-    const hasRealStatements = rawStmts.length >= 2;
-
-    // Check statements embedded in content or other fields
-    const stmtsInContent = splitRawTextIntoStatements(cleanContent);
-    const hasStatementsInContent = stmtsInContent.length >= 2;
-
-    const stmtsInPassage = q.passageContent ? splitRawTextIntoStatements(q.passageContent) : [];
-    const hasStatementsInPassage = stmtsInPassage.length >= 2;
-
-    const stmtsInExplanation = q.explanation ? splitRawTextIntoStatements(q.explanation) : [];
-    const hasStatementsInExplanation = stmtsInExplanation.length >= 2;
-
-    const hasAnyTrueFalseStatements = hasRealStatements || hasStatementsInContent || hasStatementsInPassage || hasStatementsInExplanation;
-
-    // Check options embedded in content
-    const optsInContent = splitRawTextIntoOptions(cleanContent);
-    const hasOptionsInContent = optsInContent.length >= 2;
-
-    let part: ExamPart = 1;
-    const rawPartNum = Number(q.part);
-
-    // 1. KHÓA CHẶT 100% THEO ĐỀ GỐC VÀ TỰ ĐỘNG SỬA NẾU BỊ GÁN NHẦM LOẠI CÂU:
-    if (rawPartNum === 1 || q.questionType === "multiple_choice") {
-      part = 1;
-    } else if (rawPartNum === 2 || q.questionType === "true_false") {
-      // Bảo vệ: Nếu bị gán Part 2 nhưng không có mệnh đề a, b, c, d mà lại chứa 4 phương án trắc nghiệm A, B, C, D rõ ràng -> Phục hồi về Part 1!
-      if (!hasRealStatements && !hasStatementsInContent && (hasRealOptions || hasOptionsInContent)) {
-        part = 1;
-      } else {
-        part = 2;
-      }
-    } else if (rawPartNum === 3 || q.questionType === "short_answer") {
-      if (!q.shortAnswer && (hasRealOptions || hasOptionsInContent)) {
-        part = 1;
-      } else if (!q.shortAnswer && (hasRealStatements || hasStatementsInContent)) {
-        part = 2;
-      } else {
-        part = 3;
-      }
-    }
-    // 2. NẾU CHƯA CÓ PART XÁC ĐỊNH RÕ RÀNG -> DỰA VÀO DỮ LIỆU ĐẶC TRƯNG:
-    else if (hasRealOptions || hasOptionsInContent) {
-      part = 1;
-    } else if (hasRealStatements || hasStatementsInContent) {
-      part = 2;
-    } else if (q.shortAnswer) {
-      part = 3;
-    } else if (total === 28) {
-      if (idx < 18) part = 1;
-      else if (idx < 22) part = 2;
-      else part = 3;
-    } else if (total === 22) {
-      if (idx < 12) part = 1;
-      else if (idx < 16) part = 2;
-      else part = 3;
-    } else {
-      part = 1;
-    }
-
-    const questionType = part === 2 ? "true_false" : part === 3 ? "short_answer" : "multiple_choice";
-
-    // XỬ LÝ VÀ BÓC TÁCH TOÀN BỘ PHƯƠNG ÁN PHẦN I ĐẢM BẢO 100% NGUYÊN FILE GỐC
+    // ─── PHẦN I: TRẮC NGHIỆM 4 PHƯƠNG ÁN (A, B, C, D) ───
     let finalOptions: string[] = [];
-    if (part === 1) {
-      let candidateOpts = [...rawOpts];
+    if (targetPart === 1) {
+      let candidateOpts: string[] = [];
 
-      // Kiểm tra nếu các phương án bị gộp vào bên trong 1 phần tử (VD: options[0] chứa "B. ... C. ... D. ...")
-      const isMergedInOption = candidateOpts.some((opt) =>
-        /(?:[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?[B-D]\]?|\([B-D]\))[.)/:]\*{0,2})\s+/i.test(opt)
-      );
-
-      if (candidateOpts.length === 1 || isMergedInOption) {
-        const combined = candidateOpts.join(" \n ");
-        const splitted = splitRawTextIntoOptions(combined);
+      // 1. Ưu tiên options đã có
+      if (Array.isArray(q.options) && q.options.length >= 2 && !q.options.every(o => /^Phương án\s*[A-D]?$/i.test(String(o).trim()))) {
+        candidateOpts = q.options.map(o => String(o || "").trim()).filter(Boolean);
+      }
+      // 2. Khôi phục từ statements nếu trước đó bị parse nhầm thành Part 2
+      else if (Array.isArray(q.statements) && q.statements.length >= 2 && !q.statements.every(s => !s?.text || /^Khẳng định/i.test(String(s.text).trim()))) {
+        candidateOpts = q.statements.map(s => String(s?.text || "").trim()).filter(Boolean);
+      }
+      // 3. Bóc tách từ content
+      else {
+        const splitted = splitRawTextIntoOptions(cleanContent);
         if (splitted.length >= 2) {
           candidateOpts = splitted;
         }
       }
 
-      // Kiểm tra nếu nội dung câu hỏi (content) chứa luôn các phương án A. B. C. D. ở cuối
-      const isPlaceholderOnly = candidateOpts.length === 0 || candidateOpts.every((opt) => /^Phương án [A-D]$/i.test(opt.trim()));
-      if (isPlaceholderOnly || candidateOpts.length < 2) {
-        const optionStartMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:\[?A\]?|\(A\))[.)/:]\*{0,2})\s+/i);
+      // Kiểm tra nếu các phương án bị gộp bên trong 1 dòng
+      const isMergedInOption = candidateOpts.some((opt) =>
+        /(?:[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?[B-D]\]?|\([B-D]\))[.)/:\-–—]\*{0,2})\s+/i.test(opt)
+      );
+      if (candidateOpts.length === 1 || isMergedInOption) {
+        const splitted = splitRawTextIntoOptions(candidateOpts.join(" \n "));
+        if (splitted.length >= 2) {
+          candidateOpts = splitted;
+        }
+      }
+
+      // Nếu trong content còn phương án ở cuối câu
+      if (candidateOpts.length < 2) {
+        const optionStartMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:\[?A\]?|\(A\))[.)/:\-–—]\*{0,2})\s+/i);
         if (optionStartMatch !== -1) {
           const optSection = cleanContent.substring(optionStartMatch);
           const splitted = splitRawTextIntoOptions(optSection);
@@ -765,94 +760,65 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
         }
       }
 
-      // Làm sạch tiền tố A., B., C., D. thừa ở từng phần tử nếu còn sót
+      // Làm sạch toàn bộ tiền tố A, B, C, D, a, b, c, d, 1, 2, 3, 4, Một, Hai
       finalOptions = candidateOpts.map((opt, oIdx) => {
-        const letter = ["A", "B", "C", "D", "E", "F"][oIdx];
+        const letter = ["A", "B", "C", "D", "E", "F"][oIdx] || "A";
         return opt
           .replace(new RegExp(`^(?:\\*{0,2}\\[?${letter}\\]?[.)/:]\\*{0,2})\\s*`, "i"), "")
-          .replace(/^(?:\*{0,2}\([A-D]\)\*{0,2})\s*/i, "")
+          .replace(/^(?:\*{0,2}\([A-DFa-df]\)\*{0,2})\s*/i, "")
+          .replace(/^(?:[a-dA-D1-4]\)|Một\)|Hai\)|Ba\)|Bốn\)|Ý\s*[a-dA-D1-4]\)?)\s*/i, "")
           .trim();
       });
 
-      hasMissingSourceData = finalOptions.length !== 4;
+      const defOpts = ["Phương án A", "Phương án B", "Phương án C", "Phương án D"];
+      while (finalOptions.length < 4) {
+        finalOptions.push(defOpts[finalOptions.length]);
+      }
+
+      hasMissingSourceData = finalOptions.length !== 4 || finalOptions.every(o => /^Phương án/i.test(o));
     }
 
-    // XỬ LÝ VÀ BÓC TÁCH 4 MỆNH ĐỀ PHẦN II (ĐÚNG/SAI) BẢO ĐẢM KHÔNG BỎ SÓT NỘI DUNG
-    let statements = q.statements ? [...q.statements] : undefined;
-    if (part === 2) {
-      // 1. Kiểm tra nếu statements rỗng, bị gộp hoặc có placeholder
-      const hasInvalidStatements =
-        !statements ||
-        statements.length < 4 ||
-        statements.some(
-          (s) =>
-            !s.text ||
-            !s.text.trim() ||
-            s.text.trim().length < 15 ||
-            /^(?:Khẳng định|Ý|Mệnh đề|Phương án|Câu)/i.test(s.text.trim()) ||
-            /(?:[\n\r\t]|\s{2,})(?:\*{0,2}(?:\[?[b-d]\]?|\([b-d]\)|[b-d])[.):/\-–—\s]\*{0,2})\s+/i.test(s.text)
-        );
-
-      if (hasInvalidStatements) {
-        const candidatePool = [
-          cleanContent,
-          (statements || []).map((s) => s.text || "").join("\n"),
-          (q.options || []).join("\n"),
-          q.passageContent || "",
-          q.explanation || "",
-          q.groupTitle || "",
-        ];
-
-        let recovered: { id: string; label: string; text: string; correctValue: boolean }[] = [];
-        let sourceUsed = "";
-
-        for (const cand of candidatePool) {
-          if (cand && cand.trim()) {
-            const spl = splitRawTextIntoStatements(cand);
-            if (spl.length >= 2) {
-              recovered = spl;
-              sourceUsed = cand;
-              break;
-            }
+    // ─── PHẦN II: TRẮC NGHIỆM ĐÚNG / SAI (4 Ý a, b, c, d) ───
+    let statements: TrueFalseStatement[] | undefined = undefined;
+    if (targetPart === 2) {
+      let rawStmts: any[] = [];
+      if (Array.isArray(q.statements) && q.statements.length >= 2 && !q.statements.every(s => !s?.text || /^Khẳng định/i.test(String(s.text).trim()))) {
+        rawStmts = q.statements;
+      } else {
+        const splitted = splitRawTextIntoStatements(cleanContent);
+        if (splitted.length >= 2) {
+          rawStmts = splitted;
+          const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))[.):/\-–—\s]*\*{0,2})|(?:\*{0,2}(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.):/\-–—\s]*\*{0,2}|\(([a-d])\)|\b([a-d])\)))\s*/);
+          if (firstLetterMatch !== -1) {
+            cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
           }
-        }
-
-        if (recovered.length >= 2) {
-          statements = recovered;
-        } else if (q.options && q.options.length >= 2 && !q.options.every((o) => /^Phương án/i.test(o.trim()))) {
-          // If options exist, map them to statements
-          statements = q.options.slice(0, 4).map((opt, oIdx) => ({
+        } else if (Array.isArray(q.options) && q.options.length >= 2 && !q.options.every(o => /^Phương án/i.test(String(o).trim()))) {
+          rawStmts = q.options.map((opt, oIdx) => ({
             id: ["a", "b", "c", "d"][oIdx] || "a",
             label: `${["a", "b", "c", "d"][oIdx] || "a"})`,
-            text: opt.replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "").trim(),
+            text: opt,
             correctValue: oIdx === (q.correctIndex || 0),
           }));
         }
       }
 
-      // Làm sạch cleanContent: loại bỏ phần ý a, b, c, d khỏi nội dung đề bài (để lại đề bài và bảng biểu/hình ảnh)
-      const firstLetterMatch = cleanContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
-      if (firstLetterMatch !== -1) {
-        cleanContent = cleanContent.substring(0, firstLetterMatch).trim();
-      }
-
       const requiredLetters = ["a", "b", "c", "d"];
       const existingMap: Record<string, any> = {};
-      (statements || []).forEach((st) => {
+      rawStmts.forEach((st) => {
         const key = (st.id || st.label?.replace(/[^a-d]/gi, "") || "a").toLowerCase();
         existingMap[key] = st;
       });
 
-      const normalizedStatements: NonNullable<Question["statements"]> = [];
+      const normalizedStatements: TrueFalseStatement[] = [];
       requiredLetters.forEach((l, lIdx) => {
-        const existing = existingMap[l];
+        const existing = existingMap[l] || rawStmts[lIdx];
         let cleanText = String(existing?.text || "").trim();
 
         if (cleanText) {
           cleanText = cleanText
             .replace(
               new RegExp(
-                `^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`,
+                `^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\)|Một\\)|Hai\\)|Ba\\)|Bốn\\))\\s*`,
                 "i"
               ),
               ""
@@ -860,33 +826,29 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
             .trim();
         }
 
-        const isPlaceholder = /^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(cleanText);
-        if ((!cleanText || isPlaceholder) && q.options?.[lIdx] && !/^Phương án\s*[A-D]?$/i.test(q.options[lIdx].trim())) {
+        const isPlaceholder = !cleanText || /^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(cleanText);
+        if (isPlaceholder && q.options?.[lIdx] && !/^Phương án\s*[A-D]?$/i.test(q.options[lIdx].trim())) {
           cleanText = q.options[lIdx]
             .replace(/^(?:\*{0,2}(?:\[?[A-Da-d]\]?|\([A-Da-d]\)|[A-Da-d])[.):/\-–—\s]*\*{0,2})\s*/i, "")
             .trim();
         }
 
-        if (!cleanText || /^(?:Khẳng định(?: ý)?|Ý|Mệnh đề|Phương án)\s*[a-d]?$/i.test(cleanText)) {
-          hasMissingSourceData = true;
-          return;
-        }
-
         normalizedStatements.push({
           id: l,
           label: `${l})`,
-          text: cleanText,
+          text: cleanText || `Mệnh đề ${l}`,
           correctValue: Boolean(existing?.correctValue),
           explanation: existing?.explanation || "",
         });
       });
+
       statements = normalizedStatements;
-      hasMissingSourceData ||= normalizedStatements.length !== 4;
+      hasMissingSourceData = normalizedStatements.some(s => /^Mệnh đề\s*[a-d]$/i.test(s.text));
     }
 
-    // XỬ LÝ PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
+    // ─── PHẦN III: TRẢ LỜI NGẮN / ĐIỀN SỐ ───
     let finalShortAnswer = q.shortAnswer || "";
-    if (part === 3 && !finalShortAnswer) {
+    if (targetPart === 3 && !finalShortAnswer) {
       const ansMatch = cleanContent.match(/(?:Đáp án|Đáp số|Kết quả|KQ|Key|Answer|Điền số)[\s.:]+([-+]?\d*(?:[.,]\d+)?(?:\/\d+)?|[A-Za-z0-9_+\-/^]+)/i);
       if (ansMatch) {
         finalShortAnswer = ansMatch[1].replace(",", ".").trim();
@@ -898,12 +860,12 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
       ...q,
       content: cleanContent,
       groupTitle: cleanGroupTitle,
-      part,
+      part: targetPart,
       questionType,
-      options: part === 1 ? finalOptions.slice(0, 4) : [],
-      statements: part === 2 ? statements : undefined,
-      needsReview: Boolean(q.needsReview || (part !== 3 && hasMissingSourceData)),
-      shortAnswer: part === 3 ? (q.shortAnswer || finalShortAnswer || "") : undefined,
+      options: targetPart === 1 ? finalOptions.slice(0, 4) : [],
+      statements: targetPart === 2 ? statements : undefined,
+      needsReview: Boolean(q.needsReview || (targetPart !== 3 && hasMissingSourceData)),
+      shortAnswer: targetPart === 3 ? (q.shortAnswer || finalShortAnswer || "") : undefined,
     };
   });
 }

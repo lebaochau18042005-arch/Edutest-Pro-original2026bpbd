@@ -2318,9 +2318,9 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
   let currentQ: any = null;
   let questionCounter = 0;
 
-  const part1Regex = /(?:\*{0,2}(?:PHẦN|Phần|PART|DẠNG|Dạng)\s*(?:I|1|THỨ NHẤT|MỘT)\b|\bTRẮC NGHIỆM NHIỀU PHƯƠNG ÁN\b|\bTRẮC NGHIỆM 4 LỰA CHỌN\b)/i;
-  const part2Regex = /(?:\*{0,2}(?:PHẦN|Phần|PART|DẠNG|Dạng)\s*(?:II|2|THỨ HAI|HAI)\b|\bTRẮC NGHIỆM ĐÚNG\s*[\/\-]?\s*SAI\b|\bĐÚNG SAI\b)/i;
-  const part3Regex = /(?:\*{0,2}(?:PHẦN|Phần|PART|DẠNG|Dạng)\s*(?:III|3|THỨ BA|BA)\b|\bTRẢ LỜI NGẮN\b|\bĐIỀN KHUYẾT\b|\bĐIỀN SỐ\b)/i;
+  const part1Regex = /^(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:I|1|THỨ\s*NHẤT|THỨ\s*1|MỘT)\b|\bI\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*(?:NHIỀU\s*PHƯƠNG\s*ÁN|4\s*LỰA\s*CHỌN|4\s*PHƯƠNG\s*ÁN|NHIỀU\s*LỰA\s*CHỌN)\b|\bCÂU\s*TRẮC\s*NGHIỆM\s*NHIỀU\s*PHƯƠNG\s*ÁN\b)/i;
+  const part2Regex = /^(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:II|2|THỨ\s*HAI|THỨ\s*2|HAI)\b|\bII\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|ĐÚNG\s*SAI|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*ĐÚNG\s*[\/\-]?\s*SAI\b|\bCÂU\s*TRẮC\s*NGHIỆM\s*ĐÚNG\s*SAI\b)/i;
+  const part3Regex = /^(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:III|3|THỨ\s*BA|THỨ\s*3|BA)\b|\bIII\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|TRẢ\s*LỜI|ĐIỀN|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*TRẢ\s*LỜI\s*NGẮN\b|\bCÂU\s*(?:TRẮC\s*NGHIỆM\s*)?(?:HỎI\s*)?TRẢ\s*LỜI\s*NGẮN\b|\bTHÍ\s*SINH\s*TRẢ\s*LỜI\s*TỪ\s*CÂU\b)/i;
 
   const questionRegex = /^(?:\*{0,2}(?:Câu|Bài|Question)\s*(\d+)|\*{0,2}(\d+)[.)/:]|\[Câu\s*(\d+)\])(?:\s*[\(\[][^\)\]]+[\)\]])?[\s.:-]/i;
   const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/i;
