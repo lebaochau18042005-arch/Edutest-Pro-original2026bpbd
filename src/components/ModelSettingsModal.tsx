@@ -196,12 +196,11 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   };
 
   const handleResetCloudDbUrl = () => {
-    const defaultUrl = "https://edutest-pro-cloud-default-rtdb.asia-southeast1.firebasedatabase.app";
-    setCloudDbUrl(defaultUrl);
-    saveCloudDatabaseConfig({ databaseUrl: defaultUrl });
+    setCloudDbUrl("");
+    saveCloudDatabaseConfig({ databaseUrl: "" });
     setCloudTestResult({
       success: true,
-      msg: "Đã khôi phục về máy chủ Cloud Database mặc định của Edutest Pro.",
+      msg: "Đã chuyển về chế độ lưu trữ cục bộ (Local & Backend API).",
     });
   };
 
@@ -524,7 +523,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                     onClick={handleResetCloudDbUrl}
                     className="text-[11px] text-emerald-700 hover:text-emerald-900 font-semibold underline cursor-pointer"
                   >
-                    Khôi phục mặc định
+                    Xóa / Chuyển về Local
                   </button>
                 </div>
 
@@ -532,11 +531,11 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                   type="text"
                   value={cloudDbUrl}
                   onChange={(e) => setCloudDbUrl(e.target.value)}
-                  placeholder="https://your-project.firebaseio.com"
+                  placeholder="https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-xs font-mono transition-all"
                 />
                 <p className="text-[11px] text-slate-500">
-                  Hệ thống đã tích hợp sẵn máy chủ Cloud tốc độ cao của Edutest Pro. Thầy/Cô không cần thay đổi nếu không dùng máy chủ Firebase riêng.
+                  Dán URL Firebase Realtime Database (miễn phí từ Google Firebase) để đồng bộ trực tiếp kết quả bài thi của học sinh trên mọi thiết bị và mạng Internet.
                 </p>
               </div>
 

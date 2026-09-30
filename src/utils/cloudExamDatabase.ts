@@ -7,8 +7,14 @@ export interface CloudDatabaseConfig {
   autoSync: boolean;
 }
 
-// Default high-availability Firebase Realtime Database for Edutest Pro
-const DEFAULT_CLOUD_DB_URL = "https://edutest-pro-cloud-default-rtdb.asia-southeast1.firebasedatabase.app";
+// Default Cloud Database URL helper
+export function isConfiguredCloudUrl(url?: string): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return false;
+  if (trimmed.includes("edutest-pro-cloud-default-rtdb")) return false;
+  return true;
+}
 
 const CONFIG_STORAGE_KEY = "edutest_cloud_db_config";
 
@@ -20,7 +26,11 @@ export function getCloudDatabaseConfig(): CloudDatabaseConfig {
     const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed && parsed.databaseUrl) {
+      if (parsed && typeof parsed.databaseUrl === "string") {
+        if (parsed.databaseUrl.includes("edutest-pro-cloud-default-rtdb")) {
+          parsed.databaseUrl = "";
+          parsed.autoSync = false;
+        }
         return parsed;
       }
     }
@@ -28,8 +38,8 @@ export function getCloudDatabaseConfig(): CloudDatabaseConfig {
 
   return {
     provider: "firebase_rtdb",
-    databaseUrl: DEFAULT_CLOUD_DB_URL,
-    autoSync: true,
+    databaseUrl: "",
+    autoSync: false,
   };
 }
 
@@ -92,7 +102,7 @@ export async function publishExamToCloud(
   let cloudSuccess = false;
 
   // 1. Try Cloud Database if configured
-  if (baseUrl) {
+  if (isConfiguredCloudUrl(baseUrl)) {
     try {
       const targetUrl = `${baseUrl}/exams/${cleanCode}.json`;
       const res = await fetchWithTimeout(targetUrl, {
@@ -151,7 +161,7 @@ export async function fetchExamFromCloud(accessCode: string): Promise<ExamPackag
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
 
   // Strategy 1: Fetch from Cloud Database
-  if (baseUrl) {
+  if (isConfiguredCloudUrl(baseUrl)) {
     try {
       const targetUrl = `${baseUrl}/exams/${cleanKey}.json`;
       const res = await fetchWithTimeout(targetUrl, {}, 4000);
@@ -214,7 +224,7 @@ export async function submitExamToCloud(
   let cloudOk = false;
 
   // 1. Upload to Cloud Database
-  if (baseUrl) {
+  if (isConfiguredCloudUrl(baseUrl)) {
     try {
       const targetUrl = `${baseUrl}/submissions/${examKey}/${subKey}.json`;
       const res = await fetchWithTimeout(targetUrl, {
@@ -275,7 +285,7 @@ export async function fetchSubmissionsFromCloud(
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
 
   const results: StudentSubmission[] = [];
-  if (!baseUrl) return results;
+  if (!isConfiguredCloudUrl(baseUrl)) return results;
 
   try {
     let targetUrl = `${baseUrl}/submissions.json`;
@@ -316,7 +326,7 @@ export async function fetchSubmissionsFromCloud(
 export async function syncClassroomsToCloud(classrooms: Classroom[]): Promise<boolean> {
   const config = getCloudDatabaseConfig();
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!baseUrl) return false;
+  if (!isConfiguredCloudUrl(baseUrl)) return false;
 
   try {
     const res = await fetchWithTimeout(`${baseUrl}/classrooms.json`, {
@@ -336,7 +346,7 @@ export async function syncClassroomsToCloud(classrooms: Classroom[]): Promise<bo
 export async function fetchClassroomsFromCloud(): Promise<Classroom[] | null> {
   const config = getCloudDatabaseConfig();
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!baseUrl) return null;
+  if (!isConfiguredCloudUrl(baseUrl)) return null;
 
   try {
     const res = await fetchWithTimeout(`${baseUrl}/classrooms.json`, {}, 4000);
@@ -354,7 +364,7 @@ export async function fetchClassroomsFromCloud(): Promise<Classroom[] | null> {
 export async function syncAssignmentsToCloud(assignments: ClassAssignment[]): Promise<boolean> {
   const config = getCloudDatabaseConfig();
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!baseUrl) return false;
+  if (!isConfiguredCloudUrl(baseUrl)) return false;
 
   try {
     const res = await fetchWithTimeout(`${baseUrl}/assignments.json`, {
@@ -374,7 +384,7 @@ export async function syncAssignmentsToCloud(assignments: ClassAssignment[]): Pr
 export async function fetchAssignmentsFromCloud(): Promise<ClassAssignment[] | null> {
   const config = getCloudDatabaseConfig();
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!baseUrl) return null;
+  if (!isConfiguredCloudUrl(baseUrl)) return null;
 
   try {
     const res = await fetchWithTimeout(`${baseUrl}/assignments.json`, {}, 4000);
@@ -397,6 +407,14 @@ export async function testCloudDatabaseConnection(): Promise<{
   const start = performance.now();
   const config = getCloudDatabaseConfig();
   const baseUrl = config.databaseUrl.replace(/\/+$/, "");
+
+  if (!isConfiguredCloudUrl(baseUrl)) {
+    return {
+      success: false,
+      latencyMs: 0,
+      message: "Vui lòng nhập URL Firebase Realtime Database của bạn để kiểm tra kết nối.",
+    };
+  }
 
   try {
     const testUrl = `${baseUrl}/health.json`;
