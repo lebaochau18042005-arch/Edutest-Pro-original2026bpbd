@@ -2809,7 +2809,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                             }`}
                           >
                             {/* Group Title & Passage */}
-                            {q.groupTitle && (
+                            {q.groupTitle && !/^(?:PHẦN|Phần|PART|Part|DẠNG|Dạng)\s*(?:I|II|III|1|2|3|THỨ\s*NHẤT|THỨ\s*HAI|THỨ\s*BA)/i.test(q.groupTitle.trim()) && (
                               <div className="p-2 rounded-lg bg-indigo-50/70 border border-indigo-100 text-indigo-900 font-medium text-[11px]">
                                 <strong>📌 {q.groupTitle}</strong>
                                 {q.passageContent && (

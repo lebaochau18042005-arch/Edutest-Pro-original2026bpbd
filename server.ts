@@ -1272,14 +1272,14 @@ function splitRawTextIntoOptionsServer(text: string): string[] {
       .map((c) => c.trim())
       .filter((c) => c.length > 0 && !/^:?-+:?$/.test(c));
 
-    const optionCells = pipeCells.filter((c) => /^(?:\*{0,2}\[?[A-D]\]?[.)/:]\*{0,2})/i.test(c));
+    const optionCells = pipeCells.filter((c) => /^(?:\*{0,2}(?:\[?[A-D]\]?|\([A-D]\))[.)/:\-–—]\*{0,2})/g.test(c));
     if (optionCells.length >= 2) {
-      return optionCells.map((c) => c.replace(/^(?:\*{0,2}\[?[A-D]\]?[.)/:]\*{0,2})\s*/i, "").trim());
+      return optionCells.map((c) => c.replace(/^(?:\*{0,2}(?:\[?[A-D]\]?|\([A-D]\))[.)/:\-–—]\*{0,2})\s*/g, "").trim());
     }
   }
 
-  // 2. Regex tìm vị trí các phương án A, B, C, D (hoặc A., B., A), B), [A], **A.**, .A., .B., etc.)
-  const pattern = /(?:^|[\n\r\t\s]|[.)\]\s])(?:\*{0,2}(?:\[?([A-D])\]?|\(([A-D])\)|\.?([A-D]))[.)/:]\*{0,2})\s*/gi;
+  // 2. Regex tìm vị trí các phương án A, B, C, D (UPPERCASE ONLY có ký tự phân cách bắt buộc)
+  const pattern = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[([A-D])\]|\(([A-D])\)|([A-D])(?:\)|\.|\:|\/|\s*[-–—]))\*{0,2})\s*/g;
   const matches: { letter: string; index: number; matchLength: number }[] = [];
   let m;
 
@@ -1327,12 +1327,12 @@ function splitRawTextIntoOptionsServer(text: string): string[] {
   }
 
   // 3. Không bắt đầu bằng A nhưng có B. ... C. ... D. ...
-  const bMatch = clean.search(/(?:[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?B\]?|\(B\))[.)/:]\*{0,2})\s*/i);
+  const bMatch = clean.search(/(?:[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?B\]?|\(B\))[.)/:\-–—]\*{0,2})\s*/);
   if (bMatch > 0) {
-    const textA = clean.substring(0, bMatch).replace(/^(?:\*{0,2}(?:\[?A\]?|\(A\))[.)/:]\*{0,2})\s*/i, "").trim();
+    const textA = clean.substring(0, bMatch).replace(/^(?:\*{0,2}(?:\[?A\]?|\(A\))[.)/:\-–—]\*{0,2})\s*/, "").trim();
     const rest = clean.substring(bMatch);
     const subMatches: { letter: string; index: number; matchLength: number }[] = [];
-    const subPattern = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?([B-D])\]?|\(([B-D])\))[.)/:]\*{0,2})\s*/gi;
+    const subPattern = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:\[?([B-D])\]?|\(([B-D])\))[.)/:\-–—]\*{0,2})\s*/g;
     let sm;
     while ((sm = subPattern.exec(rest)) !== null) {
       const letter = (sm[1] || sm[2] || "").toUpperCase();
@@ -1375,9 +1375,9 @@ function splitRawTextIntoStatementsServer(text: string): { id: string; label: st
 
       // Structure | a) | Nội dung mệnh đề | Đúng |
       if (cells.length >= 2) {
-        const firstCellMatch = cells[0].match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*$/i);
+        const firstCellMatch = cells[0].match(/^(?:(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))[.):/\-–—\s]*\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])(?:\)|\.|\:|\/|\s*[-–—]))\*{0,2}))\s*$/);
         if (firstCellMatch) {
-          const l = (firstCellMatch[1] || firstCellMatch[2] || firstCellMatch[3] || firstCellMatch[4] || firstCellMatch[5] || "a").toLowerCase();
+          const l = (firstCellMatch[1] || firstCellMatch[2] || firstCellMatch[3] || firstCellMatch[4] || firstCellMatch[5] || firstCellMatch[6] || "a").toLowerCase();
           const stmtText = cells[1] || "";
           const restRow = cells.slice(2).join(" ");
           const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(restRow) || /\(Đúng\)|\[Đúng\]|\(Đ\)/i.test(stmtText);
@@ -1393,10 +1393,10 @@ function splitRawTextIntoStatementsServer(text: string): { id: string; label: st
       }
 
       for (const cell of cells) {
-        const sm = cell.match(/^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i);
+        const sm = cell.match(/^(?:(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))[.):/\-–—\s]*\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])(?:\)|\.|\:|\/|\s*[-–—]))\*{0,2}))\s*(.*)/);
         if (sm) {
-          const l = (sm[1] || sm[2] || sm[3] || sm[4] || sm[5] || "a").toLowerCase();
-          const rawVal = sm[6] || "";
+          const l = (sm[1] || sm[2] || sm[3] || sm[4] || sm[5] || sm[6] || "a").toLowerCase();
+          const rawVal = sm[7] || "";
           const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|\bTrue\b|\[x\]|✓|\*/i.test(rawVal) || /\bĐúng\b/i.test(cell);
           const cleanText = rawVal.replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "").trim();
           tableStmts.push({
@@ -1416,7 +1416,8 @@ function splitRawTextIntoStatementsServer(text: string): { id: string; label: st
   }
 
   // 2. Position-based splitting for non-table text
-  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*/gi;
+  // IMPORTANT: Only match lowercase a-d markers (or explicit prefixed markers like "Ý a/A", "Mệnh đề a/A")
+  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:(?:\*{0,2}(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))(?:\)|\.|\:|\/|\s*[-–—]|\s+)\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])(?:\)|\.|\:|\/|\s*[-–—]))\*{0,2}))\s*/g;
   const matches: { letter: string; index: number; matchLength: number }[] = [];
   let m;
 
@@ -1428,7 +1429,7 @@ function splitRawTextIntoStatementsServer(text: string): { id: string; label: st
     const lastUrlClose = beforeStr.lastIndexOf(")");
     if (lastUrlOpen !== -1 && (lastUrlClose === -1 || lastUrlClose < lastUrlOpen)) continue;
 
-    const letter = (m[1] || m[2] || m[3] || m[4] || m[5] || "").toLowerCase();
+    const letter = (m[1] || m[2] || m[3] || m[4] || m[5] || m[6] || "").toLowerCase();
     if (!letter || !["a", "b", "c", "d"].includes(letter)) continue;
 
     matches.push({
@@ -2352,35 +2353,40 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
     const hasStmts = extractedStmts.length >= 2;
     const existingStmts = Array.isArray(currentQ.statements) ? currentQ.statements.filter((s: any) => s && s.text && !/^Khẳng định/i.test(s.text)) : [];
     const hasExistingStmts = existingStmts.length >= 2;
-    const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length >= 2 && !currentQ.options.every((o: any) => /^Phương án/i.test(o));
+    const extractedOpts = splitRawTextIntoOptionsServer(rawContent);
+    const hasOpts = (Array.isArray(currentQ.options) && currentQ.options.length >= 2 && !currentQ.options.every((o: any) => /^Phương án/i.test(o))) || extractedOpts.length >= 2;
 
-    // 1. ƯU TIÊN TUYỆT ĐỐI CHO PHẦN II (ĐÚNG / SAI)
-    if (hasExistingStmts || hasStmts || (currentQ.part === 2 && !hasOpts)) {
+    // 1. PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN)
+    if (hasOpts && !hasExistingStmts && !hasStmts) {
+      currentQ.part = 1;
+      currentQ.questionType = "multiple_choice";
+      currentQ.statements = [];
+      currentQ.shortAnswer = undefined;
+    }
+    // 2. PHẦN II (ĐÚNG / SAI)
+    else if (hasExistingStmts || hasStmts || (currentQ.part === 2 && !hasOpts)) {
       currentQ.part = 2;
       currentQ.questionType = "true_false";
       if (hasStmts && (!currentQ.statements.length || currentQ.statements.length < 4)) {
         currentQ.statements = extractedStmts;
       }
-      const firstLetterMatch = currentQ.content.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+      const firstLetterMatch = currentQ.content.search(/(?:^|[\n\r]|\s{2,})(?:(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))[.):/\-–—\s]*\*{0,2})|(?:\*{0,2}(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.):/\-–—\s]*\*{0,2}|\(([a-d])\)|\b([a-d])\)))\s*/);
       if (firstLetterMatch !== -1) {
         currentQ.content = currentQ.content.substring(0, firstLetterMatch).trim();
       }
       currentQ.options = [];
       currentQ.shortAnswer = undefined;
     }
-    // 2. PHẦN I (TRẮC NGHIỆM 4 LỰA CHỌN)
-    else if (hasOpts || (currentQ.part === 1 && !currentQ.shortAnswer)) {
-      currentQ.part = 1;
-      currentQ.questionType = "multiple_choice";
-      currentQ.statements = [];
-      currentQ.shortAnswer = undefined;
-    }
     // 3. PHẦN III (TRẢ LỜI NGẮN / ĐIỀN SỐ)
-    else {
+    else if (currentQ.shortAnswer || currentQ.part === 3) {
       currentQ.part = 3;
       currentQ.questionType = "short_answer";
       currentQ.options = [];
       currentQ.statements = [];
+    }
+    else {
+      currentQ.part = currentQ.part || 1;
+      currentQ.questionType = currentQ.part === 2 ? "true_false" : currentQ.part === 3 ? "short_answer" : "multiple_choice";
     }
 
     // If Part 2, strictly ensure all 4 statements a, b, c, d exist
@@ -2480,17 +2486,30 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
       continue;
     }
 
+    // Skip general document header metadata so it never triggers false questions
+    if (
+      /^(?:HƯỚNG\s*DẪN|THỜI\s*GIAN|MÃ\s*ĐỀ|TRANG\s*\d+|SỞ\s*GD|BỘ\s*GD|TRƯỜNG\s*THPT|ĐỀ\s*THI|KỲ\s*THI|HỌ\s*VÀ\s*TÊN|SỐ\s*BÁO\s*DANH|LƯU\s*Ý|MỤC\s*TIÊU)/i.test(trimmed)
+    ) {
+      continue;
+    }
+
     const qMatch = trimmed.match(questionRegex);
     if (qMatch) {
+      const isPureNumberMatch = Boolean(qMatch[2]);
+      const restText = trimmed.replace(questionRegex, "").trim();
+
+      // If matched a raw number without "Câu/Bài/Question", ensure it's not metadata
+      if (isPureNumberMatch && /^(?:hướng dẫn|mục tiêu|lưu ý|thời gian|phần|trang|mã đề|chú ý|họ và tên)/i.test(restText)) {
+        continue;
+      }
+
       finalizeCurrentQ();
       questionCounter++;
       const qNum = parseInt(qMatch[1] || qMatch[2] || qMatch[3], 10) || questionCounter;
       
       let inferredPart: 1 | 2 | 3 = currentPart;
-      if (qNum >= 23 && qNum <= 28) inferredPart = 3;
-      else if (qNum >= 19 && qNum <= 22 && currentPart === 1) inferredPart = 2;
 
-      const contentText = trimmed.replace(questionRegex, "").trim() || trimmed;
+      const contentText = restText || trimmed;
       currentQ = {
         id: `q_parsed_${Date.now()}_${questionCounter}_${Math.random().toString(36).substring(2, 6)}`,
         qNumber: qNum,
