@@ -45,6 +45,8 @@ import {
 } from "../../utils/examHelpers";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
 import { clientExtractRubric, clientGradePaper } from "../../utils/clientAI";
+import { RubricEditor } from "./RubricEditor";
+import { validateRubricSettings } from "../../utils/rubricSettings";
 
 interface AIGraderViewProps {
   exams: ExamPackage[];
@@ -182,8 +184,14 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
       ],
     };
 
-    setRubrics([defaultRubric]);
-    setActiveRubric(defaultRubric);
+    let saved: ExamRubric[] = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem("edutest_grading_rubrics_v1") || "[]");
+      if (Array.isArray(stored)) saved = stored.filter(r => r && Array.isArray(r.items) && typeof r.title === "string");
+    } catch { /* Keep the editor available when saved data is invalid. */ }
+    setRubrics(saved.length ? saved : [defaultRubric]);
+    setActiveRubric(saved[0] || defaultRubric);
+    setSelectedRubricId(saved[0]?.id || defaultRubric.id);
     fetchGradedResults();
   }, []);
 
@@ -206,11 +214,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   };
 
   // Convert an exam from system into Rubric
-  const handleSelectExamAsRubric = (examId: string) => {
+  const handleSelectExamAsRubric = (examId: string, examCode?: string) => {
     const exam = exams.find((e) => e.id === examId);
     if (!exam) return;
 
-    const variant = exam.variants[0];
+    const variant = examCode ? exam.variants.find(v => v.examCode === examCode) : exam.variants[0];
+    if (!variant) return;
     const isMath = (exam.config.subject || "").toLowerCase().includes("toán");
     const items: RubricItem[] = variant.questions.map((q) => {
       let points = 0.25;
@@ -219,7 +228,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
       let corAns = "";
       if (q.part === 1 || q.questionType === "multiple_choice") {
-        const letter = ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A";
+        const letter = ["A", "B", "C", "D"][q.correctIndex] || "";
         const optVal = q.options && q.options[q.correctIndex ?? 0] ? `: ${q.options[q.correctIndex ?? 0]}` : "";
         corAns = `${letter}${optVal}`;
       } else if (q.part === 2 || q.questionType === "true_false") {
@@ -242,8 +251,8 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     });
 
     const newRubric: ExamRubric = {
-      id: `rubric-exam-${exam.id}`,
-      title: `Biểu điểm: ${exam.title}`,
+      id: `rubric-exam-${exam.id}-${variant.examCode}`,
+      title: `Biểu điểm: ${exam.title} — Mã đề ${variant.examCode}`,
       subject: exam.config.subject,
       grade: exam.config.grade,
       maxScore: exam.config.maxScore || 10.0,
@@ -400,6 +409,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
       return;
     }
 
+    const settingsErrors = validateRubricSettings(activeRubric);
+    if (settingsErrors.length) {
+      alert(settingsErrors.join("\n"));
+      setActiveStep("rubric_setup");
+      return;
+    }
     setIsGradingBatch(true);
     setGradingProgress({ current: 0, total: uploadQueue.length });
 
@@ -482,7 +497,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
     setIsGradingBatch(false);
     // Switch to results tab when completed
-    setActiveStep("results_table");
+    if (updatedQueue.every(item => item.status === "success")) setActiveStep("results_table");
   };
 
   // Delete a graded paper
@@ -1177,6 +1192,14 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                           {ex.variants.length} mã đề
                         </span>
                       </div>
+                      <label className="block mt-3 text-xs font-semibold text-slate-700" onClick={e => e.stopPropagation()}>
+                        Chọn mã đề trên phiếu học sinh
+                        <select className="mt-1 w-full rounded-lg border border-slate-300 p-2"
+                          value={selectedExamIdForRubric === ex.id ? activeRubric?.examCode : ex.variants[0]?.examCode}
+                          onChange={e => { setSelectedExamIdForRubric(ex.id); handleSelectExamAsRubric(ex.id, e.target.value); }}>
+                          {ex.variants.map(v => <option key={v.examCode} value={v.examCode}>Mã đề {v.examCode}</option>)}
+                        </select>
+                      </label>
                     </div>
                   ))}
                 </div>
@@ -1324,6 +1347,16 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
             </div>
           )}
 
+          <label className="block font-bold">Biểu điểm đã lưu
+            <select className="ml-3 border rounded-lg p-2" value={selectedRubricId} onChange={e => { const selected = rubrics.find(r => r.id === e.target.value); if (selected) { setActiveRubric(selected); setSelectedRubricId(selected.id); } }}>
+              {rubrics.map(r => <option key={r.id} value={r.id}>{r.title} — {r.examCode || "Chưa có mã đề"}</option>)}
+            </select>
+          </label>
+          <RubricEditor rubric={activeRubric} onSave={value => {
+            const updated = [value, ...rubrics.filter(r => r.id !== value.id)];
+            localStorage.setItem("edutest_grading_rubrics_v1", JSON.stringify(updated));
+            setRubrics(updated); setActiveRubric(value); setSelectedRubricId(value.id);
+          }} />
           {/* Active Rubric Inspection & Edit Table */}
           {activeRubric && (
             <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
@@ -1333,7 +1366,7 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
                     Biểu Điểm Đang Áp Dụng: {activeRubric.title}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Tổng điểm tối đa: <strong className="text-blue-600">{activeRubric.maxScore}đ</strong> • {activeRubric.items.length} câu hỏi
+                    Tổng điểm tối đa: <strong className="text-blue-600">{activeRubric.maxScore}đ</strong> • {activeRubric.items.length} câu hỏi • Hệ số tổng hợp: {activeRubric.gradeWeight ?? 1}
                   </p>
                 </div>
 

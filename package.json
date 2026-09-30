@@ -9,6 +9,7 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test:paper-grading": "tsx scripts/paperGradingRegressionTest.ts",
     "test:formulas": "tsx scripts/formulaRegressionTest.ts"
   },
   "dependencies": {

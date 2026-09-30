@@ -519,12 +519,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         return;
       }
 
+      const targetVariant = foundExam.variants.find(v => v.examCode === selectedVariantCode);
+      if (!targetVariant) {
+        setEntryError("Vui lòng chọn đúng mã đề trước khi tải phiếu để chấm.");
+        return;
+      }
       setIsGradingPaper(true);
       try {
         const reader = new FileReader();
         reader.onload = async () => {
           const base64 = reader.result as string;
-          const targetVariant = foundExam.variants.find((v) => v.examCode === selectedVariantCode) || foundExam.variants[0];
           const isMath = (foundExam.config.subject || "").toLowerCase().includes("toán");
           const rubricItems = targetVariant ? targetVariant.questions.map((q) => {
             let points = 0.25;
@@ -533,7 +537,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             
             let corAns = "";
             if (q.part === 1 || q.questionType === "multiple_choice") {
-              const letter = ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A";
+              const letter = ["A", "B", "C", "D"][q.correctIndex] || "";
               const optVal = q.options && q.options[q.correctIndex ?? 0] ? `: ${q.options[q.correctIndex ?? 0]}` : "";
               corAns = `${letter}${optVal}`;
             } else if (q.part === 2 || q.questionType === "true_false") {

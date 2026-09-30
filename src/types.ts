@@ -314,6 +314,8 @@ export interface GradedQuestionDetail {
 }
 
 export interface GradedPaperResult {
+  assessmentType?: ExamRubric["assessmentType"];
+  gradeWeight?: number;
   id: string;
   studentName: string;
   studentClass: string;
@@ -344,6 +346,8 @@ export interface GradedPaperResult {
 
 
 export interface RubricItem {
+  printedNumber?: number;
+  trueFalseScoring?: "tiered" | "linear" | "all_or_nothing";
   questionIndex: number | string;
   part?: number | string;
   content?: string;
@@ -356,6 +360,8 @@ export interface RubricItem {
 }
 
 export interface ExamRubric {
+  assessmentType?: "regular" | "midterm" | "final" | "custom";
+  gradeWeight?: number;
   id: string;
   title: string;
   subject: string;

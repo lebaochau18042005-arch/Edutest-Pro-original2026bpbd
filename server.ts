@@ -1,3 +1,4 @@
+import { recognizeAndGradePaper } from "./src/utils/paperGrading";
 import express from "express";
 import path from "path";
 import os from "os";
@@ -2870,7 +2871,8 @@ app.post("/api/ai/grade-paper", async (req, res) => {
     if (!resolvedRubric && examId) {
       const exam = activeExams.find((e) => e.id === examId);
       if (exam) {
-        const variant = exam.variants.find((v: any) => v.examCode === examCode) || exam.variants[0];
+        const variant = examCode ? exam.variants.find((v: any) => v.examCode === examCode) : exam.variants[0];
+        if (!variant) return res.status(400).json({ error: "Không tìm thấy đáp án cho mã đề đã chọn." });
         const isMath = (exam.config.subject || "").toLowerCase().includes("toán");
         const items = variant.questions.map((q: any) => {
           let points = 0.25;
@@ -2879,7 +2881,7 @@ app.post("/api/ai/grade-paper", async (req, res) => {
 
           let corAns = "";
           if (q.part === 1 || q.questionType === "multiple_choice") {
-            const letter = ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A";
+            const letter = ["A", "B", "C", "D"][q.correctIndex] || "";
             const optVal = (q.options && q.options[q.correctIndex]) ? `: ${q.options[q.correctIndex]}` : "";
             corAns = `${letter}${optVal}`;
           } else if (q.part === 2 || q.questionType === "true_false") {
@@ -2895,6 +2897,7 @@ app.post("/api/ai/grade-paper", async (req, res) => {
             points,
             criteria: q.explanation || "",
             questionType: q.questionType,
+            part: q.part,
           };
         });
 
@@ -2913,230 +2916,26 @@ app.post("/api/ai/grade-paper", async (req, res) => {
       return res.status(400).json({ error: "Không tìm thấy đáp án / biểu điểm chuẩn để chấm bài." });
     }
 
-    const cleanBase64 = paperFile.data.replace(/^data:[^;]+;base64,/, "");
     const mimeType = paperFile.mimeType || "image/jpeg";
 
-    const promptText = `Bạn là Trợ lý Giám khảo Chấm thi AI Thông minh, cẩn trọng và chuẩn mực của Bộ GD&ĐT Việt Nam (OMR Pro Vision Grader).
-Nhiệm vụ của bạn là đọc và chấm điểm bài làm của học sinh trong tài liệu đính kèm (${paperFile.fileName || "Bài làm"}) dựa trên ĐÁP ÁN & BIỂU ĐIỂM CHUẨN sau đây.
-
-THÔNG TIN ĐỀ & ĐÁP ÁN BIỂU ĐIỂM CHUẨN:
-- Tên đề: ${resolvedRubric.title || "Bài kiểm tra"}
-- Môn học: ${resolvedRubric.subject || "Toán"}
-- Thang điểm tối đa: ${resolvedRubric.maxScore || 10.0}
-- Mã đề chuẩn: ${resolvedRubric.examCode || "101"}
-- Mức độ chấm: ${gradingStrictness === "strict" ? "Nghiêm ngặt, trừ điểm nếu thiếu bước/đơn vị" : "Tiêu chuẩn Bộ GD&ĐT, cho điểm theo ý đúng"}
-
-DANH SÁCH CÂU HỎI VÀ ĐÁP ÁN CHUẨN:
-${JSON.stringify(
-  resolvedRubric.items.map((it: any) => ({
-    cau: it.questionIndex,
-    noi_dung_cau_hoi: it.content,
-    dap_an_dung_cua_giao_vien: it.correctAnswer,
-    diem_toi_da: it.points,
-    tieu_chi: it.criteria,
-    dang: it.questionType,
-  })),
-  null,
-  2
-)}
-
-HƯỚNG DẪN CHẤM BÀI CHI TIẾT & NHẬN DIỆN PHIẾU TRẮC NGHIỆM (OMR / VIẾT TAY):
-1. Nhận diện thông tin học sinh trên đầu bài làm: Họ và tên, Lớp, Số báo danh (SBD - 6 chữ số tô hoặc viết), Mã đề thi (3-4 chữ số tô hoặc viết, ví dụ 101, 102, 108).
-2. Trích xuất câu trả lời của học sinh cho TỪNG CÂU HỎI:
-   - Đối với Phiếu Trả Lời Trắc Nghiệm Chuẩn Bộ GD&ĐT:
-     * PHẦN I: Trắc nghiệm 4 lựa chọn (A, B, C, D) -> Đọc chữ cái học sinh đã tô đen kín ô tròn.
-     * PHẦN II: Trắc nghiệm Đúng/Sai (các ý a, b, c, d) -> Đọc xem từng ý học sinh tô Đúng (Đ) hay Sai (S). Định dạng: "ĐĐSS" hoặc "SĐĐĐ".
-     * PHẦN III: Trắc nghiệm Trả lời ngắn -> Đọc số âm/dương hoặc giá trị số học sinh đã tô ở các cột số 0-9. Ví dụ: "40", "-2.5", "12".
-   - Đối với Bài làm tự luận / Viết tay: Đọc câu trả lời, công thức toán và lời giải.
-3. Đối chiếu câu trả lời của học sinh với ĐÁP ÁN CHUẨN:
-   - status: "correct" (Đúng hoàn toàn) | "partial" (Đúng một phần) | "incorrect" (Sai) | "ungraded" (Chưa làm/bỏ trống)
-   - pointsAwarded: Số điểm đạt được cho câu đó.
-   - feedback: Lời nhận xét ngắn gọn, chỉ rõ học sinh chọn đúng/sai so với đáp án.
-4. Trích xuất danh sách tọa độ các ô tròn bong bóng đã tô (bubbleCoordinates) trên phiếu thi (nếu là ảnh phiếu trắc nghiệm OMR):
-   - xPercent: Tọa độ ngang theo % chiều rộng ảnh (0 đến 100).
-   - yPercent: Tọa độ dọc theo % chiều cao ảnh (0 đến 100).
-   - state: "correct" (nếu học sinh tô đúng) | "incorrect" (nếu học sinh tô sai) | "missed_correct" (đáp án đúng mà học sinh không tô).
-   - option: Phương án ("A", "B", "C", "D", "Đ", "S", hoặc số).
-   - part: "part1" | "part2" | "part3" | "sbd" | "code".
-5. Tổng hợp:
-   - totalScore: Tổng điểm bài làm (làm tròn 2 chữ số thập phân, tối đa ${resolvedRubric.maxScore || 10.0}).
-   - gradeClassification: "Xuất sắc" (>= 9.0), "Giỏi" (>= 8.0), "Khá" (>= 6.5), "Trung bình" (>= 5.0), "Yếu" (< 5.0).
-   - summaryEvaluation: Nhận xét tổng thể bài làm.
-
-TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC CẤU HÌNH.`;
-
-    const response = await generateContentWithModelFallback(ai, {
-      selectedModel: requestedModel,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType,
-                data: cleanBase64,
-              },
-            },
-            {
-              text: promptText,
-            },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            studentName: { type: Type.STRING },
-            studentClass: { type: Type.STRING },
-            studentId: { type: Type.STRING },
-            sbd: { type: Type.STRING },
-            examCode: { type: Type.STRING },
-            totalScore: { type: Type.NUMBER },
-            maxScore: { type: Type.NUMBER },
-            gradeClassification: { type: Type.STRING },
-            summaryEvaluation: { type: Type.STRING },
-            details: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  questionIndex: { type: Type.INTEGER },
-                  part: { type: Type.STRING },
-                  questionContent: { type: Type.STRING },
-                  studentAnswer: { type: Type.STRING },
-                  teacherAnswer: { type: Type.STRING },
-                  pointsAwarded: { type: Type.NUMBER },
-                  maxPoints: { type: Type.NUMBER },
-                  status: { type: Type.STRING },
-                  feedback: { type: Type.STRING },
-                },
-                required: ["questionIndex", "studentAnswer", "teacherAnswer", "pointsAwarded", "maxPoints", "status"],
-              },
-            },
-            bubbleCoordinates: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  xPercent: { type: Type.NUMBER },
-                  yPercent: { type: Type.NUMBER },
-                  part: { type: Type.STRING },
-                  questionIndex: { type: Type.STRING },
-                  option: { type: Type.STRING },
-                  state: { type: Type.STRING },
-                },
-                required: ["xPercent", "yPercent", "state", "option"],
-              },
-            },
-          },
-          required: ["totalScore", "summaryEvaluation", "details"],
-        },
-      },
-    });
-
-    const parsedResult = JSON.parse(response.text);
-
-    // 1. Re-verify & guarantee all rubric items are in details
-    const rubricItems = resolvedRubric.items || [];
-    const detailsMap = new Map<string, any>();
-    (parsedResult.details || []).forEach((d: any) => {
-      detailsMap.set(String(d.questionIndex), d);
-    });
-
-    const finalizedDetails = rubricItems.map((rItem: any, idx: number) => {
-      const qNum = rItem.questionIndex ?? idx + 1;
-      const matched = detailsMap.get(String(qNum));
-      const maxPts = Number(rItem.points) || (rItem.part === 2 || rItem.questionType === "true_false" ? 1.0 : rItem.part === 3 || rItem.questionType === "short_answer" ? 0.5 : 0.25);
-
-      if (!matched) {
-        return {
-          questionIndex: qNum,
-          part: rItem.part ? `part${rItem.part}` : (idx < 12 ? "part1" : idx < 16 ? "part2" : "part3"),
-          questionContent: rItem.content || `Câu ${qNum}`,
-          studentAnswer: "Chưa làm / Bỏ trống",
-          teacherAnswer: String(rItem.correctAnswer || ""),
-          pointsAwarded: 0,
-          maxPoints: maxPts,
-          status: "ungraded" as const,
-          feedback: "Không tìm thấy câu trả lời trên bài làm.",
-        };
-      }
-
-      let pts = typeof matched.pointsAwarded === "number" ? matched.pointsAwarded : Number(matched.pointsAwarded) || 0;
-      let status = matched.status || (pts >= maxPts ? "correct" : pts > 0 ? "partial" : "incorrect");
-
-      // Auto-validate Part 2 (True/False) score with official MOET formula
-      if (rItem.part === 2 || rItem.questionType === "true_false" || matched.part === "part2") {
-        const studentAnsStr = String(matched.studentAnswer || "");
-        if (rItem.statements && Array.isArray(rItem.statements) && rItem.statements.length > 0) {
-          let subCorrectCount = 0;
-          const totalSubCount = rItem.statements.length;
-          rItem.statements.forEach((stmt: any) => {
-            const label = (stmt.label || stmt.id || "").replace(/[^a-d]/gi, "").toLowerCase();
-            const expectedVal = Boolean(stmt.correctValue);
-            const subRegex = new RegExp(`(?:${label}\\s*[:.)\\-\\s]*|\\b${label}\\b[\\s:.)\\-]*)(Đúng|Sai|Đ|S|True|False|T|F)`, "i");
-            const m = studentAnsStr.match(subRegex);
-            if (m) {
-              const studentVal = /^(?:Đúng|Đ|True|T)$/i.test(m[1]);
-              if (studentVal === expectedVal) subCorrectCount++;
-            }
-          });
-
-          if (subCorrectCount > 0 && subCorrectCount <= totalSubCount) {
-            if (subCorrectCount === 1) pts = 0.1 * (maxPts / 1.0);
-            else if (subCorrectCount === 2) pts = 0.25 * (maxPts / 1.0);
-            else if (subCorrectCount === 3) pts = 0.50 * (maxPts / 1.0);
-            else if (subCorrectCount === 4) pts = 1.00 * (maxPts / 1.0);
-            pts = Number(pts.toFixed(2));
-            status = subCorrectCount === 4 ? "correct" : "partial";
-          }
-        }
-      }
-
-      pts = Math.max(0, Math.min(maxPts, pts));
-
-      return {
-        questionIndex: qNum,
-        part: matched.part || (rItem.part ? `part${rItem.part}` : (idx < 12 ? "part1" : idx < 16 ? "part2" : "part3")),
-        questionContent: matched.questionContent || rItem.content || `Câu ${qNum}`,
-        studentAnswer: matched.studentAnswer || "Chưa làm / Bỏ trống",
-        teacherAnswer: matched.teacherAnswer || String(rItem.correctAnswer || ""),
-        pointsAwarded: pts,
-        maxPoints: maxPts,
-        status,
-        feedback: matched.feedback || (status === "correct" ? "Chính xác." : "Sai hoặc chưa đúng đáp án chuẩn."),
-      };
-    });
-
-    const effectiveDetails = finalizedDetails.length > 0 ? finalizedDetails : (parsedResult.details || []);
-
-    // Finalize score and structure
-    const calculatedScore = effectiveDetails.reduce(
-      (acc: number, d: any) => acc + (Number(d.pointsAwarded) || 0),
-      0
-    );
-    const maxScore = Number(resolvedRubric.maxScore) || 10.0;
-    const finalScore = Math.min(maxScore, Math.max(0, Number(calculatedScore.toFixed(2))));
-
-    let classification = parsedResult.gradeClassification;
-    if (!classification) {
-      if (finalScore >= 9.0) classification = "Xuất sắc";
-      else if (finalScore >= 8.0) classification = "Giỏi";
-      else if (finalScore >= 6.5) classification = "Khá";
-      else if (finalScore >= 5.0) classification = "Trung bình";
-      else classification = "Yếu";
-    }
+    const parsedResult = await recognizeAndGradePaper(paperFile, resolvedRubric, async (contents, config) => {
+      const response = await generateContentWithModelFallback(ai, { selectedModel: requestedModel, contents, config });
+      return response.text;
+    }, gradingStrictness);
+    const finalScore = parsedResult.totalScore;
+    const maxScore = parsedResult.maxScore;
+    const classification = parsedResult.gradeClassification;
 
     const gradedRecord = {
+      assessmentType: resolvedRubric.assessmentType,
+      gradeWeight: resolvedRubric.gradeWeight ?? 1,
       id: `graded-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       studentName: studentNameOverride || parsedResult.studentName || "Học sinh",
       studentClass: studentClassOverride || parsedResult.studentClass || "12A",
       studentId: parsedResult.studentId || parsedResult.sbd || `HS${Math.floor(1000 + Math.random() * 9000)}`,
       sbd: parsedResult.sbd || parsedResult.studentId || "100016",
-      examCode: parsedResult.examCode || resolvedRubric.examCode || "108",
-      detectedExamCode: parsedResult.examCode || resolvedRubric.examCode || "108",
+      examCode: parsedResult.examCode || resolvedRubric.examCode || "",
+      detectedExamCode: parsedResult.examCode || resolvedRubric.examCode || "",
       examTitle: resolvedRubric.title || "Bài kiểm tra",
       fileName: paperFile.fileName || "bai_lam.jpg",
       fileData: paperFile.data ? (paperFile.data.length < 2000000 ? paperFile.data : undefined) : undefined,
@@ -3146,9 +2945,9 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC CẤU HÌNH.`;
       maxScore,
       gradeClassification: classification,
       summaryEvaluation: parsedResult.summaryEvaluation || "Đã hoàn thành chấm điểm chi tiết bằng AI.",
-      details: effectiveDetails,
+      details: parsedResult.details,
       bubbleCoordinates: parsedResult.bubbleCoordinates || [],
-      teacherNotes: "",
+      teacherNotes: parsedResult.teacherNotes || "",
       isReviewedByTeacher: false,
     };
 
