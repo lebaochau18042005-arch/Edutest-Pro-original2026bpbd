@@ -1417,7 +1417,7 @@ function splitRawTextIntoStatementsServer(text: string): { id: string; label: st
 
   // 2. Position-based splitting for non-table text
   // IMPORTANT: Only match lowercase a-d markers (or explicit prefixed markers like "Ý a/A", "Mệnh đề a/A")
-  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:(?:\*{0,2}(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))(?:\)|\.|\:|\/|\s*[-–—]|\s+)\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])(?:\)|\.|\:|\/|\s*[-–—]))\*{0,2}))\s*/g;
+  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:(?:\*{0,2}(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))(?:\)|\.|\:|\/|\s*[-–—]|\s+)\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])\)|([a-d])(?:\.|\:|\/|\s*[-–—])(?=\s))\*{0,2}))\s*/g;
   const matches: { letter: string; index: number; matchLength: number }[] = [];
   let m;
 
@@ -2323,8 +2323,10 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
   const part3Regex = /^(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:III|3|THỨ\s*BA|THỨ\s*3|BA)\b|\bIII\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|TRẢ\s*LỜI|ĐIỀN|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*TRẢ\s*LỜI\s*NGẮN\b|\bCÂU\s*(?:TRẮC\s*NGHIỆM\s*)?(?:HỎI\s*)?TRẢ\s*LỜI\s*NGẮN\b|\bTHÍ\s*SINH\s*TRẢ\s*LỜI\s*TỪ\s*CÂU\b)/i;
 
   const questionRegex = /^(?:\*{0,2}(?:Câu|Bài|Question)\s*(\d+)|\*{0,2}(\d+)[.)/:]|\[Câu\s*(\d+)\])(?:\s*[\(\[][^\)\]]+[\)\]])?[\s.:-]/i;
-  const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/i;
-  const subStatementRegex = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i;
+  // Option regex MUST match UPPERCASE A-D only (no /i flag) to prevent matching statement a) as option A
+  const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/;
+  // Sub-statement regex matches lowercase a-d or explicit "Ý a/A", "Mệnh đề a/A"
+  const subStatementRegex = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))[.):/\-–—\s]*\*{0,2})\s*(.*)/i;
   const answerLineRegex = /^(?:Đáp án|Kết quả|Đ\/A|Key|Answer)[\s.:]+(.*)/i;
 
   const finalizeCurrentQ = () => {
@@ -2392,18 +2394,30 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
     // If Part 2, strictly ensure all 4 statements a, b, c, d exist
     if (currentQ.part === 2) {
       const requiredLetters = ["a", "b", "c", "d"];
-      const existingLetters = currentQ.statements.map((s: any) => s.id);
-      requiredLetters.forEach((l) => {
-        if (!existingLetters.includes(l)) {
-          currentQ.statements.push({
+      const existingMap: Record<string, any> = {};
+      (currentQ.statements || []).forEach((s: any) => {
+        existingMap[s.id] = s;
+      });
+      currentQ.statements = requiredLetters.map((l) => {
+        if (existingMap[l]) {
+          let cleanText = String(existingMap[l].text || "").trim()
+            .replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\)|Một\\)|Hai\\)|Ba\\)|Bốn\\))\\s*`, "i"), "")
+            .replace(/^[.,;:-]\s*/, "")
+            .trim();
+          return {
             id: l,
             label: `${l})`,
-            text: `Khẳng định ý ${l}`,
-            correctValue: true,
-          });
+            text: cleanText || `Mệnh đề ${l}`,
+            correctValue: Boolean(existingMap[l].correctValue),
+          };
         }
+        return {
+          id: l,
+          label: `${l})`,
+          text: `Mệnh đề ${l}`,
+          correctValue: true,
+        };
       });
-      currentQ.statements.sort((a: any, b: any) => a.id.localeCompare(b.id));
       currentQ.options = [];
     }
 
@@ -2580,13 +2594,18 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
       } else if (currentQ.part === 2) {
         const subMatch = trimmed.match(subStatementRegex);
         if (subMatch) {
-          const subLetter = (subMatch[1] || subMatch[2] || subMatch[3] || subMatch[4] || subMatch[5] || "a").toLowerCase();
+          const subLetter = (subMatch[1] || subMatch[2] || subMatch[3] || "a").toLowerCase();
           const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(trimmed);
-          const subText = (subMatch[6] || "").replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
+          const rawSubText = subMatch[4] || "";
+          const subText = rawSubText
+            .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "")
+            .replace(/^[.,;:-]\s*/, "")
+            .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+            .trim();
           currentQ.statements.push({
             id: subLetter,
             label: `${subLetter})`,
-            text: subText,
+            text: subText || `Ý ${subLetter}`,
             correctValue: isCorrect,
           });
         } else if (currentQ.statements.length === 0) {

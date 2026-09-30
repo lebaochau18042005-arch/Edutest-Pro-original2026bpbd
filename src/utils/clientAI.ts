@@ -380,8 +380,8 @@ export function splitRawTextIntoStatements(text: string): TrueFalseStatement[] {
 
   // 3. Position-based splitting for non-table text
   // IMPORTANT: Only match lowercase a-d markers (or explicit prefixed markers like "Ý a/A", "Mệnh đề a/A")
-  // MUST NOT match raw uppercase A., B., C., D. options as True/False statements!
-  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:(?:\*{0,2}(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))(?:\)|\.|\:|\/|\s*[-–—]|\s+)\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])(?:\)|\.|\:|\/|\s*[-–—]))\*{0,2}))\s*/g;
+  // MUST NOT match raw uppercase A., B., C., D. options or math products like a.e + b
+  const markerRegex = /(?:^|[\n\r\t]|\s{2,}|\s+)(?:(?:\*{0,2}(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))(?:\)|\.|\:|\/|\s*[-–—]|\s+)\*{0,2})|(?:\*{0,2}(?:\[([a-d])\]|\(([a-d])\)|([a-d])\)|([a-d])(?:\.|\:|\/|\s*[-–—])(?=\s))\*{0,2}))\s*/g;
   const matches: { letter: string; index: number; matchLength: number }[] = [];
   let m;
 
@@ -569,8 +569,10 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
   const part3Regex = /^(?:[#*_\s-]*)(?:(?:PHẦN|Phần|PART|Part|DẠNG\s*THỨC|Dạng\s*thức|DẠNG|Dạng)\s*(?:III|3|THỨ\s*BA|THỨ\s*3|BA)\b|\bIII\s*[.:\-\)]\s*(?:TRẮC\s*NGHIỆM|TRẢ\s*LỜI|ĐIỀN|CÂU\s*HỎI|PHẦN)|\bTRẮC\s*NGHIỆM\s*TRẢ\s*LỜI\s*NGẮN\b|\bCÂU\s*(?:TRẮC\s*NGHIỆM\s*)?(?:HỎI\s*)?TRẢ\s*LỜI\s*NGẮN\b|\bTHÍ\s*SINH\s*TRẢ\s*LỜI\s*TỪ\s*CÂU\b)/i;
 
   const questionRegex = /^(?:[#*_\s-]*)(?:(?:Câu|Bài|Question)\s*(\d+)|\*{0,2}(\d+)[.)/:]|\[Câu\s*(\d+)\])(?:\s*[\(\[][^\)\]]+[\)\]])?[\s.:-]/i;
-  const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/i;
-  const subStatementRegex = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]\*{0,2}|\(([a-d])\)|\b([a-d])\))\s*(.*)/i;
+  // Option regex MUST match UPPERCASE A-D only (no /i flag) to prevent matching statement a) as option A
+  const optionRegex = /^(?:\*{0,2}([A-D])[.)/:]\*{0,2})\s*(.*)/;
+  // Sub-statement regex matches lowercase a-d or explicit "Ý a/A", "Mệnh đề a/A"
+  const subStatementRegex = /^(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?([a-dA-D])\]?|\(([a-dA-D])\)|([a-dA-D]))[.):/\-–—\s]*\*{0,2})\s*(.*)/i;
   const answerLineRegex = /^(?:[#*_\s-]*)(?:Đáp án|Đáp số|Kết quả|Đ\/A|Key|Answer|Điền số|ĐA|KQ|Kết luận)[\s.:]+(.*)/i;
 
   const finalizeCurrentQ = () => {
@@ -584,9 +586,12 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       ? currentQ.statements
       : splitRawTextIntoStatements(currentQ.content || "");
 
+    const hasOpts = extractedOpts.length >= 2;
+    const hasStmts = extractedStmts.length >= 2;
+
     // 1. KHÓA CHẶT THEO TIÊU ĐỀ PHẦN VÀ DỮ LIỆU ĐẶC TRƯNG
     if (currentQ.part === 1) {
-      if (extractedOpts.length < 2 && extractedStmts.length >= 2 && !currentQ.options?.length) {
+      if (!hasOpts && hasStmts && !currentQ.options?.length) {
         currentQ.part = 2;
         currentQ.questionType = "true_false";
         currentQ.statements = extractedStmts;
@@ -598,12 +603,13 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
         currentQ.shortAnswer = undefined;
       }
     } else if (currentQ.part === 2) {
-      if (extractedOpts.length >= 2 && extractedStmts.length < 2) {
+      if (hasOpts && !hasStmts) {
         currentQ.part = 1;
         currentQ.questionType = "multiple_choice";
         currentQ.options = extractedOpts;
         currentQ.statements = undefined;
       } else {
+        currentQ.part = 2;
         currentQ.questionType = "true_false";
         currentQ.options = [];
         currentQ.shortAnswer = undefined;
@@ -620,9 +626,22 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
         }
       }
     } else if (currentQ.part === 3) {
-      currentQ.questionType = "short_answer";
-      currentQ.options = [];
-      currentQ.statements = undefined;
+      if (hasOpts && !hasStmts) {
+        currentQ.part = 1;
+        currentQ.questionType = "multiple_choice";
+        currentQ.options = extractedOpts;
+        currentQ.statements = undefined;
+      } else if (hasStmts && !hasOpts) {
+        currentQ.part = 2;
+        currentQ.questionType = "true_false";
+        currentQ.statements = extractedStmts;
+        currentQ.options = [];
+      } else {
+        currentQ.part = 3;
+        currentQ.questionType = "short_answer";
+        currentQ.options = [];
+        currentQ.statements = undefined;
+      }
     } else {
       currentQ.part = 1;
       currentQ.questionType = "multiple_choice";
@@ -640,14 +659,23 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
       currentQ.statements = requiredLetters.map((l, lIdx) => {
         if (existingMap[l]) {
           let cleanText = (existingMap[l].text || "").trim();
-          cleanText = cleanText.replace(new RegExp(`^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]?|\\(${l}\\)|${l})[.):/\\-–—\\s]*\\*{0,2}|\\(${l}\\)|\\b${l}\\))\\s*`, "i"), "").trim();
+          cleanText = cleanText
+            .replace(
+              new RegExp(
+                `^(?:\\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\\s*)?(?:\\[?${l}\\]|\\(${l}\\)|${l}[.):/\\-–—])\\*{0,2}|\\(${l}\\)|${l}[.):/\\-–—]|Một\\)|Hai\\)|Ba\\)|Bốn\\))\\s*`,
+                "i"
+              ),
+              ""
+            )
+            .replace(/^[.,;:-]\s*/, "")
+            .trim();
           if (/^Khẳng định/i.test(cleanText) && currentQ.options && currentQ.options[lIdx] && !/^Phương án/i.test(currentQ.options[lIdx].trim())) {
             cleanText = currentQ.options[lIdx];
           }
           return {
             id: l,
             label: `${l})`,
-            text: cleanText || `Ý ${l}`,
+            text: cleanText || `Mệnh đề ${l}`,
             correctValue: Boolean(existingMap[l].correctValue),
             explanation: existingMap[l].explanation || "",
           };
@@ -872,13 +900,18 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
         const subMatch = trimmed.match(subStatementRegex);
         if (subMatch) {
           if (!currentQ.statements) currentQ.statements = [];
-          const subLetter = (subMatch[1] || subMatch[2] || subMatch[3] || subMatch[4] || subMatch[5] || "a").toLowerCase();
+          const subLetter = (subMatch[1] || subMatch[2] || subMatch[3] || "a").toLowerCase();
           const isCorrect = /\(Đúng\)|\[Đúng\]|Đúng|\(Đ\)|true/i.test(trimmed);
-          const subText = (subMatch[6] || "").replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)/gi, "").trim();
+          const rawSubText = subMatch[4] || "";
+          const subText = rawSubText
+            .replace(/\(Đúng\)|\(Sai\)|\[Đúng\]|\[Sai\]|\(Đ\)|\(S\)|\bTrue\b|\bFalse\b/gi, "")
+            .replace(/^[.,;:-]\s*/, "")
+            .replace(/[:\-–—]\s*(?:Đúng|Sai)\s*$/i, "")
+            .trim();
           currentQ.statements.push({
             id: subLetter,
             label: `${subLetter})`,
-            text: subText,
+            text: subText || `Ý ${subLetter}`,
             correctValue: isCorrect,
           });
         } else if (!currentQ.statements || currentQ.statements.length === 0) {
@@ -907,7 +940,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
 }
 function isSyntheticPlaceholder(value: unknown): boolean {
   const text = String(value || "").trim();
-  return !text || /^(?:Phương án|Mệnh đề|Ý|Khẳng định(?: ý)?)\s*[A-Da-d]?$/i.test(text);
+  return !text || /^(?:Phương án|Mệnh đề|Ý|Khẳng định(?: ý)?)\s*[A-Da-d]?$/i.test(text) || /^[.,;:-]$/.test(text);
 }
 
 /**
@@ -1108,7 +1141,10 @@ export function mergeParsedQuestionsWithSource(
     const part = question.part === 2 ? 2 : question.part === 3 ? 3 : 1;
     let source = sourceByPart[part][partOffsets[part]++];
     if (!source && sourceQuestions.length === parsedQuestions.length) {
-      source = sourceQuestions[qIdx];
+      const candidate = sourceQuestions[qIdx];
+      if (candidate && (candidate.part === part || (!candidate.part && part === 1))) {
+        source = candidate;
+      }
     }
     if (!source) {
       return {
