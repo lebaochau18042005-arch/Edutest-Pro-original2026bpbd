@@ -45,7 +45,10 @@ import {
 } from "../../utils/examHelpers";
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
 import { clientExtractRubric, clientGradePaper } from "../../utils/clientAI";
+import { GradedPaperReview } from "./GradedPaperReview";
 import { RubricEditor } from "./RubricEditor";
+import { PaperScanReview } from "./PaperScanReview";
+import type { PaperScan } from "../../utils/paperGrading";
 import { validateRubricSettings } from "../../utils/rubricSettings";
 
 interface AIGraderViewProps {
@@ -65,6 +68,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const [rubrics, setRubrics] = useState<ExamRubric[]>([]);
   const [selectedRubricId, setSelectedRubricId] = useState<string>("default-math12");
   const [activeRubric, setActiveRubric] = useState<ExamRubric | null>(null);
+  const [scanReview, setScanReview] = useState<{ scan: PaperScan; rubric: ExamRubric; imageUrl: string; mimeType: string } | null>(null);
+  const reviewWaiter = useRef<{ resolve: (scan: PaperScan) => void; reject: (error: Error) => void } | null>(null);
+  useEffect(() => () => {
+    reviewWaiter.current?.reject(new Error("Đã dừng duyệt phiếu."));
+    reviewWaiter.current = null;
+  }, []);
 
   // Rubric creation mode: "from_exam" | "upload_file" | "manual_text"
   const [rubricCreateMode, setRubricCreateMode] = useState<"from_exam" | "upload_file" | "manual_text">("from_exam");
@@ -444,6 +453,10 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
         const apiKey = getStoredApiKey();
         const model = getStoredSelectedModel();
         const json = await clientGradePaper({
+          reviewScan: scan => new Promise<PaperScan>((resolve, reject) => {
+            reviewWaiter.current = { resolve, reject };
+            setScanReview({ scan, rubric: activeRubric, imageUrl: item.previewUrl, mimeType: item.mimeType });
+          }),
           paperFile: {
             data: base64Data,
             mimeType: item.mimeType,
@@ -518,12 +531,13 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const handleUpdateDetailScore = async (
     questionIdx: number | string,
     newPoints: number,
-    newFeedback?: string
+    newFeedback?: string,
+    part?: string
   ) => {
     if (!selectedPaperForModal) return;
 
     const updatedDetails = selectedPaperForModal.details.map((d) => {
-      if (String(d.questionIndex) === String(questionIdx)) {
+      if (String(d.questionIndex) === String(questionIdx) && (part === undefined || d.part === part)) {
         return {
           ...d,
           pointsAwarded: newPoints,
@@ -673,6 +687,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {scanReview && <PaperScanReview {...scanReview} onConfirm={scan => {
+        reviewWaiter.current?.resolve(scan); reviewWaiter.current = null; setScanReview(null);
+      }} onCancel={() => {
+        reviewWaiter.current?.reject(new Error("Đã dừng để kiểm tra phiếu. Chưa lưu điểm bài này."));
+        reviewWaiter.current = null; setScanReview(null);
+      }} />}
       {/* Top Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 text-white relative overflow-hidden shadow-xl">
         <div className="absolute -right-12 -top-12 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
@@ -1765,238 +1785,7 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
       {/* ========================================================================= */}
       {/* DETAILED SIDE-BY-SIDE MODAL REVIEW                                       */}
       {/* ========================================================================= */}
-      {selectedPaperForModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="p-4 sm:p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/30 text-blue-300 border border-blue-500/40">
-                    Đối Chiếu & Giám Khảo Chấm Điểm
-                  </span>
-                  <span className="text-xs text-slate-400 font-mono">
-                    Mã đề: {selectedPaperForModal.examCode || "101"}
-                  </span>
-                </div>
-                <h2 className="text-lg sm:text-xl font-bold text-white flex items-center space-x-3">
-                  <span>{selectedPaperForModal.studentName}</span>
-                  <span className="text-slate-400 font-normal text-sm">
-                    (Lớp {selectedPaperForModal.studentClass})
-                  </span>
-                </h2>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <div className="text-right hidden sm:block">
-                  <p className="text-[10px] text-slate-400 uppercase font-bold">Tổng Điểm</p>
-                  <p className="text-xl font-black text-emerald-400">
-                    {selectedPaperForModal.totalScore} / {selectedPaperForModal.maxScore}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPaperForModal(null)}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body: Split Screen */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 flex-1 overflow-y-auto divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
-              {/* Left Column: Student Paper View (Zoom & Rotation) */}
-              <div className="lg:col-span-5 p-4 bg-slate-950 flex flex-col space-y-3">
-                <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-2">
-                  <span className="font-bold text-slate-300">File bài làm gốc: {selectedPaperForModal.fileName}</span>
-                  <div className="flex items-center space-x-1">
-                    <button
-                      type="button"
-                      onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.25))}
-                      className="p-1 hover:bg-slate-800 text-slate-300 rounded"
-                      title="Phóng to"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRotationAngle((r) => (r + 90) % 360)}
-                      className="p-1 hover:bg-slate-800 text-slate-300 rounded"
-                      title="Xoay ảnh"
-                    >
-                      <RotateCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 bg-slate-900 rounded-2xl flex items-center justify-center p-2 overflow-hidden min-h-[300px]">
-                  {selectedPaperForModal.fileData ? (
-                    <img
-                      src={selectedPaperForModal.fileData}
-                      alt="Student Paper"
-                      style={{
-                        transform: `scale(${zoomLevel}) rotate(${rotationAngle}deg)`,
-                        transition: "transform 0.2s ease",
-                      }}
-                      className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg"
-                    />
-                  ) : (
-                    <div className="text-center p-6 space-y-2 text-slate-400 text-xs">
-                      <FileText className="w-10 h-10 text-slate-600 mx-auto" />
-                      <p className="font-bold text-slate-300">{selectedPaperForModal.fileName}</p>
-                      <p className="text-[11px] text-slate-500">
-                        File tài liệu đã được AI OCR trích xuất thành công toàn bộ câu trả lời.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right Column: Side-by-Side Question Comparison & Scoring */}
-              <div className="lg:col-span-7 p-4 sm:p-6 space-y-6 overflow-y-auto bg-slate-50">
-                {/* AI Summary Card */}
-                <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-2">
-                  <div className="flex items-center space-x-2 text-xs font-bold text-blue-700">
-                    <Sparkles className="w-4 h-4 text-blue-600" />
-                    <span>Nhận Xét Tổng Thể Của AI Giám Khảo</span>
-                  </div>
-                  <p className="text-xs text-slate-700 leading-relaxed">
-                    {selectedPaperForModal.summaryEvaluation}
-                  </p>
-                </div>
-
-                {/* Per-Question Side-by-Side Table */}
-                <div className="space-y-3">
-                  <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                    Đối Chiếu Chi Tiết Từng Câu Hỏi ({selectedPaperForModal.details.length} câu)
-                  </h4>
-
-                  <div className="space-y-3">
-                    {selectedPaperForModal.details.map((detail, idx) => (
-                      <div
-                        key={idx}
-                        className={`p-4 rounded-2xl border transition-all ${
-                          detail.status === "correct"
-                            ? "bg-white border-emerald-200 shadow-xs"
-                            : detail.status === "partial"
-                            ? "bg-white border-amber-200 shadow-xs"
-                            : "bg-white border-rose-200 shadow-xs"
-                        }`}
-                      >
-                        {/* Question Header & Score Controller */}
-                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-2.5">
-                          <div className="flex items-center space-x-2">
-                            <span className="font-bold text-slate-900 text-xs">
-                              Câu {detail.questionIndex}:
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                detail.status === "correct"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : detail.status === "partial"
-                                  ? "bg-amber-100 text-amber-800"
-                                  : "bg-rose-100 text-rose-800"
-                              }`}
-                            >
-                              {detail.status === "correct"
-                                ? "Đúng"
-                                : detail.status === "partial"
-                                ? "Đúng 1 phần"
-                                : "Sai / Chưa đúng"}
-                            </span>
-                          </div>
-
-                          {/* Editable Score Input */}
-                          <div className="flex items-center space-x-1.5 text-xs">
-                            <span className="text-slate-500 text-[11px]">Điểm đạt:</span>
-                            <input
-                              type="number"
-                              step="0.25"
-                              min="0"
-                              max={detail.maxPoints}
-                              value={detail.pointsAwarded}
-                              onChange={(e) =>
-                                handleUpdateDetailScore(
-                                  detail.questionIndex,
-                                  parseFloat(e.target.value) || 0
-                                )
-                              }
-                              className="w-14 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-center font-bold text-xs text-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            />
-                            <span className="text-slate-400 font-semibold">
-                              / {detail.maxPoints}đ
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Side-by-Side Comparison Box */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                          {/* Student Answer */}
-                          <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                            <p className="text-[10px] font-bold uppercase text-slate-500">
-                              Câu trả lời của học sinh:
-                            </p>
-                            <p className="font-bold text-slate-900 break-words font-mono">
-                              {detail.studentAnswer || "(Trống)"}
-                            </p>
-                          </div>
-
-                          {/* Teacher Correct Answer */}
-                          <div className="p-2.5 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-1">
-                            <p className="text-[10px] font-bold uppercase text-emerald-700">
-                              Đáp án chuẩn của giáo viên:
-                            </p>
-                            <p className="font-bold text-emerald-900 break-words font-mono">
-                              {detail.teacherAnswer || "-"}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Detailed Feedback & Explanation */}
-                        {detail.feedback && (
-                          <div className="mt-2.5 p-2 bg-blue-50/50 rounded-xl text-[11px] text-slate-700 space-y-1">
-                            <span className="font-bold text-blue-700">Nhận xét & Lỗi sai: </span>
-                            <span>{detail.feedback}</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Teacher Custom Notes Field */}
-                <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-2">
-                  <label className="block font-bold text-slate-900 text-xs">
-                    Ghi Chú & Lời Dặn Riêng Của Giáo Viên:
-                  </label>
-                  <textarea
-                    rows={3}
-                    defaultValue={selectedPaperForModal.teacherNotes || ""}
-                    onBlur={(e) => handleSaveTeacherNotes(e.target.value)}
-                    placeholder="Nhập ghi chú hoặc nhắc nhở cho học sinh này (tự động lưu khi bấm ra ngoài)..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
-              <span className="text-xs text-slate-500">
-                Thầy cô có thể điều chỉnh điểm từng câu trực tiếp trên bảng.
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedPaperForModal(null)}
-                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs transition-all"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {selectedPaperForModal && <GradedPaperReview key={selectedPaperForModal.id} paper={selectedPaperForModal} onClose={() => setSelectedPaperForModal(null)} onScore={handleUpdateDetailScore} onNotes={handleSaveTeacherNotes} />}
     </div>
   );
 };

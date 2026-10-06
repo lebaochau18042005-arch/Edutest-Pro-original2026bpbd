@@ -2110,6 +2110,7 @@ Trả về JSON array các rubric item.`;
 // 6. AI Grade Paper (AIGraderView & StudentPortal)
 // ──────────────────────────────────────────────
 export async function clientGradePaper(payload: {
+  reviewScan?: import("./paperGrading").ReviewPaperScan;
   paperFile: { data: string; mimeType: string; fileName: string };
   rubric: any;
   studentNameOverride?: string;
@@ -2123,7 +2124,7 @@ export async function clientGradePaper(payload: {
     // Share one budget across OCR, fallback and optional essay assessment.
     const deadline = Date.now() + 90000;
     const result = await recognizeAndGradePaper(paperFile, rubric,
-      (contents, config) => generateWithFallback(contents, apiKey, model, config, deadline), gradingStrictness);
+      (contents, config) => generateWithFallback(contents, apiKey, model, config, deadline), gradingStrictness, payload.reviewScan);
 
     const gradedPaper = {
       assessmentType: rubric.assessmentType,

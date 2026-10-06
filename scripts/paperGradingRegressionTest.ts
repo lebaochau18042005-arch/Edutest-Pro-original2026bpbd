@@ -35,3 +35,19 @@ assert.equal(calls,1); assert.equal(recognized.totalScore,0);
 await assert.rejects(recognizeAndGradePaper({data:"image",mimeType:"image/jpeg"},make([mc]),async()=>"bad json"),/không hợp lệ/);
 await assert.rejects(recognizeAndGradePaper({data:"image",mimeType:"image/jpeg"},make([mc]),async()=>JSON.stringify({part1:[{question:3,selected:"A"},{question:3,selected:"C"}],part2:[],part3:[]})),/trùng/);
 console.log("Passed: configurable scoring, weights, printed numbers, validation, wrong answers, isolated OCR and invalid scans.");
+
+const mistakenOCR = async () => JSON.stringify({examCode:"9001",part1:[{question:3,selected:"C"}],part2:[],part3:[]});
+let reviewed = false;
+const corrected = await recognizeAndGradePaper({data:"image",mimeType:"image/jpeg"},make([mc]),mistakenOCR,"standard",async scan => {
+  reviewed = true;
+  assert.equal(scan.part1[3],"C");
+  return {...scan,part1:{3:"A"}};
+});
+assert.ok(reviewed);
+assert.equal(corrected.details[0].studentAnswer,"A");
+assert.equal(corrected.totalScore,0);
+assert.match(corrected.teacherNotes!,/đã duyệt/);
+await assert.rejects(recognizeAndGradePaper({data:"image",mimeType:"image/jpeg"},make([mc]),mistakenOCR,"standard",async () => { throw new Error("Dừng duyệt"); }),/Dừng duyệt/);
+const unreviewed = await recognizeAndGradePaper({data:"image",mimeType:"image/jpeg"},make([mc]),mistakenOCR);
+assert.match(unreviewed.summaryEvaluation,/CHƯA DUYỆT/);
+console.log("Passed: correction before grading, cancellation without result, unreviewed results marked provisional.");

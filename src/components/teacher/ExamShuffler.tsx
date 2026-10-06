@@ -1904,8 +1904,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => openPresentationInNewTab(selectedQuestions, config, config.originalExamCode || "101")}
-                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                            onClick={() => {
+                              if (selectedQuestions && selectedQuestions.length > 0) {
+                                openPresentationInNewTab(selectedQuestions, config, config.originalExamCode || "101");
+                              } else {
+                                alert("Vui lòng nhập hoặc chọn câu hỏi trước khi mở bài giảng trình chiếu!");
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                            title="Mở bài giảng trình chiếu chữa đề thi trực tiếp trên máy chiếu/màn hình"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
                             Bài Giảng Slides (.html)
@@ -3068,11 +3075,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
                     type="button"
                     onClick={() => {
                       const currentVariant = generatedVariants.find((v) => v.examCode === activeVariantTab) || generatedVariants[0];
-                      if (currentVariant) {
-                        openPresentationInNewTab(currentVariant.questions, config, activeVariantTab);
+                      const qList = currentVariant?.questions?.length ? currentVariant.questions : selectedQuestions;
+                      if (qList && qList.length > 0) {
+                        openPresentationInNewTab(qList, config, currentVariant?.examCode || activeVariantTab || config.originalExamCode || "101");
+                      } else {
+                        alert("Vui lòng nhập hoặc chọn câu hỏi trước khi mở bài giảng trình chiếu!");
                       }
                     }}
-                    className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center gap-1.5 transition-all shadow-2xs"
+                    className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
                     title="Mở bài giảng trình chiếu chữa đề thi trực tiếp trên máy chiếu/màn hình"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-blue-600" />
