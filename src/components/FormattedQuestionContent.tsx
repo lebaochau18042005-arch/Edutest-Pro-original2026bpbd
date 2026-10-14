@@ -128,7 +128,6 @@ export const SafeExamImage: React.FC<{
  */
 export const MathTextRenderer: React.FC<{ text: string }> = ({ text }) => {
   const [modalImage, setModalImage] = useState<{ src: string; alt: string } | null>(null);
-  const hasLeakedFormulaToken = /__FORMULA_TOKEN_\d+__/.test(text || "");
 
   const renderedSegments = useMemo(() => {
     if (!text) return [];
@@ -208,11 +207,6 @@ export const MathTextRenderer: React.FC<{ text: string }> = ({ text }) => {
 
   return (
     <>
-      {hasLeakedFormulaToken && (
-        <span className="inline-flex mr-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-300 text-[10px] font-bold text-amber-800">
-          ⚠ Công thức nguồn chưa được khôi phục
-        </span>
-      )}
       <span className="whitespace-pre-line inline-flex flex-wrap items-baseline gap-0 align-middle">
         {renderedSegments.map((part, pIdx) => {
           if (part.type === "text") {

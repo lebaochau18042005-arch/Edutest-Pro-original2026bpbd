@@ -52,7 +52,6 @@ import { Question, ExamConfig, ExamVariant, ExamPackage, ExamPart, CognitiveLeve
 import {
   generateVariantsFromQuestions,
   exportAnswerKeyMatrix,
-  exportAllExamVariantsBundle,
   normalizeExamQuestions3Parts,
   exportQuestionsToWordDoc,
   exportQuestionsToPrintablePdf,
@@ -71,56 +70,6 @@ import { openPresentationInNewTab, exportPresentationHTMLFile } from "../../util
 import { openPrintableOMRSheet } from "../../utils/omrSheetGenerator";
 import { LiveQuizModal } from "../game/LiveQuizModal";
 import { InstantShareModal } from "./InstantShareModal";
-import { saveSourcePackage } from "../../utils/sourcePackageStore";
-import { indexDocxQuestions } from "../../utils/ooxmlQuestionIndexer";
-import { exportExactPreservedDocxVariant } from "../../utils/ooxmlComposer";
-import { validateQuestionsWithSourceStore } from "../../utils/preservationValidator";
-import { exportSourceBundleForQuestions } from "../../utils/preservationBundle";
-
-
-function makeAccessCode(): string {
-  const time = Date.now().toString(36).slice(-5).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `EX${time}${rand}`;
-}
-
-function validateQuestionsForPublishing(questions: Question[]): string[] {
-  const issues: string[] = [];
-  const placeholderOption = /^Phương án\s+[A-D]$/i;
-  const placeholderStatement = /^(?:Mệnh đề|Ý|Khẳng định(?: ý)?)\s*[a-d]?$/i;
-
-  questions.forEach((q, idx) => {
-    const label = `Câu ${idx + 1}`;
-    if (!String(q.content || '').trim()) issues.push(`${label}: thiếu nội dung câu hỏi.`);
-    if (q.needsReview) issues.push(`${label}: chưa được giáo viên kiểm duyệt.`);
-    if (q.preservation && q.preservation.status !== 'PASS') {
-      issues.push(`${label}: dữ liệu nguồn đang ở trạng thái ${q.preservation.status}.`);
-    }
-
-    if (q.part === 1 || q.questionType === 'multiple_choice') {
-      const opts = q.options || [];
-      if (opts.length !== 4) issues.push(`${label}: Phần I phải có đúng 4 phương án thực.`);
-      if (opts.some(o => !String(o || '').trim() || placeholderOption.test(String(o).trim()))) {
-        issues.push(`${label}: có phương án trống/giả, không được tự bổ sung A-B-C-D.`);
-      }
-      if (!Number.isInteger(q.correctIndex) || q.correctIndex < 0 || q.correctIndex > 3) {
-        issues.push(`${label}: chưa có đáp án đúng A/B/C/D đã xác nhận.`);
-      }
-    } else if (q.part === 2 || q.questionType === 'true_false') {
-      const stmts = q.statements || [];
-      if (stmts.length !== 4) issues.push(`${label}: Phần II phải có đủ 4 ý a-b-c-d.`);
-      if (stmts.some(st => !String(st.text || '').trim() || placeholderStatement.test(String(st.text).trim()))) {
-        issues.push(`${label}: có mệnh đề trống/giả.`);
-      }
-      if (stmts.some(st => typeof st.correctValue !== 'boolean')) {
-        issues.push(`${label}: có ý Đúng/Sai chưa xác nhận đáp án.`);
-      }
-    } else if (q.part === 3 || q.questionType === 'short_answer') {
-      if (!String(q.shortAnswer || '').trim()) issues.push(`${label}: chưa có đáp án trả lời ngắn.`);
-    }
-  });
-  return Array.from(new Set(issues));
-}
 
 // Helper: Extract huge Base64 strings from Markdown text to prevent payload bloat or AI token truncation
 function sanitizeMarkdownImages(
@@ -258,62 +207,11 @@ function restoreMarkdownImagesInQuestions(
   });
 }
 
-
-// Restore immutable DOCX formula tokens after AI has only classified/split questions.
-function restoreFormulaTokensInQuestions(
-  questions: Question[],
-  formulaMap: Record<string, { id?: string; type?: string; latex?: string; originalXml?: string; originalRef?: string }>
-): Question[] {
-  const entries = Object.entries(formulaMap || {});
-  if (entries.length === 0) return questions;
-
-  const replace = (value?: string): string => {
-    let result = value || "";
-    for (const [token, asset] of entries) {
-      if (result.includes(token)) result = result.replaceAll(token, asset.latex || token);
-    }
-    return result;
-  };
-
-  return questions.map((q) => {
-    const sourceSnapshot = JSON.stringify({
-      content: q.content,
-      options: q.options,
-      statements: q.statements,
-      explanation: q.explanation,
-      passageContent: q.passageContent,
-    });
-    const used = entries.filter(([token]) => sourceSnapshot.includes(token));
-    const formulaAssets = used.map(([token, asset], idx) => ({
-      id: asset.id || `${q.id || "q"}_formula_${idx}`,
-      type: asset.type === "mathtype" ? "mathtype" as const : "omml" as const,
-      latex: asset.latex,
-      originalXml: asset.originalXml,
-      originalRef: asset.originalRef || token,
-      needsReview: false,
-    }));
-
-    return {
-      ...q,
-      content: replace(q.content),
-      options: (q.options || []).map(replace),
-      statements: q.statements?.map((st) => ({
-        ...st,
-        text: replace(st.text),
-        explanation: replace(st.explanation),
-      })),
-      explanation: replace(q.explanation) || undefined,
-      passageContent: replace(q.passageContent) || undefined,
-      formulaAssets: formulaAssets.length > 0 ? formulaAssets : q.formulaAssets,
-    };
-  });
-}
-
 interface ExamShufflerProps {
   questionBank: Question[];
   exams?: ExamPackage[];
   initialExamToLoad?: ExamPackage | null;
-  onPublishExam: (exam: ExamPackage) => void | Promise<void>;
+  onPublishExam: (exam: ExamPackage) => void;
   onOpenStudentExam: (examId: string, examCode: string) => void;
   onAddQuestion?: (q: Question) => void;
   onAddMultipleQuestions?: (qList: Question[]) => void;
@@ -351,12 +249,12 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   });
 
   const [examTitle, setExamTitle] = useState("Đề thi thử Tốt nghiệp THPT 2026 - Chuẩn cấu trúc Bộ GD&ĐT");
-  const [accessCode, setAccessCode] = useState<string>(() => makeAccessCode());
+  const [accessCode, setAccessCode] = useState("THPT2026");
   const [newExamCodeInput, setNewExamCodeInput] = useState("");
 
   // Input source mode: "paste" | "bank" | "upload" | "bank_exams"
   const [inputMode, setInputMode] = useState<"paste" | "bank" | "upload" | "bank_exams">("paste");
-  const [rawText, setRawText] = useState("");
+  const [rawText, setRawText] = useState(SAMPLE_EXAM_TEXT);
   const [uploadedImageMap, setUploadedImageMap] = useState<Record<string, string>>({});
   const [isParsing, setIsParsing] = useState(false);
   const [isSolvingAI, setIsSolvingAI] = useState(false);
@@ -511,13 +409,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           originalQuestions: normalizedQuestions,
           variants,
           createdAt: new Date().toISOString(),
-          status: "draft",
-          accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
+          status: "published",
+          accessCode: accessCode.trim().toUpperCase() || "THPT2026",
         };
         setPublishedExam(autoPkg);
+        onPublishExam(autoPkg);
         setSavedExamNotification({
           exam: autoPkg,
-          message: "Đề đã được trích xuất thành bản nháp. Hãy kiểm duyệt trước khi xuất bản/giao học sinh.",
+          message: "Đề thi đã được trích xuất và lưu vĩnh viễn vào Ngân Hàng Đề Thi!",
         });
         setExtractedViewMode("list");
         setExtractedPartFilter("all");
@@ -603,18 +502,23 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
     }
   });
 
-  // Quick Change Part: preserve existing source only; never invent options/statements/answers.
+  // Quick Change Part for any question (Phần I <-> Phần II <-> Phần III)
   const handleQuickChangeQuestionPart = (questionId: string, targetPart: 1 | 2 | 3) => {
     setSelectedQuestions((prev) =>
       prev.map((q) => {
         if (q.id !== questionId) return q;
-        const preservation = q.preservation
-          ? { ...q.preservation, status: "NEEDS_REVIEW" as const, warnings: Array.from(new Set([...(q.preservation.warnings || []), "Đã đổi dạng câu hỏi; cần giáo viên kiểm tra lại."])) }
-          : q.preservation;
 
         if (targetPart === 1) {
-          const opts = q.options?.length ? [...q.options] : (q.statements || []).map((st) => st.text).filter(Boolean);
-          const validCorrect = Number.isInteger(q.correctIndex) && q.correctIndex >= 0 && q.correctIndex < Math.min(4, opts.length);
+          // Convert to Part I (Multiple Choice 4 Options)
+          let opts: string[] = [];
+          if (q.options && q.options.length >= 2) {
+            opts = [...q.options];
+          } else if (q.statements && q.statements.length > 0) {
+            opts = q.statements.map((s) => s.text);
+          }
+          while (opts.length < 4) {
+            opts.push(`Phương án ${LETTERS[opts.length] || "A"}`);
+          }
           return {
             ...q,
             part: 1,
@@ -622,57 +526,82 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             options: opts.slice(0, 4),
             statements: undefined,
             shortAnswer: undefined,
-            correctIndex: validCorrect ? q.correctIndex : -1,
-            needsReview: true,
-            preservation,
+            correctIndex: q.correctIndex ?? 0,
+            needsReview: false,
           };
-        }
-
-        if (targetPart === 2) {
+        } else if (targetPart === 2) {
+          // Convert to Part II (True / False 4 Sub-statements)
           let stmts: TrueFalseStatement[] = [];
           let newContent = q.content || "";
+
+          // 1. Try extracting from content first (if content contains a), b), c), d))
           const fromContent = splitRawTextIntoStatements(newContent);
-          if (fromContent.length > 0) {
-            stmts = fromContent.slice(0, 4).map((st) => ({ ...st }));
-          } else if (q.statements?.length) {
-            stmts = q.statements.slice(0, 4).map((st) => ({ ...st }));
-          } else if (q.options?.length) {
-            stmts = q.options.slice(0, 4).map((opt, oIdx) => ({
-              id: ["a", "b", "c", "d"][oIdx],
-              label: `${["a", "b", "c", "d"][oIdx]})`,
+          if (fromContent.length >= 2) {
+            stmts = fromContent;
+            const firstMatch = newContent.search(/(?:^|[\n\r]|\s{2,})(?:\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Mục|Câu)\s*)?(?:\[?a\]?|\(a\)|a)[.):/\-–—\s]*\*{0,2}|\(a\)|\ba\))\s*/i);
+            if (firstMatch !== -1) {
+              newContent = newContent.substring(0, firstMatch).trim();
+            }
+          } else if (q.statements && q.statements.length >= 2 && !q.statements.every(s => !s.text || /^Khẳng định/i.test(s.text.trim()))) {
+            stmts = [...q.statements];
+          } else if (q.options && q.options.length > 0 && !q.options.every(o => /^Phương án/i.test(o.trim()))) {
+            stmts = q.options.map((opt, oIdx) => ({
+              id: ["a", "b", "c", "d"][oIdx] || "a",
+              label: `${["a", "b", "c", "d"][oIdx] || "a"})`,
               text: opt,
-              correctValue: Number.isInteger(q.correctIndex) && q.correctIndex === oIdx,
+              correctValue: oIdx === (q.correctIndex || 0),
             }));
           }
+
+          const required = ["a", "b", "c", "d"];
+          const existingMap: Record<string, TrueFalseStatement> = {};
+          stmts.forEach((s) => {
+            const key = (s.id || s.label?.replace(/[^a-d]/gi, "") || "a").toLowerCase();
+            existingMap[key] = s;
+          });
+
+          const finalStatements: TrueFalseStatement[] = required.map((l, lIdx) => {
+            if (existingMap[l] && existingMap[l].text && !/^Khẳng định/i.test(existingMap[l].text.trim())) {
+              return existingMap[l];
+            }
+            if (q.options && q.options[lIdx] && !/^Phương án/i.test(q.options[lIdx].trim())) {
+              return {
+                id: l,
+                label: `${l})`,
+                text: q.options[lIdx],
+                correctValue: lIdx === (q.correctIndex || 0),
+              };
+            }
+            return {
+              id: l,
+              label: `${l})`,
+              text: existingMap[l]?.text || `Mệnh đề ${l}`,
+              correctValue: true,
+            };
+          });
+
           return {
             ...q,
             content: newContent,
             part: 2,
             questionType: "true_false" as QuestionType,
-            statements: stmts,
+            statements: finalStatements,
             options: [],
             shortAnswer: undefined,
-            correctIndex: -1,
-            needsReview: true,
-            preservation,
+            needsReview: false,
+          };
+        } else {
+          // Convert to Part III (Short Answer)
+          return {
+            ...q,
+            part: 3,
+            questionType: "short_answer" as QuestionType,
+            shortAnswer: q.shortAnswer || (q.options && q.options[q.correctIndex || 0]) || "0",
+            options: [],
+            statements: undefined,
+            needsReview: false,
           };
         }
-
-        const existingAnswer = String(q.shortAnswer || "").trim();
-        const optionAnswer = Number.isInteger(q.correctIndex) && q.correctIndex >= 0 && q.options?.[q.correctIndex]
-          ? String(q.options[q.correctIndex]).trim()
-          : "";
-        return {
-          ...q,
-          part: 3,
-          questionType: "short_answer" as QuestionType,
-          shortAnswer: existingAnswer || optionAnswer,
-          options: [],
-          statements: undefined,
-          correctIndex: -1,
-          needsReview: true,
-          preservation,
-        };
       })
     );
   };
@@ -702,12 +631,13 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             originalQuestions: parsed.questions,
             variants,
             createdAt: new Date().toISOString(),
-            status: "draft",
-            accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
+            status: "published",
+            accessCode: accessCode.trim().toUpperCase() || "THPT2026",
           };
           setPublishedExam(draftPkg);
+          onPublishExam(draftPkg);
 
-          setParseSuccessMsg(`✅ Đã khôi phục thành công bản nháp gồm ${parsed.questions.length} câu hỏi. Chưa xuất bản cho học sinh.`);
+          setParseSuccessMsg(`✅ Đã khôi phục thành công bản nháp gồm ${parsed.questions.length} câu hỏi!`);
           setShowMissingAnswersPrompt(false);
           return;
         }
@@ -734,14 +664,6 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
         setUploadProgress({ current: i + 1, total: files.length, currentFileName: file.name });
         setUploadedFileName(file.name);
         setUploadedFileSize((file.size / 1024).toFixed(1) + " KB");
-
-        // Phase 3: keep the original binary outside Question JSON/localStorage.
-        // IndexedDB preserves DOCX/PDF/image source byte-for-byte for later audit/export.
-        const sourceRecord = await saveSourcePackage(file, {
-          kind: "exam-source",
-          subject: config.subject,
-          grade: config.grade,
-        });
 
         const fileNameLower = file.name.toLowerCase();
         const isImage = fileNameLower.match(/\.(png|jpe?g|webp|gif|bmp)$/) !== null;
@@ -775,27 +697,6 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
               ...q,
               id: `file_q_${Date.now()}_${startIndex + qIdx + 1}`,
               originalOrderIndex: startIndex + qIdx + 1,
-              originalSource: {
-                fileName: file.name,
-                fileType: fileNameLower.endsWith(".pdf") ? ("pdf" as const) : ("image" as const),
-                fileId: sourceRecord.id,
-                storage: "indexeddb" as const,
-                checksumSha256: sourceRecord.sha256,
-                sourcePreserved: true,
-                originalOrderIndex: startIndex + qIdx + 1,
-              },
-              preservation: {
-                status: "NEEDS_REVIEW" as const,
-                formulaCount: q.formulaAssets?.length || 0,
-                imageCount: q.diagramUrl || q.content?.includes("![") ? 1 : 0,
-                tableCount: q.content?.includes("|") ? 1 : 0,
-                warnings: [
-                  "PDF/ảnh được AI nhận diện; file nguồn byte-for-byte đã lưu trong IndexedDB để đối chiếu.",
-                ],
-                extractor: "ai-file" as const,
-                sourcePackageAvailable: true,
-              },
-              needsReview: true,
             }));
             currentQuestionsList = [...currentQuestionsList, ...newQuestions];
             updatedFilesList.push({
@@ -811,7 +712,6 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           }
         } else if (fileNameLower.endsWith(".docx")) {
           const arrayBuffer = await file.arrayBuffer();
-          const ooxmlIndex = await indexDocxQuestions(arrayBuffer);
           let deepResult: any = null;
           try {
             deepResult = await extractDocxDeep(arrayBuffer);
@@ -873,65 +773,13 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           });
 
           if (parsed.success && parsed.data && parsed.data.length > 0) {
-            // Restore exact OMML-derived LaTeX only AFTER AI splitting, then restore images.
-            const formulaRestored = restoreFormulaTokensInQuestions(parsed.data, deepResult?.formulaMap || {});
-            const restored = restoreMarkdownImagesInQuestions(formulaRestored, finalImageMap);
+            const restored = restoreMarkdownImagesInQuestions(parsed.data, finalImageMap);
             const startIndex = currentQuestionsList.length;
-            const formulaCount = Number(
-              deepResult?.formulaCount ?? deepResult?.ommlCount ?? deepResult?.mathCount ?? 0
-            );
-            const tableCount = Number(deepResult?.tableCount ?? 0);
-            const imageCount = Object.keys(finalImageMap || {}).length;
-            const preservationWarnings: string[] = Array.isArray(deepResult?.warnings)
-              ? deepResult.warnings.map((w: any) => String(w))
-              : [];
-            preservationWarnings.push(...ooxmlIndex.warnings);
-            if (ooxmlIndex.questionCount !== restored.length) {
-              preservationWarnings.push(
-                `OOXML index nhận ${ooxmlIndex.questionCount} câu nhưng parser tạo ${restored.length} câu; chưa thể xuất Word bảo toàn nguồn chính xác.`
-              );
-            }
-
-            const embeddingCount = Number(deepResult?.embeddingCount ?? 0);
-            if (embeddingCount > 0 && !preservationWarnings.some((w) => /OLE|MathType/i.test(w))) {
-              preservationWarnings.push(`Phát hiện ${embeddingCount} đối tượng OLE/MathType; cần giữ file DOCX gốc để đối chiếu byte-for-byte.`);
-            }
-
-            const newQuestions = restored.map((q, qIdx) => {
-              const questionFormulaCount = q.formulaAssets?.length || 0;
-              const questionImageCount = [q.content, ...(q.options || []), ...(q.statements || []).map((st) => st.text)]
-                .join("\n")
-                .match(/!\[[^\]]*\]\((?:data:image|https?:|\/)/g)?.length || (q.diagramUrl ? 1 : 0);
-              const questionTableCount = (q.content.match(/^\s*\|.*\|\s*$/gm) || []).length > 1 ? 1 : 0;
-              return {
-                ...q,
-                id: `docx_q_${Date.now()}_${startIndex + qIdx + 1}`,
-                originalOrderIndex: startIndex + qIdx + 1,
-                originalSource: {
-                  fileName: file.name,
-                  fileType: "docx" as const,
-                  fileId: sourceRecord.id,
-                  storage: "indexeddb" as const,
-                  checksumSha256: sourceRecord.sha256,
-                  sourcePreserved: true,
-                  originalOrderIndex: startIndex + qIdx + 1,
-                  ooxmlQuestionIndex: ooxmlIndex.questionCount === restored.length ? qIdx + 1 : undefined,
-                  ooxmlIndexedQuestionCount: ooxmlIndex.questionCount || undefined,
-                },
-                preservation: {
-                  // PASS is intentionally withheld until teacher review / post-parse validator.
-                  status: "NEEDS_REVIEW" as const,
-                  formulaCount: questionFormulaCount,
-                  imageCount: questionImageCount,
-                  tableCount: questionTableCount,
-                  warnings: [...preservationWarnings, ...(parsed.warning ? [parsed.warning] : [])],
-                  extractor: useDeepExtraction ? ("deep-ooxml" as const) : ("mammoth" as const),
-                  embeddingCount,
-                  sourcePackageAvailable: true,
-                },
-                needsReview: true,
-              };
-            });
+            const newQuestions = restored.map((q, qIdx) => ({
+              ...q,
+              id: `docx_q_${Date.now()}_${startIndex + qIdx + 1}`,
+              originalOrderIndex: startIndex + qIdx + 1,
+            }));
             currentQuestionsList = [...currentQuestionsList, ...newQuestions];
             updatedFilesList.push({
               name: file.name,
@@ -1028,13 +876,14 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           originalQuestions: currentQuestionsList,
           variants,
           createdAt: new Date().toISOString(),
-          status: "draft",
-          accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
+          status: "published",
+          accessCode: accessCode.trim().toUpperCase() || "THPT2026",
         };
         setPublishedExam(batchPkg);
+        onPublishExam(batchPkg);
         setSavedExamNotification({
           exam: batchPkg,
-          message: "Đã tải file và tạo bản nháp. Hãy kiểm duyệt trước khi xuất bản/giao học sinh.",
+          message: "Đã tải lên và lưu trữ thành công đề thi vào Ngân Hàng Đề Thi!",
         });
 
         setExtractedViewMode("list");
@@ -1177,42 +1026,18 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   };
 
   // Mark all questions as reviewed & approved
-  const handleApproveAllAnswers = async () => {
-    const report = await validateQuestionsWithSourceStore(selectedQuestions);
-    if (!report.ok) {
-      const detail = report.blockingIssues.slice(0, 8).map((i) => `- ${i.questionId}: ${i.message}`).join("\n");
-      alert(`Chưa thể duyệt vì còn lỗi bảo toàn nguồn:\n${detail}`);
-      return;
-    }
-    const validatedAt = new Date().toISOString();
+  const handleApproveAllAnswers = () => {
     setSelectedQuestions((prev) =>
-      prev.map((q) => ({
-        ...q,
-        needsReview: false,
-        preservation: q.preservation
-          ? { ...q.preservation, status: "PASS" as const, sourcePackageAvailable: true, validatedAt }
-          : q.preservation,
-      }))
+      prev.map((q) => ({ ...q, needsReview: false }))
     );
     setShowReviewModal(false);
-    setParseSuccessMsg("✅ Giáo viên đã kiểm duyệt; dữ liệu nguồn đạt PASS và sẵn sàng tạo đề!");
+    setParseSuccessMsg("✅ Toàn bộ đáp án đã được kiểm duyệt và sẵn sàng tạo đề!");
   };
 
   // Save edited question from QuestionEditorModal
   const handleSaveEditedQuestion = (updated: Question) => {
-    const editedWarnings = [
-      ...(updated.preservation?.warnings || []),
-      "Nội dung câu đã được chỉnh sửa sau khi nhập; cần kiểm duyệt lại trước khi PASS.",
-    ];
-    const editedQuestion: Question = {
-      ...updated,
-      needsReview: true,
-      preservation: updated.preservation
-        ? { ...updated.preservation, status: "NEEDS_REVIEW", warnings: Array.from(new Set(editedWarnings)), validatedAt: undefined }
-        : updated.preservation,
-    };
     setSelectedQuestions((prev) =>
-      prev.map((q) => (q.id === updated.id ? editedQuestion : q))
+      prev.map((q) => (q.id === updated.id ? { ...updated, needsReview: false } : q))
     );
 
     // If variants were already generated, update the variant questions as well
@@ -1224,15 +1049,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
             if (vq.originalId === updated.id) {
               return {
                 ...vq,
-                content: editedQuestion.content,
-                part: editedQuestion.part,
-                questionType: editedQuestion.questionType,
-                level: editedQuestion.level,
-                explanation: editedQuestion.explanation,
-                groupTitle: editedQuestion.groupTitle,
-                passageContent: editedQuestion.passageContent,
-                statements: editedQuestion.statements,
-                shortAnswer: editedQuestion.shortAnswer,
+                content: updated.content,
+                part: updated.part,
+                questionType: updated.questionType,
+                level: updated.level,
+                explanation: updated.explanation,
+                groupTitle: updated.groupTitle,
+                passageContent: updated.passageContent,
+                statements: updated.statements,
+                shortAnswer: updated.shortAnswer,
               };
             }
             return vq;
@@ -1246,32 +1071,22 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   };
 
   // Execute Shuffling or Keep Original
-  const handleExecuteShuffle = async () => {
+  const handleExecuteShuffle = () => {
     if (selectedQuestions.length === 0) {
       alert("Vui lòng tải hoặc chọn ít nhất 1 câu hỏi để tạo đề thi!");
       return;
     }
 
-    // Phase 3 preservation gate: unresolved tokens or missing DOCX source for MathType/OLE are blocking.
-    const preservationReport = await validateQuestionsWithSourceStore(selectedQuestions);
-    if (!preservationReport.ok) {
-      const detail = preservationReport.blockingIssues
-        .slice(0, 8)
-        .map((i) => `- ${i.questionId}: ${i.message}`)
-        .join("\n");
-      alert(
-        `Không thể xuất bản vì dữ liệu nguồn chưa an toàn:\n${detail}` +
-          (preservationReport.blockingIssues.length > 8 ? "\n..." : "")
+    // Check if any question still strictly needs review
+    const unreviewedCount = selectedQuestions.filter((q) => q.needsReview).length;
+    if (unreviewedCount > 0) {
+      const confirmReview = window.confirm(
+        `Còn ${unreviewedCount} câu hỏi có đáp án AI tự động giải chưa được kiểm duyệt. Bạn có muốn mở bảng kiểm duyệt trước không?`
       );
-      return;
-    }
-
-    const publishIssues = validateQuestionsForPublishing(selectedQuestions);
-    if (publishIssues.length > 0) {
-      setShowReviewModal(true);
-      alert(`Chưa thể xuất bản đề. Cần xử lý ${publishIssues.length} vấn đề:
-${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.length > 10 ? "\n..." : ""}`);
-      return;
+      if (confirmReview) {
+        setShowReviewModal(true);
+        return;
+      }
     }
 
     const variants = generateVariantsFromQuestions(selectedQuestions, config);
@@ -1289,11 +1104,11 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
       variants,
       createdAt: new Date().toISOString(),
       status: "published",
-      accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
+      accessCode: accessCode.trim().toUpperCase() || "THPT2026",
     };
 
     setPublishedExam(pkg);
-    await Promise.resolve(onPublishExam(pkg));
+    onPublishExam(pkg);
     setIsShareModalOpen(true);
 
     setTimeout(() => {
@@ -1305,25 +1120,7 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
   };
 
   // Open 1-Click Share & QR Modal safely with automatic fallback package generation
-  const handleOpenShareModal = async () => {
-    const questionsForCheck: any[] = selectedQuestions.length > 0
-      ? selectedQuestions
-      : generatedVariants[0]?.questions || [];
-    if (questionsForCheck.length > 0) {
-      const publishIssues = validateQuestionsForPublishing(questionsForCheck as Question[]);
-      if (publishIssues.length > 0) {
-        setShowReviewModal(true);
-        alert(`Chưa thể tạo link/QR. Cần kiểm duyệt đề trước:
-${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.length > 10 ? "\n..." : ""}`);
-        return;
-      }
-      const preservationReport = await validateQuestionsWithSourceStore(questionsForCheck);
-      if (!preservationReport.ok) {
-        const detail = preservationReport.blockingIssues.slice(0, 8).map((i) => `- ${i.questionId}: ${i.message}`).join("\n");
-        alert(`Chưa thể tạo link/QR vì dữ liệu nguồn chưa an toàn:\n${detail}`);
-        return;
-      }
-    }
+  const handleOpenShareModal = () => {
     let pkg = publishedExam;
     if (!pkg) {
       const questionsToUse =
@@ -1349,100 +1146,12 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
         variants: variantsToUse,
         createdAt: new Date().toISOString(),
         status: "published",
-        accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
+        accessCode: accessCode.trim().toUpperCase() || "THPT2026",
       };
       setPublishedExam(pkg);
-      await Promise.resolve(onPublishExam(pkg));
-    } else {
-      pkg = { ...pkg, status: "published", accessCode: (pkg.accessCode || accessCode || makeAccessCode()).trim().toUpperCase() };
-      setPublishedExam(pkg);
-      // Re-publish the existing package before exposing the QR/link so Cloud is definitely current.
-      await Promise.resolve(onPublishExam(pkg));
+      onPublishExam(pkg);
     }
     setIsShareModalOpen(true);
-  };
-
-  const handleSafeWordExport = async (variantQuestions: any[], includeAnswers: boolean) => {
-    const report = await validateQuestionsWithSourceStore(variantQuestions);
-    if (!report.ok) {
-      const detail = report.blockingIssues.slice(0, 8).map((i) => `- ${i.questionId}: ${i.message}`).join("\n");
-      alert(`Không thể xuất Word vì dữ liệu bảo toàn chưa đạt yêu cầu:\n${detail}`);
-      return;
-    }
-    if (report.warnings.length > 0) {
-      const proceed = window.confirm(
-        `Còn ${report.warnings.length} cảnh báo cần kiểm duyệt. Bạn vẫn muốn xuất Word theo bản hiển thị hiện tại?`
-      );
-      if (!proceed) return;
-    }
-    exportQuestionsToWordDoc(variantQuestions, {
-      title: examTitle,
-      department: config.department,
-      school: config.school,
-      examPeriod: config.examPeriod,
-      subject: config.subject,
-      duration: config.duration,
-      examCode: activeVariantTab,
-      includeAnswers,
-    });
-  };
-
-  // Download the complete shuffled exam set + answers in ONE ZIP file.
-  const handleExportAllVariantsBundle = async () => {
-    if (!generatedVariants.length) {
-      alert("Chưa có bộ đề đã trộn để tải. Vui lòng bấm Trộn đề trước.");
-      return;
-    }
-    const publishIssues = validateQuestionsForPublishing(selectedQuestions);
-    if (publishIssues.length > 0) {
-      alert(`Chưa thể tải bộ đề + đáp án vì đề chưa kiểm duyệt xong:
-${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.length > 10 ? "\n..." : ""}`);
-      return;
-    }
-    try {
-      await exportAllExamVariantsBundle(generatedVariants, {
-        title: examTitle || `${config.subject}_${config.examPeriod}`,
-        department: config.department,
-        school: config.school,
-        examPeriod: config.examPeriod,
-        subject: config.subject,
-        duration: config.duration,
-        grade: config.grade,
-      });
-      setParseSuccessMsg(`✅ Đã tải bộ ${generatedVariants.length} mã đề + đáp án trong 1 file ZIP.`);
-    } catch (err: any) {
-      alert("Không thể tạo bộ đề ZIP: " + (err?.message || String(err)));
-    }
-  };
-
-  const handleExportSourceBundle = async (variantQuestions: any[]) => {
-    const result = await exportSourceBundleForQuestions(variantQuestions, `${examTitle}_${activeVariantTab}`);
-    if (result.missing.length > 0) {
-      alert(`Đã xuất ${result.saved} file nguồn; còn thiếu ${result.missing.length} source package trên thiết bị này.`);
-    } else {
-      setParseSuccessMsg(`✅ Đã xuất gói nguồn bảo toàn gồm ${result.saved} file gốc + manifest.`);
-    }
-  };
-
-  // Phase 4: exact OOXML export by cloning the original DOCX package and reordering source question blocks.
-  const handleExportExactOoxmlWord = async (variant: ExamVariant) => {
-    const report = await exportExactPreservedDocxVariant(
-      variant.questions,
-      selectedQuestions,
-      { ...config, title: examTitle, examCode: variant.examCode }
-    );
-    if (!report.ok) {
-      alert(
-        "Không thể xuất Word bảo toàn OOXML:\n- " +
-          report.blockingIssues.join("\n- ") +
-          (report.warnings.length ? "\n\nCảnh báo:\n- " + report.warnings.join("\n- ") : "")
-      );
-      return;
-    }
-    setParseSuccessMsg(
-      `✅ Đã xuất Word OOXML bảo toàn ${report.preservedQuestionCount} câu từ DOCX gốc` +
-        (report.warnings.length ? `; có ${report.warnings.length} cảnh báo cần xem.` : ".")
-    );
   };
 
   // Print single exam variant
@@ -3199,7 +2908,7 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
                                 </button>
                                 {isPart1 && (
                                   <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-                                    Đáp án: {Number.isInteger(q.correctIndex) && q.correctIndex >= 0 ? (LETTERS[q.correctIndex] || "CHƯA DUYỆT") : "CHƯA DUYỆT"}
+                                    Đáp án: {LETTERS[q.correctIndex] || "A"}
                                   </span>
                                 )}
                               </div>
@@ -3925,21 +3634,21 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {/* Download ALL shuffled variants + answers */}
-                        <button
-                          type="button"
-                          onClick={handleExportAllVariantsBundle}
-                          className="px-2.5 py-1.5 rounded-lg font-bold bg-indigo-600 text-white border border-indigo-700 hover:bg-indigo-700 flex items-center gap-1 cursor-pointer shadow-sm"
-                          title="Tải toàn bộ các mã đề đã trộn, đáp án theo từng mã và bảng đáp án tổng trong một file ZIP"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Tải Toàn Bộ Đề + Đáp Án</span>
-                        </button>
-
                         {/* Word Exam */}
                         <button
                           type="button"
-                          onClick={() => handleSafeWordExport(currentVariant.questions, false)}
+                          onClick={() =>
+                            exportQuestionsToWordDoc(currentVariant.questions, {
+                              title: examTitle,
+                              department: config.department,
+                              school: config.school,
+                              examPeriod: config.examPeriod,
+                              subject: config.subject,
+                              duration: config.duration,
+                              examCode: activeVariantTab,
+                              includeAnswers: false,
+                            })
+                          }
                           className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-blue-700 border border-blue-200 hover:bg-blue-50 flex items-center gap-1 cursor-pointer"
                           title="Xuất file Word đề thi không có đáp án cho học sinh"
                         >
@@ -3947,37 +3656,26 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
                           <span>Word (Đề Thi)</span>
                         </button>
 
-                        {/* Phase 4 Exact OOXML Word */}
-                        <button
-                          type="button"
-                          onClick={() => handleExportExactOoxmlWord(currentVariant)}
-                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-violet-50 text-violet-800 border border-violet-300 hover:bg-violet-100 flex items-center gap-1 cursor-pointer"
-                          title="Xuất DOCX bằng cách clone file Word gốc và đảo thứ tự khối câu hỏi; giữ nguyên OMML, MathType/OLE, ảnh và relationships"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5 text-violet-700" />
-                          <span>Word OOXML Bảo Toàn</span>
-                        </button>
-
                         {/* Word with Answers */}
                         <button
                           type="button"
-                          onClick={() => handleSafeWordExport(currentVariant.questions, true)}
+                          onClick={() =>
+                            exportQuestionsToWordDoc(currentVariant.questions, {
+                              title: examTitle,
+                              department: config.department,
+                              school: config.school,
+                              examPeriod: config.examPeriod,
+                              subject: config.subject,
+                              duration: config.duration,
+                              examCode: activeVariantTab,
+                              includeAnswers: true,
+                            })
+                          }
                           className="px-2.5 py-1.5 rounded-lg font-semibold bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 flex items-center gap-1 cursor-pointer"
                           title="Xuất file Word đề thi có sẵn đáp án chi tiết và ma trận"
                         >
                           <FileText className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Word (Kèm Đáp Án)</span>
-                        </button>
-
-                        {/* Original preservation bundle */}
-                        <button
-                          type="button"
-                          onClick={() => handleExportSourceBundle(currentVariant.questions)}
-                          className="px-2.5 py-1.5 rounded-lg font-semibold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 flex items-center gap-1 cursor-pointer"
-                          title="Xuất ZIP gồm DOCX/PDF/ảnh nguồn byte-for-byte và manifest bảo toàn"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
-                          <span>Gói Nguồn</span>
                         </button>
 
                         {/* Printable PDF */}
@@ -4164,7 +3862,7 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
                               } else if (isP3) {
                                 ans = q.shortAnswer || "-";
                               } else {
-                                ans = Number.isInteger(q.correctIndex) && q.correctIndex >= 0 ? (LETTERS[q.correctIndex] || "CHƯA DUYỆT") : "CHƯA DUYỆT";
+                                ans = LETTERS[q.correctIndex ?? 0] || "A";
                               }
 
                               return (

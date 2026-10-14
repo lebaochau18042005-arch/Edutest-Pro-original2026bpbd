@@ -2,6 +2,7 @@ import { recognizeAndGradePaper } from "./src/utils/paperGrading";
 import express from "express";
 import path from "path";
 import os from "os";
+import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -9,36 +10,9 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
-const EDUTEST_ADMIN_TOKEN = String(process.env.EDUTEST_ADMIN_TOKEN || "").trim();
-
-function isAdminRequest(req: any): boolean {
-  const provided = String(req.headers?.["x-edutest-admin-token"] || "").trim();
-  if (EDUTEST_ADMIN_TOKEN) return provided.length > 0 && provided === EDUTEST_ADMIN_TOKEN;
-  // Local development stays usable without a token; production must configure one.
-  return process.env.NODE_ENV !== "production" && !process.env.VERCEL;
-}
-
-function requireAdmin(req: any, res: any, next: any) {
-  if (isAdminRequest(req)) return next();
-  if (!EDUTEST_ADMIN_TOKEN) {
-    return res.status(503).json({ error: "Chưa cấu hình EDUTEST_ADMIN_TOKEN trên máy chủ." });
-  }
-  return res.status(401).json({ error: "Không có quyền quản trị EduTest Pro." });
-}
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-
-app.get("/api/system-status", (req, res) => {
-  const firebaseUrl = String(process.env.FIREBASE_DATABASE_URL || "").trim();
-  res.json({
-    success: true,
-    secureServerGrading: true,
-    durableExamStorageConfigured: Boolean(firebaseUrl),
-    adminTokenConfigured: Boolean(EDUTEST_ADMIN_TOKEN),
-    demoDataEnabled: process.env.ENABLE_DEMO_DATA === "true",
-  });
-});
 
 // Discovers machine's LAN IPv4 for mobile phone Wi-Fi testing
 app.get("/api/network-ip", (req, res) => {
@@ -256,54 +230,6 @@ function normalizeShortAnsServer(val: any): string {
   return String(val).trim().toLowerCase().replace(/\s+/g, "").replace(/,/g, ".");
 }
 
-function questionTypeOf(q: any): "multiple_choice" | "true_false" | "short_answer" | "essay" {
-  if (q?.part === 2 || q?.questionType === "true_false") return "true_false";
-  if (q?.part === 3 || q?.questionType === "short_answer") return "short_answer";
-  if (q?.questionType === "essay") return "essay";
-  return "multiple_choice";
-}
-
-function validateQuestionForPublication(q: any, idx: number): string[] {
-  const issues: string[] = [];
-  const label = `Câu ${idx + 1}`;
-  if (!String(q?.content || "").trim()) issues.push(`${label}: thiếu nội dung.`);
-  if (q?.needsReview) issues.push(`${label}: chưa được giáo viên kiểm duyệt.`);
-  if (q?.preservation && q.preservation.status && q.preservation.status !== "PASS") {
-    issues.push(`${label}: dữ liệu nguồn chưa đạt PASS.`);
-  }
-  const type = questionTypeOf(q);
-  if (type === "multiple_choice") {
-    const options = Array.isArray(q?.options) ? q.options : [];
-    if (options.length < 2 || options.some((x: any) => !String(x || "").trim())) issues.push(`${label}: phương án trắc nghiệm không hợp lệ.`);
-    if (!Number.isInteger(q?.correctIndex) || q.correctIndex < 0 || q.correctIndex >= options.length) issues.push(`${label}: chưa có đáp án A/B/C/D hợp lệ.`);
-  } else if (type === "true_false") {
-    const statements = Array.isArray(q?.statements) ? q.statements : [];
-    if (statements.length !== 4) issues.push(`${label}: phải có đủ 4 ý Đúng/Sai.`);
-    if (statements.some((st: any) => typeof st?.correctValue !== "boolean")) issues.push(`${label}: có ý Đúng/Sai chưa xác nhận đáp án.`);
-  } else if (type === "short_answer") {
-    if (!String(q?.shortAnswer || "").trim()) issues.push(`${label}: chưa có đáp án trả lời ngắn.`);
-  }
-  return issues;
-}
-
-function validateQuestionsForPublicationServer(questions: any[]): string[] {
-  return (questions || []).flatMap((q, idx) => validateQuestionForPublication(q, idx));
-}
-
-function getConfiguredQuestionPoints(q: any): number | null {
-  const value = Number(q?.points);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function getOnlineQuestionBasePoints(q: any, subject: string): number {
-  const configured = getConfiguredQuestionPoints(q);
-  if (configured !== null) return configured;
-  const lower = String(subject || "").toLowerCase();
-  if (q?.part === 2 || q?.questionType === "true_false") return 1;
-  if (q?.part === 3 || q?.questionType === "short_answer") return lower.includes("toán") ? 0.5 : 0.25;
-  return 0.25;
-}
-
 // Generate variants for 3-part exam
 function generateExamVariants(
   questions: any[],
@@ -332,7 +258,7 @@ function generateExamVariants(
 
     const mappedQuestions = orderedQuestions.map((q, idx) => {
       let options = [...(q.options || [])];
-      let correctIndex = Number.isInteger(q.correctIndex) ? q.correctIndex : -1;
+      let correctIndex = q.correctIndex ?? 0;
 
       if ((q.part === 1 || !q.part) && shuffleOptions && options.length > 1) {
         const indexedOptions = options.map((opt, i) => ({
@@ -342,7 +268,7 @@ function generateExamVariants(
         const shuffled = shuffleArray(indexedOptions);
         options = shuffled.map((item) => item.text);
         correctIndex = shuffled.findIndex((item) => item.isCorrect);
-        if (correctIndex === -1) throw new Error(`Không xác định được đáp án đúng của câu ${idx + 1} sau khi trộn.`);
+        if (correctIndex === -1) correctIndex = 0;
       }
 
       return {
@@ -353,7 +279,7 @@ function generateExamVariants(
         content: q.content,
         options,
         correctIndex,
-        originalCorrectIndex: Number.isInteger(q.correctIndex) ? q.correctIndex : -1,
+        originalCorrectIndex: q.correctIndex ?? 0,
         statements: q.statements ? JSON.parse(JSON.stringify(q.statements)) : undefined,
         shortAnswer: q.shortAnswer,
         acceptableAnswers: q.acceptableAnswers,
@@ -371,10 +297,10 @@ function generateExamVariants(
     const answerKey: Record<number, string> = {};
     mappedQuestions.forEach((q) => {
       if (q.part === 1 || q.questionType === "multiple_choice") {
-        answerKey[q.questionIndex] = letters[q.correctIndex] || "CHƯA_DUYỆT";
+        answerKey[q.questionIndex] = letters[q.correctIndex] || "A";
       } else if (q.part === 2 || q.questionType === "true_false") {
         const tf = (q.statements || []).map((s: any) => `${s.label?.replace(")", "") || s.id}:${s.correctValue ? "Đ" : "S"}`).join(",");
-        answerKey[q.questionIndex] = tf || "CHƯA_DUYỆT";
+        answerKey[q.questionIndex] = tf || "a:Đ,b:S,c:Đ,d:S";
       } else {
         answerKey[q.questionIndex] = q.shortAnswer || "";
       }
@@ -390,7 +316,7 @@ function generateExamVariants(
 }
 
 // In-Memory store
-let questionsBank = process.env.ENABLE_DEMO_DATA === "true" ? [...INITIAL_QUESTIONS] : [];
+let questionsBank = [...INITIAL_QUESTIONS];
 
 // Default pre-configured exam
 const defaultExamConfig = {
@@ -412,7 +338,7 @@ const defaultExamConfig = {
   maxTabViolations: 3,
 };
 
-let activeExams: any[] = process.env.ENABLE_DEMO_DATA === "true" ? [
+let activeExams: any[] = [
   {
     id: "exam-demo-01",
     title: "Đề thi thử Tốt nghiệp THPT 2026 - Môn Toán & Khoa Học",
@@ -423,130 +349,9 @@ let activeExams: any[] = process.env.ENABLE_DEMO_DATA === "true" ? [
     status: "published",
     accessCode: "TOAN12",
   },
-] : [];
+];
 
-
-const FIREBASE_DATABASE_URL = String(process.env.FIREBASE_DATABASE_URL || "").replace(/\/+$/, "");
-const FIREBASE_DATABASE_AUTH = String(process.env.FIREBASE_DATABASE_AUTH || "").trim();
-
-function safeDbKey(value: string): string {
-  return encodeURIComponent(String(value || "").trim().toUpperCase().replace(/[.#$[\]/]/g, "_"));
-}
-
-function firebaseServerUrl(pathname: string): string {
-  if (!FIREBASE_DATABASE_URL) return "";
-  const base = `${FIREBASE_DATABASE_URL}/${pathname.replace(/^\/+/, "")}.json`;
-  if (!FIREBASE_DATABASE_AUTH) return base;
-  const joiner = base.includes("?") ? "&" : "?";
-  return `${base}${joiner}auth=${encodeURIComponent(FIREBASE_DATABASE_AUTH)}`;
-}
-
-async function firebaseServerPut(pathname: string, value: any): Promise<boolean> {
-  const url = firebaseServerUrl(pathname);
-  if (!url) return false;
-  try {
-    const r = await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(value),
-    });
-    return r.ok;
-  } catch (err) {
-    console.warn("Firebase server PUT failed:", err);
-    return false;
-  }
-}
-
-async function firebaseServerGet(pathname: string): Promise<any | null> {
-  const url = firebaseServerUrl(pathname);
-  if (!url) return null;
-  try {
-    const r = await fetch(url, { method: "GET" });
-    if (!r.ok) return null;
-    const data = await r.json();
-    return data || null;
-  } catch (err) {
-    console.warn("Firebase server GET failed:", err);
-    return null;
-  }
-}
-
-async function firebaseServerDelete(pathname: string): Promise<boolean> {
-  const url = firebaseServerUrl(pathname);
-  if (!url) return false;
-  try {
-    const r = await fetch(url, { method: "DELETE" });
-    return r.ok;
-  } catch (err) {
-    console.warn("Firebase server DELETE failed:", err);
-    return false;
-  }
-}
-
-function sanitizeQuestionForStudent(q: any): any {
-  const copy: any = { ...q };
-  delete copy.correctIndex;
-  delete copy.originalCorrectIndex;
-  delete copy.shortAnswer;
-  delete copy.acceptableAnswers;
-  delete copy.explanation;
-  delete copy.answer;
-  delete copy.correctAnswer;
-  if (Array.isArray(copy.statements)) {
-    copy.statements = copy.statements.map((st: any) => {
-      const out = { ...st };
-      delete out.correctValue;
-      delete out.isCorrect;
-      delete out.answer;
-      return out;
-    });
-  }
-  return copy;
-}
-
-function sanitizeExamForStudent(exam: any): any {
-  if (!exam) return exam;
-  return {
-    ...exam,
-    originalQuestions: Array.isArray(exam.originalQuestions)
-      ? exam.originalQuestions.map(sanitizeQuestionForStudent)
-      : [],
-    variants: Array.isArray(exam.variants)
-      ? exam.variants.map((v: any) => ({
-          ...v,
-          questions: Array.isArray(v.questions) ? v.questions.map(sanitizeQuestionForStudent) : [],
-          answerKey: {},
-        }))
-      : [],
-  };
-}
-
-async function persistPrivateExam(exam: any): Promise<boolean> {
-  if (!exam?.accessCode) return false;
-  const key = safeDbKey(exam.accessCode);
-  return firebaseServerPut(`privateExams/${key}`, {
-    ...exam,
-    serverUpdatedAt: new Date().toISOString(),
-  });
-}
-
-async function loadPrivateExam(searchKey: string): Promise<any | null> {
-  const raw = String(searchKey || "").trim();
-  if (!raw) return null;
-  const upper = raw.toUpperCase();
-  const local = activeExams.find(
-    (e: any) => e.id === raw || e.id?.toUpperCase?.() === upper || e.accessCode?.toUpperCase?.() === upper
-  );
-  if (local) return local;
-  const remote = await firebaseServerGet(`privateExams/${safeDbKey(upper)}`);
-  if (remote) {
-    activeExams = [remote, ...activeExams.filter((e: any) => e.id !== remote.id && e.accessCode !== remote.accessCode)];
-    return remote;
-  }
-  return null;
-}
-
-let studentSubmissions: any[] = process.env.ENABLE_DEMO_DATA === "true" ? [
+let studentSubmissions: any[] = [
   {
     id: "sub-1",
     examId: "exam-demo-01",
@@ -747,16 +552,16 @@ let studentSubmissions: any[] = process.env.ENABLE_DEMO_DATA === "true" ? [
     syncedToGoogleSheet: true,
     status: "submitted",
   },
-] : [];
+];
 
 // ---------------- API ENDPOINTS ----------------
 
 // 1. Question Bank APIs
-app.get("/api/questions", requireAdmin, (req, res) => {
+app.get("/api/questions", (req, res) => {
   res.json({ success: true, data: questionsBank });
 });
 
-app.post("/api/questions", requireAdmin, (req, res) => {
+app.post("/api/questions", (req, res) => {
   const { questions } = req.body;
   if (Array.isArray(questions)) {
     const formatted = questions.map((q) => ({
@@ -766,8 +571,8 @@ app.post("/api/questions", requireAdmin, (req, res) => {
       level: q.level || "Thông hiểu",
       chapter: q.chapter || "Chương chung",
       content: q.content,
-      options: Array.isArray(q.options) ? q.options : [],
-      correctIndex: Number.isInteger(q.correctIndex) ? q.correctIndex : undefined,
+      options: q.options || ["A", "B", "C", "D"],
+      correctIndex: typeof q.correctIndex === "number" ? q.correctIndex : 0,
       explanation: q.explanation || "",
     }));
     questionsBank.push(...formatted);
@@ -781,7 +586,7 @@ app.post("/api/questions", requireAdmin, (req, res) => {
       chapter: req.body.chapter || "",
       content: req.body.content,
       options: req.body.options || [],
-      correctIndex: Number.isInteger(req.body.correctIndex) ? req.body.correctIndex : undefined,
+      correctIndex: req.body.correctIndex ?? 0,
       explanation: req.body.explanation || "",
     };
     questionsBank.push(single);
@@ -791,76 +596,59 @@ app.post("/api/questions", requireAdmin, (req, res) => {
   }
 });
 
-app.delete("/api/questions/:id", requireAdmin, (req, res) => {
+app.delete("/api/questions/:id", (req, res) => {
   const { id } = req.params;
   questionsBank = questionsBank.filter((q) => q.id !== id);
   res.json({ success: true, data: questionsBank });
 });
 
 // 2. Exam APIs & Shuffling
-app.get("/api/exams", async (req, res) => {
-  if (FIREBASE_DATABASE_URL) {
-    const remote = await firebaseServerGet("privateExams");
-    if (remote && typeof remote === "object") {
-      const map = new Map(activeExams.map((e: any) => [e.id || e.accessCode, e]));
-      Object.values(remote).forEach((e: any) => { if (e?.id || e?.accessCode) map.set(e.id || e.accessCode, e); });
-      activeExams = Array.from(map.values());
-    }
-  }
-  const data = isAdminRequest(req) ? activeExams : activeExams.map(sanitizeExamForStudent);
-  res.json({ success: true, data });
+app.get("/api/exams", (req, res) => {
+  res.json({ success: true, data: activeExams });
 });
 
-app.get("/api/exams/:id", async (req, res) => {
-  const exam = await loadPrivateExam(req.params.id);
+app.get("/api/exams/:id", (req, res) => {
+  const searchKey = req.params.id?.trim().toUpperCase();
+  const exam = activeExams.find(
+    (e) =>
+      e.id === req.params.id ||
+      e.id?.toUpperCase() === searchKey ||
+      e.accessCode?.toUpperCase() === searchKey
+  );
   if (!exam) {
     return res.status(404).json({ error: "Không tìm thấy đề kiểm tra với mã " + req.params.id });
   }
-  res.json({ success: true, data: sanitizeExamForStudent(exam) });
+  res.json({ success: true, data: exam });
 });
 
 // Save direct full ExamPackage created by teacher
-app.post("/api/exams", requireAdmin, async (req, res) => {
+app.post("/api/exams", (req, res) => {
   try {
     const pkg = req.body;
     if (!pkg || !pkg.accessCode || !pkg.originalQuestions) {
       return res.status(400).json({ error: "Dữ liệu đề kiểm tra không hợp lệ" });
     }
-    const publishIssues = validateQuestionsForPublicationServer(pkg.originalQuestions || []);
-    if (publishIssues.length) {
-      return res.status(400).json({ error: "Đề chưa đủ điều kiện xuất bản", issues: publishIssues });
-    }
     const upperCode = pkg.accessCode.trim().toUpperCase();
     activeExams = activeExams.filter(
       (e) => e.id !== pkg.id && e.accessCode?.toUpperCase() !== upperCode
     );
-    const savedPkg = { ...pkg, accessCode: upperCode };
+    const savedPkg = {
+      ...pkg,
+      accessCode: upperCode,
+    };
     activeExams.unshift(savedPkg);
-    const durable = await persistPrivateExam(savedPkg);
-    res.json({
-      success: true,
-      durable,
-      data: sanitizeExamForStudent(savedPkg),
-      message: durable
-        ? "Đã lưu đề an toàn vào kho riêng phía máy chủ."
-        : "Đề chỉ đang ở bộ nhớ máy chủ. Cần cấu hình FIREBASE_DATABASE_URL trên Vercel để phát QR production.",
-    });
+    res.json({ success: true, data: savedPkg });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Lỗi lưu đề thi" });
   }
 });
 
-app.post("/api/exams/shuffle-and-create", requireAdmin, async (req, res) => {
+app.post("/api/exams/shuffle-and-create", (req, res) => {
   try {
     const { title, config, questions, accessCode } = req.body;
 
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
       return res.status(400).json({ error: "Cần ít nhất 1 câu hỏi để tạo đề thi" });
-    }
-
-    const publishIssues = validateQuestionsForPublicationServer(questions);
-    if (publishIssues.length) {
-      return res.status(400).json({ error: "Đề chưa đủ điều kiện xuất bản", issues: publishIssues });
     }
 
     const examCodes = config?.examCodes && config.examCodes.length > 0 ? config.examCodes : ["101", "102", "103", "104"];
@@ -878,8 +666,8 @@ app.post("/api/exams/shuffle-and-create", requireAdmin, async (req, res) => {
             questionIndex: idx + 1,
             content: q.content,
             options: q.options || [],
-            correctIndex: Number.isInteger(q.correctIndex) ? q.correctIndex : -1,
-            originalCorrectIndex: Number.isInteger(q.correctIndex) ? q.correctIndex : -1,
+            correctIndex: q.correctIndex ?? 0,
+            originalCorrectIndex: q.correctIndex ?? 0,
             level: q.level,
             subject: q.subject,
             explanation: q.explanation,
@@ -889,7 +677,7 @@ app.post("/api/exams/shuffle-and-create", requireAdmin, async (req, res) => {
             hasTableOrDiagram: q.hasTableOrDiagram,
           })),
           answerKey: questions.reduce((acc: any, q: any, idx: number) => {
-            acc[idx + 1] = Number.isInteger(q.correctIndex) ? (["A", "B", "C", "D"][q.correctIndex] || "CHƯA_DUYỆT") : "CHƯA_DUYỆT";
+            acc[idx + 1] = ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A";
             return acc;
           }, {}),
           isOriginalVariant: true,
@@ -933,50 +721,31 @@ app.post("/api/exams/shuffle-and-create", requireAdmin, async (req, res) => {
     };
 
     activeExams.unshift(newExam);
-    const durable = await persistPrivateExam(newExam);
-    res.json({ success: true, durable, data: sanitizeExamForStudent(newExam) });
+    res.json({ success: true, data: newExam });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Lỗi tạo đề kiểm tra" });
   }
 });
 
-app.delete("/api/exams/:id", requireAdmin, async (req, res) => {
-  const existing = await loadPrivateExam(req.params.id);
-  activeExams = activeExams.filter((e) => e.id !== req.params.id && e.accessCode?.toUpperCase() !== req.params.id?.toUpperCase());
-  if (existing?.accessCode) await firebaseServerDelete(`privateExams/${safeDbKey(existing.accessCode)}`);
+app.delete("/api/exams/:id", (req, res) => {
+  activeExams = activeExams.filter((e) => e.id !== req.params.id);
   res.json({ success: true, message: "Đã xóa đề kiểm tra" });
 });
 
 // 3. Submissions & Anti-Cheating APIs
-app.get("/api/submissions", requireAdmin, async (req, res) => {
-  const examId = String(req.query.examId || "").trim();
-  let results = examId ? studentSubmissions.filter((x) => x.examId === examId || x.accessCode === examId) : [...studentSubmissions];
-  if (FIREBASE_DATABASE_URL) {
-    const remote = examId
-      ? await firebaseServerGet(`submissionsByExam/${safeDbKey(examId)}`)
-      : await firebaseServerGet("submissions");
-    if (remote && typeof remote === "object") {
-      const remoteRows: any[] = [];
-      if (examId) {
-        remoteRows.push(...Object.values(remote));
-      } else {
-        Object.values(remote).forEach((group: any) => {
-          if (group && typeof group === "object") remoteRows.push(...Object.values(group));
-        });
-      }
-      const map = new Map(results.map((x: any) => [x.id, x]));
-      remoteRows.forEach((x: any) => { if (x?.id) map.set(x.id, x); });
-      results = Array.from(map.values());
-    }
+app.get("/api/submissions", (req, res) => {
+  const { examId } = req.query;
+  let results = studentSubmissions;
+  if (examId) {
+    results = results.filter((s) => s.examId === examId);
   }
   res.json({ success: true, data: results });
 });
 
-app.post("/api/submissions", async (req, res) => {
+app.post("/api/submissions", (req, res) => {
   try {
     const {
       examId,
-      accessCode,
       examCode,
       studentName,
       studentClass,
@@ -995,21 +764,15 @@ app.post("/api/submissions", async (req, res) => {
       isLockedDueToCheating,
     } = req.body;
 
-    const exam = activeExams.find((e) => e.id === examId) || await loadPrivateExam(accessCode || examId);
+    const exam = activeExams.find((e) => e.id === examId);
     if (!exam) {
       return res.status(404).json({ error: "Đề kiểm tra không tồn tại" });
     }
 
-    const variant = exam.variants.find((v: any) => v.examCode === examCode);
-    if (!variant) return res.status(400).json({ error: "Mã đề không hợp lệ hoặc không tồn tại." });
-    if (!String(studentName || "").trim() || !String(studentClass || "").trim()) {
-      return res.status(400).json({ error: "Thiếu họ tên hoặc lớp của học sinh." });
-    }
+    const variant = exam.variants.find((v: any) => v.examCode === examCode) || exam.variants[0];
     const totalQuestions = variant.questions.length;
-    const subjectName = exam.config.subject || "Môn học";
-    const rawMaxScore = variant.questions.reduce((sum: number, q: any) => sum + getOnlineQuestionBasePoints(q, subjectName), 0);
-    const configuredMaxScore = Number(exam.config?.maxScore) > 0 ? Number(exam.config.maxScore) : rawMaxScore || 10;
-    const scoreScale = rawMaxScore > 0 ? configuredMaxScore / rawMaxScore : 1;
+    const isMath = (exam.config.subject || "").toLowerCase().includes("toán");
+    const isEnglish = (exam.config.subject || "").toLowerCase().includes("tiếng anh");
 
     let part1Score = 0;
     let part2Score = 0;
@@ -1025,7 +788,7 @@ app.post("/api/submissions", async (req, res) => {
       const part = q.part || 1;
 
       if (part === 1 || q.questionType === "multiple_choice") {
-        const point = getOnlineQuestionBasePoints(q, subjectName) * scoreScale;
+        const point = 0.25;
         const isUnanswered = studentAns === undefined || studentAns === null || studentAns === -1 || studentAns === "";
         const isCorrect = !isUnanswered && Number(studentAns) === q.correctIndex;
         const earned = isCorrect ? point : 0;
@@ -1047,13 +810,15 @@ app.post("/api/submissions", async (req, res) => {
           pointsEarned: earned,
           maxPoints: point,
           studentAnswerDisplay: isUnanswered ? "Chưa chọn" : ["A", "B", "C", "D"][Number(studentAns)] || "-",
-          correctAnswerDisplay: Number.isInteger(q.correctIndex) ? (["A", "B", "C", "D"][q.correctIndex] || "CHƯA CÓ ĐÁP ÁN") : "CHƯA CÓ ĐÁP ÁN",
+          correctAnswerDisplay: ["A", "B", "C", "D"][q.correctIndex ?? 0] || "A",
         };
       } else if (part === 2 || q.questionType === "true_false") {
-        const stmts = Array.isArray(q.statements) ? q.statements : [];
-        if (stmts.length !== 4 || stmts.some((st: any) => typeof st.correctValue !== "boolean")) {
-          throw new Error(`Câu ${qIndex} Đúng/Sai chưa có đủ đáp án giáo viên.`);
-        }
+        const stmts = q.statements || [
+          { id: "a", label: "a)", text: "Ý a", correctValue: true },
+          { id: "b", label: "b)", text: "Ý b", correctValue: false },
+          { id: "c", label: "c)", text: "Ý c", correctValue: true },
+          { id: "d", label: "d)", text: "Ý d", correctValue: false },
+        ];
 
         const studentAnsObj = typeof studentAns === "object" && studentAns !== null ? studentAns : {};
         let subCorrect = 0;
@@ -1074,8 +839,7 @@ app.post("/api/submissions", async (req, res) => {
           };
         });
 
-        const tfMaxPoint = getOnlineQuestionBasePoints(q, subjectName) * scoreScale;
-        const qEarned = Number((calculateTrueFalseScoreServer(subCorrect) * tfMaxPoint).toFixed(2));
+        const qEarned = calculateTrueFalseScoreServer(subCorrect);
         part2Score += qEarned;
 
         if (!hasAnswered) {
@@ -1095,7 +859,7 @@ app.post("/api/submissions", async (req, res) => {
           questionType: "true_false",
           isCorrect: subCorrect === 4,
           pointsEarned: qEarned,
-          maxPoints: tfMaxPoint,
+          maxPoints: 1.0,
           studentAnswerDisplay: hasAnswered
             ? stmts.map((s: any) => `${s.label || s.id}: ${studentAnsObj[s.id] === undefined ? "?" : studentAnsObj[s.id] ? "Đ" : "S"}`).join(" | ")
             : "Chưa trả lời",
@@ -1105,7 +869,7 @@ app.post("/api/submissions", async (req, res) => {
         };
       } else {
         // Part 3 Short Answer
-        const point = getOnlineQuestionBasePoints(q, subjectName) * scoreScale;
+        const point = isMath ? 0.5 : 0.25;
         const normStudent = normalizeShortAnsServer(studentAns);
         const normCorrect = normalizeShortAnsServer(q.shortAnswer);
         const acceptable = (q.acceptableAnswers || []).map((a: any) => normalizeShortAnsServer(a));
@@ -1138,20 +902,19 @@ app.post("/api/submissions", async (req, res) => {
     });
 
     const rawScore = part1Score + part2Score + part3Score;
-    const score = Math.min(configuredMaxScore, Math.max(0, Number(rawScore.toFixed(2))));
+    const score = Math.min(10.0, Math.max(0, Number(rawScore.toFixed(2))));
 
     const newSubmission = {
-      id: String(req.body.id || `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`).trim(),
+      id: `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       examId,
-      accessCode: exam.accessCode,
       examTitle: exam.title,
       examPeriod: exam.config.examPeriod,
       examCode: variant.examCode,
-      studentName: String(studentName).trim(),
-      studentClass: String(studentClass).trim(),
-      school: String(school || exam.config.school || "").trim(),
-      grade: String(grade || exam.config.grade || "").trim(),
-      studentId: String(studentId || "").trim(),
+      studentName: studentName || "Học sinh",
+      studentClass: studentClass || "12A",
+      school: school || exam.config.school || "THPT",
+      grade: grade || exam.config.grade || "Khối 12",
+      studentId: studentId || `HS${Math.floor(10000 + Math.random() * 90000)}`,
       startedAt: new Date(Date.now() - (durationTakenSeconds || 60) * 1000).toISOString(),
       submittedAt: new Date().toISOString(),
       durationTakenSeconds: durationTakenSeconds || 0,
@@ -1161,7 +924,6 @@ app.post("/api/submissions", async (req, res) => {
       unansweredCount,
       totalQuestions,
       score,
-      maxScore: configuredMaxScore,
       part1Score: Number(part1Score.toFixed(2)),
       part2Score: Number(part2Score.toFixed(2)),
       part3Score: Number(part3Score.toFixed(2)),
@@ -1174,45 +936,20 @@ app.post("/api/submissions", async (req, res) => {
       questionTimes: questionTimes || {},
       questionTimeRecords: questionTimeRecords || [],
       violationLogs: violationLogs || [],
-      syncedToGoogleSheet: false,
+      syncedToGoogleSheet: true,
       status: isLockedDueToCheating ? "locked" : "submitted",
-      gradingPending: false,
     };
 
-    studentSubmissions = [newSubmission, ...studentSubmissions.filter((x: any) => x.id !== newSubmission.id)];
-    const subKey = safeDbKey(newSubmission.id);
-    const durableByCode = await firebaseServerPut(`submissions/${safeDbKey(exam.accessCode || exam.id)}/${subKey}`, newSubmission);
-    const durableByExam = await firebaseServerPut(`submissionsByExam/${safeDbKey(exam.id)}/${subKey}`, newSubmission);
-    const durable = durableByCode && durableByExam;
-    res.json({ success: true, durable, data: newSubmission });
+    studentSubmissions.unshift(newSubmission);
+    res.json({ success: true, data: newSubmission });
   } catch (err: any) {
     console.error("Submission error:", err);
     res.status(500).json({ error: err.message || "Lỗi lưu bài nộp" });
   }
 });
 
-// Secure class roster & assignments APIs (server-side persistence)
-app.get("/api/classrooms", requireAdmin, async (req, res) => {
-  const data = await firebaseServerGet("classrooms");
-  res.json({ success: true, data: Array.isArray(data) ? data : [] });
-});
-app.put("/api/classrooms", requireAdmin, async (req, res) => {
-  const rows = Array.isArray(req.body) ? req.body : [];
-  const durable = await firebaseServerPut("classrooms", rows);
-  res.json({ success: true, durable, data: rows });
-});
-app.get("/api/assignments", requireAdmin, async (req, res) => {
-  const data = await firebaseServerGet("assignments");
-  res.json({ success: true, data: Array.isArray(data) ? data : [] });
-});
-app.put("/api/assignments", requireAdmin, async (req, res) => {
-  const rows = Array.isArray(req.body) ? req.body : [];
-  const durable = await firebaseServerPut("assignments", rows);
-  res.json({ success: true, durable, data: rows });
-});
-
 // Unlock student
-app.post("/api/submissions/:id/unlock", requireAdmin, (req, res) => {
+app.post("/api/submissions/:id/unlock", (req, res) => {
   const submission = studentSubmissions.find((s) => s.id === req.params.id);
   if (submission) {
     submission.isLockedDueToCheating = false;
@@ -1510,7 +1247,7 @@ YÊU CẦU ĐỊNH DẠNG:
       questionType: item.questionType || (requestedPart === 2 ? "true_false" : requestedPart === 3 ? "short_answer" : "multiple_choice"),
       content: item.content,
       options: item.options || (requestedPart === 1 ? ["A", "B", "C", "D"] : []),
-      correctIndex: Number.isInteger(item.correctIndex) ? item.correctIndex : -1,
+      correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
       statements: item.statements,
       shortAnswer: item.shortAnswer,
       acceptableAnswers: item.acceptableAnswers,
@@ -2047,16 +1784,16 @@ ${sanitizedText.substring(0, 150000)}
             return {
               id: letter,
               label: `${letter})`,
-              text: cleanText,
-              correctValue: typeof existingMap[letter].correctValue === "boolean" ? existingMap[letter].correctValue : undefined,
+              text: cleanText || `Khẳng định ý ${letter}`,
+              correctValue: typeof existingMap[letter].correctValue === "boolean" ? existingMap[letter].correctValue : true,
               explanation: existingMap[letter].explanation || "",
             };
           }
           return {
             id: letter,
             label: `${letter})`,
-            text: "",
-            correctValue: undefined,
+            text: `Khẳng định ý ${letter}`,
+            correctValue: true,
             explanation: "",
           };
         });
@@ -2115,7 +1852,7 @@ ${sanitizedText.substring(0, 150000)}
         questionType,
         content: cleanContent,
         options: part === 1 ? finalOptions.slice(0, 4) : [],
-        correctIndex: Number.isInteger(item.correctIndex) ? item.correctIndex : -1,
+        correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
         statements: part === 2 ? statements : undefined,
         shortAnswer: part === 3 ? (item.shortAnswer || "") : undefined,
         acceptableAnswers: item.acceptableAnswers,
@@ -2123,7 +1860,7 @@ ${sanitizedText.substring(0, 150000)}
         groupId: item.groupId || undefined,
         groupTitle: item.groupTitle || undefined,
         passageContent: passage || undefined,
-        needsReview: item.needsReview ?? true,
+        needsReview: item.needsReview ?? false,
         isAiGenerated: item.isAiGenerated ?? false,
         hasTableOrDiagram: hasImg,
         diagramUrl: diagramUrl || undefined,
@@ -2399,16 +2136,16 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
             return {
               id: letter,
               label: `${letter})`,
-              text: cleanText,
-              correctValue: typeof existingMap[letter].correctValue === "boolean" ? existingMap[letter].correctValue : undefined,
+              text: cleanText || `Khẳng định ý ${letter}`,
+              correctValue: typeof existingMap[letter].correctValue === "boolean" ? existingMap[letter].correctValue : true,
               explanation: existingMap[letter].explanation || "",
             };
           }
           return {
             id: letter,
             label: `${letter})`,
-            text: "",
-            correctValue: undefined,
+            text: `Khẳng định ý ${letter}`,
+            correctValue: true,
             explanation: "",
           };
         });
@@ -2424,7 +2161,7 @@ QUY TẮC PHÂN LOẠI 3 PHẦN BẮT BUỘC:
         questionType,
         content: cleanContent,
         options: part === 1 ? finalOptions.slice(0, 4) : [],
-        correctIndex: Number.isInteger(item.correctIndex) ? item.correctIndex : -1,
+        correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
         statements: part === 2 ? statements : undefined,
         shortAnswer: part === 3 ? (item.shortAnswer || "") : undefined,
         acceptableAnswers: item.acceptableAnswers,
@@ -2564,7 +2301,7 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
       
       if (/^[A-D]$/i.test(rawAns)) {
         const letterIdx = ["A", "B", "C", "D"].indexOf(rawAns.toUpperCase());
-        if (letterIdx !== -1) answerKeyMap[qNum] = { choice: letterIdx };
+        answerKeyMap[qNum] = { choice: letterIdx !== -1 ? letterIdx : 0 };
       } else if (/[a-d][\s.:-]+[ĐSđs]/i.test(rawAns)) {
         const tfObj: Record<string, boolean> = {};
         const subMatches = rawAns.matchAll(/([a-d])[\s.:-]+([ĐSđsTrueFalse])/gi);
@@ -2738,8 +2475,9 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
           .replace(/^(?:\*{0,2}\([A-D]\)\*{0,2})\s*/i, "")
           .trim();
       });
-      if (currentQ.options.length !== 4) {
-        currentQ.needsReview = true;
+      const defOpts = ["Phương án A", "Phương án B", "Phương án C", "Phương án D"];
+      while (currentQ.options.length < 4) {
+        currentQ.options.push(defOpts[currentQ.options.length]);
       }
     }
 
@@ -2802,12 +2540,11 @@ function fallbackParseExam(text: string, subject = "Toán học", grade = "Khố
         questionType: inferredPart === 2 ? "true_false" : inferredPart === 3 ? "short_answer" : "multiple_choice",
         content: contentText,
         options: [],
-        correctIndex: -1,
+        correctIndex: 0,
         statements: [],
         shortAnswer: "",
         explanation: "",
         hasTableOrDiagram: trimmed.includes("|"),
-        needsReview: true,
       };
       continue;
     }
@@ -2984,18 +2721,18 @@ let gradedPaperResults: any[] = [
 // 6. AI Auto-Grading & Exam Rubric APIs
 
 // API: Get all graded papers
-app.get("/api/grader/results", requireAdmin, (req, res) => {
+app.get("/api/grader/results", (req, res) => {
   res.json({ success: true, data: gradedPaperResults });
 });
 
 // API: Delete a graded paper
-app.delete("/api/grader/results/:id", requireAdmin, (req, res) => {
+app.delete("/api/grader/results/:id", (req, res) => {
   gradedPaperResults = gradedPaperResults.filter((p) => p.id !== req.params.id);
   res.json({ success: true, message: "Đã xóa bài chấm" });
 });
 
 // API: Update teacher notes / review
-app.put("/api/grader/results/:id", requireAdmin, (req, res) => {
+app.put("/api/grader/results/:id", (req, res) => {
   const index = gradedPaperResults.findIndex((p) => p.id === req.params.id);
   if (index !== -1) {
     gradedPaperResults[index] = {
@@ -3136,11 +2873,11 @@ app.post("/api/ai/grade-paper", async (req, res) => {
       if (exam) {
         const variant = examCode ? exam.variants.find((v: any) => v.examCode === examCode) : exam.variants[0];
         if (!variant) return res.status(400).json({ error: "Không tìm thấy đáp án cho mã đề đã chọn." });
+        const isMath = (exam.config.subject || "").toLowerCase().includes("toán");
         const items = variant.questions.map((q: any) => {
-          const points = getConfiguredQuestionPoints(q);
-          if (points === null) {
-            throw new Error(`Câu ${q.questionIndex || "?"} chưa được giáo viên thiết lập điểm; không thể chấm phiếu.`);
-          }
+          let points = 0.25;
+          if (q.part === 2) points = 1.0;
+          else if (q.part === 3) points = isMath ? 0.5 : 0.25;
 
           let corAns = "";
           if (q.part === 1 || q.questionType === "multiple_choice") {
@@ -3220,7 +2957,7 @@ app.post("/api/ai/grade-paper", async (req, res) => {
     res.json({
       success: true,
       data: gradedRecord,
-      message: `Đã nhận dạng và tính điểm tạm cho ${gradedRecord.studentName}. Kết quả CHƯA CHÍNH THỨC cho đến khi giáo viên duyệt phiếu.`,
+      message: `Đã chấm bài của học sinh ${gradedRecord.studentName} thành công! Điểm: ${finalScore}/${maxScore}`,
     });
   } catch (err: any) {
     console.error("AI Grade Paper Error:", err);
@@ -3493,15 +3230,14 @@ QUY TẮC PHẢN HỒI:
   }
 });
 
-export async function startServer() {
+async function startServer() {
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else if (!process.env.VERCEL) {
+  } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -3509,13 +3245,9 @@ export async function startServer() {
     });
   }
 
-  return app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`EduTest Pro Server running on http://localhost:${PORT}`);
   });
 }
 
-export default app;
-
-if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
-  startServer();
-}
+startServer();

@@ -33,7 +33,6 @@ import { LETTERS, exportAnswerKeyMatrix, exportQuestionsToWordDoc, exportQuestio
 import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
 import { clientGenerateQuestions } from "../../utils/clientAI";
 import { InstantShareModal } from "./InstantShareModal";
-import { FormattedQuestionContent, MathTextRenderer } from "../FormattedQuestionContent";
 
 interface QuestionBankViewProps {
   questions: Question[];
@@ -738,20 +737,6 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                             >
                               {q.level}
                             </span>
-                            {q.preservation && (
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  q.preservation.status === "PASS"
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : q.preservation.status === "FAIL"
-                                    ? "bg-rose-100 text-rose-800"
-                                    : "bg-amber-100 text-amber-800"
-                                }`}
-                                title={(q.preservation.warnings || []).join("; ")}
-                              >
-                                {q.preservation.status === "PASS" ? "Bảo toàn: OK" : q.preservation.status === "FAIL" ? "Bảo toàn: Lỗi" : "Cần kiểm tra công thức/hình"}
-                              </span>
-                            )}
                             {q.chapter && (
                               <span className="text-[11px] text-slate-500 italic">
                                 Chương: {q.chapter}
@@ -759,9 +744,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                             )}
                           </div>
 
-                          <div className="text-xs sm:text-sm font-medium text-slate-800">
-                            <FormattedQuestionContent content={q.content} diagramUrl={q.diagramUrl} />
-                          </div>
+                          <p className="text-xs sm:text-sm font-medium text-slate-800">{q.content}</p>
 
                           {/* Options Grid */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs pt-1">
@@ -775,7 +758,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                                 }`}
                               >
                                 <span className="mr-1">{LETTERS[optIdx]}.</span>
-                                <span><MathTextRenderer text={opt} /></span>
+                                <span>{opt}</span>
                               </div>
                             ))}
                           </div>
@@ -783,7 +766,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                           {q.explanation && (
                             <div className="text-[11px] text-slate-600 bg-slate-100/70 p-2 rounded-md">
                               <span className="font-semibold text-slate-700">Giải thích:</span>{" "}
-                              <FormattedQuestionContent content={q.explanation} />
+                              {q.explanation}
                             </div>
                           )}
                         </div>
@@ -901,7 +884,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                         {targetVariant.questions.map((q, qIdx) => {
                           let ansText = "";
                           if (q.part === 1 || q.questionType === "multiple_choice") {
-                            ansText = Number.isInteger(q.correctIndex) && q.correctIndex >= 0 ? (LETTERS[q.correctIndex] || "CHƯA DUYỆT") : "CHƯA DUYỆT";
+                            ansText = LETTERS[q.correctIndex ?? 0] || "A";
                           } else if (q.part === 2 || q.questionType === "true_false") {
                             ansText = (q.statements || []).map((s) => s.correctValue ? "Đ" : "S").join("");
                           } else {
@@ -930,9 +913,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                             </span>
                           </div>
 
-                          <div className="text-xs sm:text-sm font-medium text-slate-800">
-                            <FormattedQuestionContent content={q.content} diagramUrl={q.diagramUrl} />
-                          </div>
+                          <p className="text-xs sm:text-sm font-medium text-slate-800">{q.content}</p>
 
                           {q.options && q.options.length > 0 && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -945,7 +926,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                                       : "bg-slate-50 border-slate-200 text-slate-700"
                                   }`}
                                 >
-                                  {LETTERS[oIdx]}. <MathTextRenderer text={opt} />
+                                  {LETTERS[oIdx]}. {opt}
                                 </div>
                               ))}
                             </div>
@@ -1266,7 +1247,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                   {aiGeneratedResults.map((q, idx) => (
                     <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1.5">
                       <p className="font-bold text-slate-900">
-                        Câu {idx + 1}: <MathTextRenderer text={q.content} />
+                        Câu {idx + 1}: {q.content}
                       </p>
                       <div className="grid grid-cols-2 gap-1.5 text-[11px]">
                         {q.options.map((opt, oIdx) => (
@@ -1278,7 +1259,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                                 : "bg-white border-slate-200"
                             }`}
                           >
-                            {LETTERS[oIdx]}. <MathTextRenderer text={opt} />
+                            {LETTERS[oIdx]}. {opt}
                           </div>
                         ))}
                       </div>

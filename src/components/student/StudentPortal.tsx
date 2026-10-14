@@ -73,19 +73,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 }) => {
   // Student registration state with LocalStorage persistence
   const [studentName, setStudentName] = useState(() => {
-    return localStorage.getItem("eduexam_student_name") || "";
+    return localStorage.getItem("eduexam_student_name") || "Lê Bảo Châu";
   });
   const [studentClass, setStudentClass] = useState(() => {
-    return localStorage.getItem("eduexam_student_class") || "";
+    return localStorage.getItem("eduexam_student_class") || "12A1";
   });
   const [school, setSchool] = useState(() => {
-    return localStorage.getItem("eduexam_student_school") || "";
+    return localStorage.getItem("eduexam_student_school") || "THPT Chuyên Lê Hồng Phong";
   });
   const [grade, setGrade] = useState(() => {
     return localStorage.getItem("eduexam_student_grade") || "Khối 12";
   });
   const [studentId, setStudentId] = useState(() => {
-    return localStorage.getItem("eduexam_student_id") || "";
+    return localStorage.getItem("eduexam_student_id") || "SBD-12058";
   });
 
   // Modal to edit student profile
@@ -103,27 +103,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [isLoadingCloudExam, setIsLoadingCloudExam] = useState(false);
 
   const [accessCodeInput, setAccessCodeInput] = useState(
-    prefillExamId || ""
+    prefillExamId || exams[0]?.accessCode || "TOAN12"
   );
   const [selectedVariantCode, setSelectedVariantCode] = useState(prefillExamCode || "101");
-
-  const chooseStableVariantCode = React.useCallback((exam: ExamPackage, preferred?: string) => {
-    const variants = exam?.variants || [];
-    if (!variants.length) return "";
-    if (preferred && variants.some((v) => v.examCode === preferred)) {
-      try { localStorage.setItem(`edutest_variant_assignment_${exam.id}`, preferred); } catch {}
-      return preferred;
-    }
-    const storageKey = `edutest_variant_assignment_${exam.id}`;
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved && variants.some((v) => v.examCode === saved)) return saved;
-    } catch {}
-    const idx = Math.floor(Math.random() * variants.length);
-    const chosen = variants[idx]?.examCode || variants[0].examCode;
-    try { localStorage.setItem(storageKey, chosen); } catch {}
-    return chosen;
-  }, []);
 
   // Classroom-based assignment state
   const [entryMethod, setEntryMethod] = useState<"class" | "code">(() => {
@@ -159,14 +141,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       try {
         const { examPayload, code: urlCode, classId: urlClassId, className: urlClassName, assignId: urlAssignId } = extractExamPayloadFromUrl();
 
-        const allowLegacyEmbeddedExam = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-        if (examPayload && allowLegacyEmbeddedExam) {
+        if (examPayload) {
           const decompressed = await decompressExamFromSharing(examPayload);
           if (decompressed) {
             setActiveExam(decompressed);
             setAccessCodeInput(decompressed.accessCode);
             if (decompressed.variants && decompressed.variants.length > 0) {
-              setSelectedVariantCode(chooseStableVariantCode(decompressed, prefillExamCode));
+              const randIdx = Math.floor(Math.random() * decompressed.variants.length);
+              setSelectedVariantCode(decompressed.variants[randIdx].examCode);
             }
             if (onAddExam) {
               onAddExam(decompressed);
@@ -201,7 +183,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           if (matched) {
             setActiveExam(matched);
             if (matched.variants && matched.variants.length > 0) {
-              setSelectedVariantCode(chooseStableVariantCode(matched, prefillExamCode));
+              const randIdx = Math.floor(Math.random() * matched.variants.length);
+              setSelectedVariantCode(matched.variants[randIdx].examCode);
             }
             return;
           } else {
@@ -214,7 +197,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 setAccessCodeInput(cloudExam.accessCode || codeToLookup);
                 if (onAddExam) onAddExam(cloudExam);
                 if (cloudExam.variants && cloudExam.variants.length > 0) {
-                  setSelectedVariantCode(chooseStableVariantCode(cloudExam, prefillExamCode));
+                  const randIdx = Math.floor(Math.random() * cloudExam.variants.length);
+                  setSelectedVariantCode(cloudExam.variants[randIdx].examCode);
                 }
                 setIsLoadingCloudExam(false);
                 return;
@@ -233,7 +217,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 setAccessCodeInput(localMatch.accessCode || codeToLookup);
                 if (onAddExam) onAddExam(localMatch);
                 if (localMatch.variants && localMatch.variants.length > 0) {
-                  setSelectedVariantCode(chooseStableVariantCode(localMatch, prefillExamCode));
+                  const randIdx = Math.floor(Math.random() * localMatch.variants.length);
+                  setSelectedVariantCode(localMatch.variants[randIdx].examCode);
                 }
                 setIsLoadingCloudExam(false);
                 return;
@@ -256,7 +241,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       window.removeEventListener("popstate", parseUrlAndPrefill);
       window.removeEventListener("hashchange", parseUrlAndPrefill);
     };
-  }, [exams, prefillExamId, prefillExamCode, chooseStableVariantCode]);
+  }, [exams, prefillExamId]);
 
   // Sync prefillExamCode when changed
   useEffect(() => {
@@ -280,9 +265,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     try {
       const q = JSON.parse(localStorage.getItem("eduexam_offline_submissions") || "[]");
       setOfflineQueue(q);
-      if (navigator.onLine && Array.isArray(q) && q.length > 0) {
-        setTimeout(() => autoSyncPendingSubmissions(), 0);
-      }
     } catch (e) {}
 
     return () => {
@@ -302,35 +284,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     } catch (e) {}
   }, [studentName, studentClass, school, grade, studentId]);
 
-  // Auto-sync pending submissions when reconnected to network. Server returns the official graded result.
+  // Auto-sync pending submissions when reconnected to network
   const autoSyncPendingSubmissions = async () => {
     try {
-      const q: StudentSubmission[] = JSON.parse(localStorage.getItem("eduexam_offline_submissions") || "[]");
-      if (!Array.isArray(q) || q.length === 0) return;
+      const q: StudentSubmission[] = JSON.parse(
+        localStorage.getItem("eduexam_offline_submissions") || "[]"
+      );
+      if (q.length === 0) return;
 
       setIsSyncingOfflineQueue(true);
-      const remaining: StudentSubmission[] = [];
-      let synced = 0;
       for (const sub of q) {
-        const result = await submitExamToCloud({ ...sub, gradingPending: true }).catch(() => null);
-        if (result?.success && result.data) {
-          synced++;
-          const graded = { ...result.data, gradingPending: false };
-          onSubmissionComplete(graded);
-          setCurrentSubmission((cur) => cur?.id === sub.id ? graded : cur);
-        } else {
-          remaining.push(sub);
-        }
+        await fetch("/api/submissions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sub),
+        }).catch(() => {});
       }
-      localStorage.setItem("eduexam_offline_submissions", JSON.stringify(remaining));
-      setOfflineQueue(remaining);
-      setSyncStatusMessage(remaining.length === 0
-        ? `Đã đồng bộ và chấm thành công ${synced} bài thi ngoại tuyến.`
-        : `Đã đồng bộ ${synced} bài; còn ${remaining.length} bài đang chờ máy chủ.`);
+      setSyncStatusMessage(`Đã đồng bộ thành công ${q.length} bài thi ngoại tuyến về máy chủ!`);
       setTimeout(() => setSyncStatusMessage(""), 5000);
-    } catch {
-      // Giữ nguyên hàng đợi nếu mạng/server chưa sẵn sàng.
-    } finally {
+      setIsSyncingOfflineQueue(false);
+    } catch (e) {
       setIsSyncingOfflineQueue(false);
     }
   };
@@ -443,8 +416,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           hash && hash.startsWith("#exam=")
             ? hash.replace(/^#exam=/, "")
             : examParam || "";
-        const allowLegacyEmbeddedExam = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-        if (base64url && allowLegacyEmbeddedExam) {
+        if (base64url) {
           const decompressed = await decompressExamFromSharing(base64url);
           if (decompressed) {
             foundExam = decompressed;
@@ -537,7 +509,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     setAccessCodeInput(foundExam.accessCode);
     const variantExists = foundExam.variants.some((v) => v.examCode === selectedVariantCode);
     if (!variantExists && foundExam.variants.length > 0) {
-      setSelectedVariantCode(chooseStableVariantCode(foundExam, prefillExamCode));
+      setSelectedVariantCode(foundExam.variants[0].examCode);
     }
 
     // If student chose paper upload mode
@@ -557,19 +529,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         const reader = new FileReader();
         reader.onload = async () => {
           const base64 = reader.result as string;
-          const missingScoreQuestions = (targetVariant?.questions || []).filter((q: any) => !(Number(q.points) > 0));
-          if (missingScoreQuestions.length > 0) {
-            setEntryError(`Đề mã ${selectedVariantCode} chưa được giáo viên lưu điểm cho ${missingScoreQuestions.length} câu. Phiếu chưa thể tự chấm; vui lòng liên hệ giáo viên.`);
-            setIsGradingPaper(false);
-            return;
-          }
-
+          const isMath = (foundExam.config.subject || "").toLowerCase().includes("toán");
           const rubricItems = targetVariant ? targetVariant.questions.map((q) => {
-            const points = Number(q.points);
+            let points = 0.25;
+            if (q.part === 2 || q.questionType === "true_false") points = 1.0;
+            else if (q.part === 3 || q.questionType === "short_answer") points = isMath ? 0.5 : 0.25;
+            
             let corAns = "";
             if (q.part === 1 || q.questionType === "multiple_choice") {
               const letter = ["A", "B", "C", "D"][q.correctIndex] || "";
-              const optVal = Number.isInteger(q.correctIndex) && q.options && q.options[q.correctIndex] ? `: ${q.options[q.correctIndex]}` : "";
+              const optVal = q.options && q.options[q.correctIndex ?? 0] ? `: ${q.options[q.correctIndex ?? 0]}` : "";
               corAns = `${letter}${optVal}`;
             } else if (q.part === 2 || q.questionType === "true_false") {
               corAns = (q.statements || []).map((s) => `${s.label || s.id}: ${s.correctValue ? "Đúng" : "Sai"}`).join(" | ");
@@ -615,21 +584,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           });
 
           if (json.success && json.data) {
-            // Student-side uploads are only a scan intake. The preliminary AI score must NOT
-            // become an official result before a teacher has reviewed the detected bubbles.
-            if (!json.data.isReviewedByTeacher) {
-              setSyncStatusMessage("Đã gửi phiếu và nhận dạng sơ bộ. Kết quả chưa được ghi điểm; giáo viên cần duyệt phiếu trước khi công nhận điểm.");
-              setPaperFile(null);
-              setPaperPreviewUrl("");
-              setIsGradingPaper(false);
-              setTimeout(() => setSyncStatusMessage(""), 8000);
-              return;
-            }
-
             setGradedPaperResult(json.data);
             setPortalState("paper_result");
 
-            // Persist only teacher-reviewed grading results.
+            // Auto-persist submission to student history and cloud
             try {
               const detailMap: Record<number, any> = {};
               let correctCount = 0;
@@ -719,45 +677,30 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     setAccessCodeInput(ex.accessCode);
     setEntryMethod("code");
     if (ex.variants && ex.variants.length > 0) {
-      setSelectedVariantCode(chooseStableVariantCode(ex, prefillExamCode));
+      const randIdx = Math.floor(Math.random() * ex.variants.length);
+      setSelectedVariantCode(ex.variants[randIdx].examCode);
     }
     setEntryError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // When student finishes submission in online exam room
-  const handleExamSubmitted = async (sub: StudentSubmission): Promise<StudentSubmission | null> => {
-    const pendingSub: StudentSubmission = {
+  const handleExamSubmitted = (sub: StudentSubmission) => {
+    const finalSub: StudentSubmission = {
       ...sub,
       classroomId: chosenClassId || sub.classroomId,
       assignmentId: chosenAssignmentId || sub.assignmentId,
-      gradingPending: true,
     };
-
-    const result = await submitExamToCloud(pendingSub);
-    if (result.success && result.data) {
-      const graded = { ...result.data, gradingPending: false };
-      setCurrentSubmission(graded);
-      onSubmissionComplete(graded);
-      try {
-        const q = JSON.parse(localStorage.getItem("eduexam_offline_submissions") || "[]");
-        const cleaned = Array.isArray(q) ? q.filter((x: any) => x.id !== pendingSub.id) : [];
-        localStorage.setItem("eduexam_offline_submissions", JSON.stringify(cleaned));
-        setOfflineQueue(cleaned);
-      } catch {}
-      setSyncStatusMessage(result.message);
-      setPortalState("result");
-      return graded;
-    }
-
-    setSyncStatusMessage(result.message || "Bài đã lưu trên thiết bị nhưng chưa được chấm trên máy chủ.");
-    setCurrentSubmission(pendingSub);
+    setCurrentSubmission(finalSub);
+    onSubmissionComplete(finalSub);
+    // Asynchronously push submission to Cloud Database
+    submitExamToCloud(finalSub).catch(() => {});
+    // Refresh offline queue
     try {
       const q = JSON.parse(localStorage.getItem("eduexam_offline_submissions") || "[]");
-      setOfflineQueue(Array.isArray(q) ? q : []);
-    } catch {}
+      setOfflineQueue(q);
+    } catch (e) {}
     setPortalState("result");
-    return pendingSub;
   };
 
   // Export offline submissions as backup file
@@ -1235,7 +1178,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                     setActiveExam(matchedExam);
                                     setAccessCodeInput(matchedExam.accessCode);
                                     if (matchedExam.variants && matchedExam.variants.length > 0) {
-                                      setSelectedVariantCode(chooseStableVariantCode(matchedExam, prefillExamCode));
+                                      const randIdx = Math.floor(Math.random() * matchedExam.variants.length);
+                                      setSelectedVariantCode(matchedExam.variants[randIdx].examCode);
                                     }
                                   }
                                 }}

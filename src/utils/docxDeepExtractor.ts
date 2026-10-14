@@ -10,24 +10,10 @@ import { convertMetafileBufferToPng } from "./wmfHelper";
  * - Converts table cells containing options or statements into clean, parseable text
  */
 
-export interface PreservedDocxFormula {
-  id: string;
-  type: "omml" | "mathtype";
-  latex?: string;
-  originalXml?: string;
-  originalRef?: string;
-}
-
 export interface DeepDocxExtractResult {
   markdown: string;
   imageMap: Record<string, string>;
   imageCount: number;
-  formulaMap: Record<string, PreservedDocxFormula>;
-  formulaCount: number;
-  tableCount: number;
-  embeddingRefs: string[];
-  embeddingCount: number;
-  warnings: string[];
 }
 
 // Map Word Symbol font characters (hex code from w:char) to LaTeX or Unicode
@@ -440,24 +426,9 @@ export async function extractDocxDeep(
 ): Promise<DeepDocxExtractResult> {
   const imageMap: Record<string, string> = { ...(existingImageMap || {}) };
   let imageCount = Object.keys(imageMap).length;
-  const formulaMap: Record<string, PreservedDocxFormula> = {};
-  let formulaCount = 0;
-  let tableCount = 0;
-  let embeddingRefs: string[] = [];
-  const warnings: string[] = [];
 
   try {
     const zip = await JSZip.loadAsync(arrayBuffer);
-
-    // Preserve legacy MathType / Equation Editor OLE payload references.
-    // The binary itself remains byte-for-byte intact inside the original DOCX; these
-    // references let the app detect that a formula cannot safely be reconstructed from OCR.
-    embeddingRefs = Object.keys(zip.files).filter((path) =>
-      /^word\/embeddings\//i.test(path) && !zip.files[path].dir
-    );
-    if (embeddingRefs.length > 0) {
-      warnings.push(`Phát hiện ${embeddingRefs.length} đối tượng OLE/MathType; giữ nguồn DOCX gốc và yêu cầu kiểm duyệt.`);
-    }
 
     // 1. Map relationships: rId -> target media path
     const relsMap: Record<string, string> = {};
@@ -527,7 +498,7 @@ export async function extractDocxDeep(
     // 3. Parse word/document.xml
     const docFile = zip.file("word/document.xml");
     if (!docFile) {
-      return { markdown: "", imageMap, imageCount, formulaMap, formulaCount, tableCount, embeddingRefs, embeddingCount: embeddingRefs.length, warnings };
+      return { markdown: "", imageMap, imageCount };
     }
 
     const docXml = await docFile.async("text");
@@ -536,7 +507,7 @@ export async function extractDocxDeep(
 
     const body = doc.getElementsByTagName("w:body")[0] || doc.getElementsByTagName("body")[0];
     if (!body) {
-      return { markdown: "", imageMap, imageCount, formulaMap, formulaCount, tableCount, embeddingRefs, embeddingCount: embeddingRefs.length, warnings };
+      return { markdown: "", imageMap, imageCount };
     }
 
     function processDocxElement(el: Element): string {
@@ -546,22 +517,9 @@ export async function extractDocxDeep(
       if (tag === "omathpara" || tag === "omath") {
         const latex = ommlNodeToLatex(el).trim();
         if (latex) {
-          // Never let the LLM rewrite a DOCX formula. Send an immutable token through
-          // the parser and restore the exact extractor output after question splitting.
+          // Normalize double spaces inside math
           const cleanLatex = latex.replace(/\s{2,}/g, " ");
-          const token = `__FORMULA_TOKEN_${formulaCount}__`;
-          let originalXml = "";
-          try {
-            originalXml = new XMLSerializer().serializeToString(el);
-          } catch (_) {}
-          formulaMap[token] = {
-            id: `formula_${formulaCount}`,
-            type: "omml",
-            latex: `$${cleanLatex}$`,
-            originalXml: originalXml || undefined,
-          };
-          formulaCount++;
-          return ` ${token} `;
+          return ` $${cleanLatex}$ `;
         }
         return "";
       }
@@ -682,7 +640,6 @@ export async function extractDocxDeep(
 
       // Table element <w:tbl>
       if (tag === "tbl") {
-        tableCount++;
         const rows: string[][] = [];
         const actualTrs = Array.from(el.children).filter((child) => getNodeTag(child) === "tr");
 
@@ -790,15 +747,9 @@ export async function extractDocxDeep(
       markdown: fullMarkdown,
       imageMap,
       imageCount,
-      formulaMap,
-      formulaCount,
-      tableCount,
-      embeddingRefs,
-      embeddingCount: embeddingRefs.length,
-      warnings,
     };
   } catch (err) {
     console.error("Deep docx extraction error:", err);
-    return { markdown: "", imageMap, imageCount, formulaMap, formulaCount, tableCount, embeddingRefs, embeddingCount: embeddingRefs.length, warnings };
+    return { markdown: "", imageMap, imageCount };
   }
 }

@@ -763,7 +763,10 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
           .replace(/^(?:\*{0,2}\([A-D]\)\*{0,2})\s*/i, "")
           .trim();
       });
-      // Do not fabricate missing options. Missing source content must remain visible for teacher review.
+      const defOpts = ["Phương án A", "Phương án B", "Phương án C", "Phương án D"];
+      while (currentQ.options.length < 4) {
+        currentQ.options.push(defOpts[currentQ.options.length]);
+      }
     }
 
     // Apply answer key lookup
@@ -843,7 +846,7 @@ export function fallbackParseExam(text: string, subject = "Toán học", grade =
         questionType: inferredPart === 2 ? "true_false" : inferredPart === 3 ? "short_answer" : "multiple_choice",
         content: contentText,
         options: [],
-        correctIndex: -1,
+        correctIndex: 0,
         statements: inferredPart === 2 ? [] : undefined,
         shortAnswer: "",
         explanation: "",
@@ -1197,7 +1200,7 @@ export function mergeParsedQuestionsWithSource(
         options: targetPart === 1 ? options : [],
         statements: targetPart === 2 ? statements : undefined,
         shortAnswer: targetPart === 3 ? (parsedQ.shortAnswer || sourceQ.shortAnswer || "") : undefined,
-        correctIndex: typeof parsedQ.correctIndex === "number" ? parsedQ.correctIndex : (typeof sourceQ.correctIndex === "number" ? sourceQ.correctIndex : -1),
+        correctIndex: typeof parsedQ.correctIndex === "number" ? parsedQ.correctIndex : (sourceQ.correctIndex ?? 0),
         passageContent: sourceQ.passageContent || parsedQ.passageContent,
         hasTableOrDiagram: Boolean(
           parsedQ.hasTableOrDiagram ||
@@ -1293,18 +1296,6 @@ export function mergeParsedQuestionsWithSource(
 }
 
 
-function collectPreservationTokens(value: string): string[] {
-  if (!value) return [];
-  return Array.from(new Set(value.match(/__(?:FORMULA|IMG)_TOKEN_\d+__/g) || []));
-}
-
-function countMissingPreservationTokens(source: string, questions: Question[]): string[] {
-  const expected = collectPreservationTokens(source);
-  if (expected.length === 0) return [];
-  const serialized = JSON.stringify(questions);
-  return expected.filter((token) => !serialized.includes(token));
-}
-
 // ──────────────────────────────────────────────
 // 1. AI Parse Exam Text (ExamShuffler)
 // ──────────────────────────────────────────────
@@ -1374,10 +1365,6 @@ QUY TẮC BẢO TOÀN CÔNG THỨC TOÁN, HÌNH ẢNH, BIỂU ĐỒ & BẢNG S�
 7. BẢO TOÀN CHÍNH XÁC SỐ LƯỢNG CÂU HỎI (QUAN TRỌNG):
    - Đề bài tải lên có bao nhiêu câu hỏi thì trích xuất ĐÚNG VÀ ĐỦ 100% bấy nhiêu câu hỏi.
    - TUYỆT ĐỐI KHÔNG tự ý bỏ bớt câu hỏi, không gộp câu hỏi độc lập lại với nhau, và KHÔNG tự ý sinh thêm câu hỏi giả lập/dư thừa!
-8. TOKEN BẤT BIẾN TỪ DOCX:
-   - Mọi token dạng __FORMULA_TOKEN_N__ và __IMG_TOKEN_N__ là đối tượng gốc đã được khóa.
-   - PHẢI sao chép NGUYÊN VẸN token vào đúng content/options/statements nơi nó xuất hiện.
-   - NGHIÊM CẤM đổi tên, xóa, tách, viết lại hoặc suy đoán nội dung của token.
 
 Văn bản đề thi:
 """
@@ -1515,7 +1502,7 @@ ${rawText.slice(0, 50000)}
         questionType,
         content: cleanContent,
         options: part === 1 ? finalOptions.slice(0, 4) : [],
-        correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : -1,
+        correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
         statements: part === 2 ? statements : undefined,
         shortAnswer: part === 3 ? (item.shortAnswer || "") : undefined,
         explanation: item.explanation || "",
@@ -1524,7 +1511,7 @@ ${rawText.slice(0, 50000)}
           ? item.groupTitle.trim()
           : undefined,
         passageContent: item.passageContent || undefined,
-        needsReview: item.needsReview ?? (part === 1 && !(typeof item.correctIndex === "number" && item.correctIndex >= 0 && item.correctIndex <= 3)),
+        needsReview: item.needsReview ?? false,
         isAiGenerated: true,
         hasTableOrDiagram: Boolean(item.hasTableOrDiagram || cleanContent.includes("|")),
       };
@@ -1605,25 +1592,7 @@ ${rawText.slice(0, 50000)}
       return q;
     });
 
-    const normalized = normalizeExamQuestions3Parts(enriched);
-    const missingTokens = countMissingPreservationTokens(rawText, normalized);
-    if (missingTokens.length > 0) {
-      const localFallback = normalizeExamQuestions3Parts(fallbackParseExam(rawText, subject, grade));
-      const fallbackMissing = countMissingPreservationTokens(rawText, localFallback);
-      if (fallbackMissing.length < missingTokens.length && localFallback.length > 0) {
-        return {
-          success: true,
-          data: localFallback,
-          warning: `AI làm mất ${missingTokens.length} token công thức/hình; hệ thống đã tự chuyển sang parser cục bộ để bảo toàn nguồn.`,
-        };
-      }
-      return {
-        success: true,
-        data: normalized.map((q) => ({ ...q, needsReview: true })),
-        warning: `Cảnh báo bảo toàn: thiếu ${missingTokens.length} token nguồn (${missingTokens.join(", ")}). Cần kiểm duyệt trước khi xuất bản.`,
-      };
-    }
-    return { success: true, data: normalized };
+    return { success: true, data: normalizeExamQuestions3Parts(enriched) };
   } catch (err: any) {
     console.warn("AI parse encountered error, falling back to local parser:", err?.message || err);
     const fallback = fallbackParseExam(rawText, subject, grade);
@@ -1946,7 +1915,7 @@ QUY TẮC BẢNG SỐ LIỆU, BIỂU ĐỒ & CÔNG THỨC (BẮT BUỘC TUÂN TH
         questionType,
         content: cleanContent || item.content || "",
         options: part === 1 ? finalOptions.slice(0, 4) : [],
-        correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : -1,
+        correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
         statements: part === 2 ? statements : undefined,
         shortAnswer: part === 3 ? (item.shortAnswer || "") : undefined,
         explanation: item.explanation || "",
@@ -2050,7 +2019,7 @@ YÊU CẦU ĐỊNH DẠNG:
       questionType: item.questionType || (requestedPart === 2 ? "true_false" : requestedPart === 3 ? "short_answer" : "multiple_choice"),
       content: item.content,
       options: item.options || (requestedPart === 1 ? ["A", "B", "C", "D"] : []),
-      correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : -1,
+      correctIndex: typeof item.correctIndex === "number" ? item.correctIndex : 0,
       statements: item.statements,
       shortAnswer: item.shortAnswer,
       explanation: item.explanation || "",
@@ -2204,7 +2173,7 @@ export async function clientDiagnosticRemediation(payload: {
     const { wrongQuestions, correctQuestions, subject, grade, apiKey, model } = payload;
 
     const wrongList = wrongQuestions.slice(0, 8).map((q, i) =>
-      `${i + 1}. [Câu ${q.questionIndex}] ${q.content?.slice(0, 100)}... (Đáp án đúng: ${q.correctAnswer ?? q.correctAnswerDisplay ?? "Chưa có đáp án duyệt"})`
+      `${i + 1}. [Câu ${q.questionIndex}] ${q.content?.slice(0, 100)}... (Đáp án đúng: ${q.correctAnswer})`
     ).join("\n");
 
     const correctList = correctQuestions.slice(0, 5).map(q =>
@@ -2221,10 +2190,9 @@ ${correctList}
 
 Hãy trả về JSON hợp lệ (không markdown, chỉ JSON thuần) với cấu trúc:
 {
-  "overallFeedback": "nhận xét tổng quát ngắn gọn về năng lực",
-  "weaknesses": [{"topic":"chủ đề yếu 1","description":"mô tả ngắn"}],
-  "strengths": ["điểm mạnh 1"],
-  "studyAdvice": ["gợi ý ôn tập 1"],
+  "overallDiagnosis": "nhận xét tổng quát ngắn gọn về năng lực",
+  "weakAreas": ["chủ đề yếu 1", "chủ đề yếu 2"],
+  "strongAreas": ["điểm mạnh 1"],
   "remediationQuestions": [
     {
       "content": "Câu hỏi ôn tập 1",

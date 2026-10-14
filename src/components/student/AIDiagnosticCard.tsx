@@ -73,7 +73,7 @@ export const AIDiagnosticCard: React.FC<AIDiagnosticCardProps> = ({
 
         let isCorrect = false;
         if (detail) {
-          isCorrect = detail.isCorrect || (detail.pointsEarned || 0) > 0;
+          isCorrect = detail.isCorrect || (detail.scoreEarned || 0) > 0;
         } else {
           if (q.part === 2 || q.questionType === "true_false") {
             isCorrect = false;
@@ -93,8 +93,7 @@ export const AIDiagnosticCard: React.FC<AIDiagnosticCardProps> = ({
           content: q.content,
           options: q.options,
           correctIndex: q.correctIndex,
-          correctAnswerDisplay: q.shortAnswer || (Number.isInteger(q.correctIndex) && q.options ? q.options[q.correctIndex as number] : ""),
-          correctAnswer: q.shortAnswer || (Number.isInteger(q.correctIndex) && q.options ? q.options[q.correctIndex as number] : ""),
+          correctAnswerDisplay: q.shortAnswer || (q.options && q.options[q.correctIndex ?? 0]) || "Đáp án chuẩn",
           studentAnswer: studentAns,
           studentAnswerDisplay: String(studentAns ?? "Chưa làm"),
           explanation: q.explanation || "",
@@ -121,16 +120,7 @@ export const AIDiagnosticCard: React.FC<AIDiagnosticCardProps> = ({
       });
 
       if (data.success && data.data) {
-        const raw: any = data.data;
-        setDiagnosticData({
-          overallFeedback: raw.overallFeedback || raw.overallDiagnosis || "",
-          strengths: Array.isArray(raw.strengths) ? raw.strengths : (Array.isArray(raw.strongAreas) ? raw.strongAreas : []),
-          weaknesses: Array.isArray(raw.weaknesses)
-            ? raw.weaknesses
-            : (Array.isArray(raw.weakAreas) ? raw.weakAreas.map((topic: any) => ({ topic: String(topic), description: "Cần ôn tập và luyện thêm dạng kiến thức này." })) : []),
-          studyAdvice: Array.isArray(raw.studyAdvice) ? raw.studyAdvice : [],
-          remediationQuestions: Array.isArray(raw.remediationQuestions) ? raw.remediationQuestions : [],
-        });
+        setDiagnosticData(data.data);
       } else {
         setErrorMsg(data.error || "Không thể phân tích kết quả bài thi từ AI.");
       }

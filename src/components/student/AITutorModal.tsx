@@ -218,7 +218,7 @@ export const AITutorModal: React.FC<AITutorModalProps> = ({
           </div>
           <div className="flex items-center gap-3 text-[11px] text-slate-600">
             <span>
-              Đáp án đúng: <strong className="text-emerald-700">{question.shortAnswer || (Number.isInteger(question.correctIndex) && question.options ? question.options[question.correctIndex as number] : "Chưa có đáp án được duyệt")}</strong>
+              Đáp án đúng: <strong className="text-emerald-700">{question.shortAnswer || (question.options && question.options[question.correctIndex ?? 0]) || "Đáp án chuẩn"}</strong>
             </span>
             {studentAnswer !== undefined && (
               <span>

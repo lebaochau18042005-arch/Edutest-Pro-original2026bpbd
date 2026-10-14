@@ -54,7 +54,6 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
   const [networkMode, setNetworkMode] = useState<"wifi" | "online">("online");
   const [cloudSyncStatus, setCloudSyncStatus] = useState<"syncing" | "synced" | "error">("syncing");
   const [cloudSyncMsg, setCloudSyncMsg] = useState<string>("");
-  const [cloudSyncAttempt, setCloudSyncAttempt] = useState(0);
 
   const [links, setLinks] = useState<{
     directLink: string;
@@ -92,28 +91,22 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
     setCloudSyncStatus("syncing");
     setCloudSyncMsg("Đang đồng bộ đề thi lên Cloud Database...");
 
-    publishExamToCloud(exam)
-      .then((res) => {
-        if (!isMounted) return;
-        const usable = res.success && (networkMode === "wifi" || res.durable === true);
-        if (usable) {
+    publishExamToCloud(exam).then((res) => {
+      if (isMounted) {
+        if (res.success) {
           setCloudSyncStatus("synced");
-          setCloudSyncMsg(res.message || "Đã đồng bộ đề thi lên nguồn lưu trữ phù hợp.");
+          setCloudSyncMsg(res.message);
         } else {
           setCloudSyncStatus("error");
-          setCloudSyncMsg(res.message || "Không thể đồng bộ đề thi lên Cloud Database.");
+          setCloudSyncMsg(res.message);
         }
-      })
-      .catch((err: any) => {
-        if (!isMounted) return;
-        setCloudSyncStatus("error");
-        setCloudSyncMsg(err?.message || "Không thể đồng bộ đề thi lên Cloud Database.");
-      });
+      }
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [isOpen, exam, cloudSyncAttempt, networkMode]);
+  }, [isOpen, exam]);
 
   useEffect(() => {
     if (!isOpen || !exam) return;
@@ -172,20 +165,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
     );
   }
 
-  const variantCodes = exam?.variants?.map((v) => v.examCode).filter(Boolean) || [];
-  const shareReady = networkMode === "wifi" ? cloudSyncStatus === "synced" : cloudSyncStatus === "synced";
-
-  const ensureShareReady = () => {
-    if (shareReady) return true;
-    const reason = cloudSyncStatus === "syncing"
-      ? "Đề đang được đồng bộ lên Cloud. Vui lòng chờ trạng thái Sẵn sàng rồi mới phát QR/link cho học sinh."
-      : `Chưa thể phát QR/link trực tuyến vì Cloud chưa lưu được đề${cloudSyncMsg ? `: ${cloudSyncMsg}` : "."}`;
-    alert(reason);
-    return false;
-  };
-
   const handleOpenExamInNewTab = () => {
-    if (!ensureShareReady()) return;
     const linkToOpen = links.directLink || links.simpleCodeLink;
     if (linkToOpen) {
       window.open(linkToOpen, "_blank");
@@ -203,7 +183,6 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
   };
 
   const handleCopyLink = () => {
-    if (!ensureShareReady()) return;
     const linkToCopy = links.directLink || links.simpleCodeLink;
     navigator.clipboard.writeText(linkToCopy);
     setCopied(true);
@@ -211,7 +190,6 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
   };
 
   const handleDownloadQr = () => {
-    if (!ensureShareReady()) return;
     if (!links.qrCodeUrl) return;
     const a = document.createElement("a");
     a.href = links.qrCodeUrl;
@@ -278,7 +256,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
         <div className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-16 my-auto py-6">
           {/* Big QR Code Card */}
           <div className="bg-white p-6 rounded-3xl shadow-2xl border-4 border-emerald-500/30 flex flex-col items-center">
-            {links.qrCodeUrl && shareReady ? (
+            {links.qrCodeUrl ? (
               <div
                 onClick={handleOpenExamInNewTab}
                 className="relative group cursor-pointer overflow-hidden rounded-2xl border-2 border-emerald-300 hover:border-emerald-500 transition-all hover:shadow-xl active:scale-95"
@@ -361,7 +339,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
                 <div>
                   <p className="font-bold text-sm text-white">Điền Họ Tên & Lớp của em</p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Hệ thống tự động phân mã đề trong bộ đã cấu hình và giữ ổn định trên thiết bị
+                    Hệ thống tự động xáo trộn và bốc ngẫu nhiên mã đề (101 - 104) để chống nhìn bài
                   </p>
                 </div>
               </div>
@@ -452,17 +430,6 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
           </div>
         )}
 
-        {cloudSyncStatus === "error" && (
-          <div className="p-3 bg-rose-50 border border-rose-300 rounded-2xl text-xs text-rose-900 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Chưa thể phát link trực tuyến an toàn.</p>
-              <p className="text-[11px] mt-0.5">{cloudSyncMsg || "Cloud chưa xác nhận đã lưu đề."} Nếu QR là gói tự chứa thì vẫn dùng được; nếu không, hãy đồng bộ lại trước khi giao cho học sinh.</p>
-              <button type="button" onClick={() => setCloudSyncAttempt(v => v + 1)} className="mt-2 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold">Thử đồng bộ lại</button>
-            </div>
-          </div>
-        )}
-
         {/* Environment Switcher: Wi-Fi vs Online Vercel */}
         <div className="p-1.5 bg-slate-100 rounded-2xl flex gap-1.5 text-xs">
           <button
@@ -512,18 +479,16 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
 
           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
             <ShieldCheck className="w-3 h-3" />
-            Tự chia mã đề theo cấu hình
+            Tự chia 4 mã đề ngẫu nhiên
           </span>
         </div>
 
         {/* QR Code Presentation Area */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-5 p-4 rounded-2xl bg-gradient-to-b from-slate-50 to-emerald-50/40 border border-emerald-100">
           <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm shrink-0 flex flex-col items-center">
-            {isLoadingLinks || !shareReady ? (
-              <div className="w-48 h-48 flex items-center justify-center text-xs text-slate-500 text-center p-4">
-                {cloudSyncStatus === "error" && !links.isSelfContained
-                  ? "Chưa thể phát QR: đề chưa được lưu Cloud."
-                  : "Đang chuẩn bị và xác nhận đề trước khi phát QR..."}
+            {isLoadingLinks ? (
+              <div className="w-48 h-48 flex items-center justify-center text-xs text-slate-400">
+                Đang chuẩn bị mã QR...
               </div>
             ) : (
               <div
@@ -630,7 +595,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
             <input
               type="text"
               readOnly
-              value={shareReady ? (links.directLink || links.simpleCodeLink) : "Đang chờ xác nhận lưu đề trước khi phát link..."}
+              value={links.directLink || links.simpleCodeLink}
               className="flex-1 text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-700 select-all"
             />
             <button
@@ -686,7 +651,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
         <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-start gap-2.5 text-xs text-indigo-950">
           <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-            <strong>Chống nhìn bài tự động:</strong> Mỗi học sinh khi quét mã QR hoặc bấm link sẽ được hệ thống phân một mã đề trong bộ {variantCodes.join(", ") || "đã cấu hình"}. Mã đã phân được giữ ổn định trên thiết bị để tránh đổi đề khi tải lại trang.
+            <strong>Chống nhìn bài tự động:</strong> Mỗi học sinh khi quét mã QR hoặc bấm link sẽ được hệ thống phân ngẫu nhiên 1 trong 4 mã đề (101, 102, 103, 104) với thứ tự câu hỏi và đáp án đảo nhau.
           </p>
         </div>
 

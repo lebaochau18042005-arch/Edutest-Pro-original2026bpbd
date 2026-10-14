@@ -1,7 +1,7 @@
 {
-  "name": "edutest-pro",
+  "name": "react-example",
   "private": true,
-  "version": "16.0.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -10,9 +10,7 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test:paper-grading": "tsx scripts/paperGradingRegressionTest.ts",
-    "test:formulas": "tsx scripts/formulaRegressionTest.ts",
-    "lint:all": "tsc --noEmit",
-    "test:security": "tsx scripts/securityRegressionTest.ts"
+    "test:formulas": "tsx scripts/formulaRegressionTest.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

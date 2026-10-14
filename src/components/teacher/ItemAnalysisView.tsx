@@ -63,7 +63,7 @@ export const ItemAnalysisView: React.FC<ItemAnalysisViewProps> = ({
   const refQuestions = refVariant?.questions || currentExam?.originalQuestions || [];
 
   // Sort submissions by total score to calculate Discrimination Index (Top 27% vs Bottom 27%)
-  const sortedSubs = [...activeSubs].sort((a, b) => b.score - a.score);
+  const sortedSubs = [...activeSubs].sort((a, b) => (b.score || 0) - (a.score || 0));
   const groupSize = Math.max(1, Math.round(totalN * 0.27));
   const topGroup = sortedSubs.slice(0, groupSize);
   const bottomGroup = sortedSubs.slice(Math.max(0, totalN - groupSize));

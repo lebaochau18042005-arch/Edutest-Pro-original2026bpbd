@@ -50,8 +50,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
   } | null>(null);
 
   useEffect(() => {
-    const maxScore = Number(submission.maxScore) > 0 ? Number(submission.maxScore) : 10;
-    if ((submission.score || 0) / maxScore >= 0.7 && !submission.isLockedDueToCheating) {
+    if ((submission.score || 0) >= 7 && !submission.isLockedDueToCheating) {
       confetti({
         particleCount: 80,
         spread: 70,
@@ -66,19 +65,6 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
     (submission.devToolsCount || 0) +
     (submission.suspiciousSpeedCount || 0);
 
-  if (submission.gradingPending) {
-    return (
-      <div className="max-w-2xl mx-auto py-10 px-4">
-        <div className="bg-amber-50 border border-amber-300 rounded-3xl p-8 text-center space-y-4">
-          <Clock className="w-10 h-10 mx-auto text-amber-600" />
-          <h2 className="text-lg font-bold text-amber-950">Bài đã lưu dự phòng – đang chờ máy chủ chấm</h2>
-          <p className="text-sm text-amber-800">Điểm chưa được tính trên thiết bị để tránh lộ đáp án. Hãy kết nối Internet rồi nộp/đồng bộ lại bài.</p>
-          <button type="button" onClick={onRetakeOrExit} className="px-5 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold">Về trang chính</button>
-        </div>
-      </div>
-    );
-  }
-
   // Filter questions
   const filteredQuestions = variant
     ? variant.questions.filter((q) => {
@@ -89,7 +75,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
         let isUnanswered = false;
 
         if (detail) {
-          isCorrect = Boolean(detail.isCorrect);
+          isCorrect = detail.isCorrect || (detail.scoreEarned || 0) > 0;
           isUnanswered = detail.unanswered || false;
         } else {
           if (q.part === 2 || q.questionType === "true_false") {
@@ -151,7 +137,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
           )}
           <div className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm text-slate-600 font-medium pt-1">
             <span className="bg-slate-100 px-2.5 py-1 rounded-xl">
-              Trường: <strong>{submission.school || "Chưa nhập"}</strong>
+              Trường: <strong>{submission.school || "THPT Chuyên Lê Hồng Phong"}</strong>
             </span>
             <span className="bg-slate-100 px-2.5 py-1 rounded-xl">
               Lớp: <strong>{submission.studentClass}</strong>
@@ -160,7 +146,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
               Thí sinh: <strong>{submission.studentName}</strong>
             </span>
             <span className="bg-amber-100 text-amber-900 px-2.5 py-1 rounded-xl font-mono font-bold">
-              SBD: {submission.studentId || "Chưa nhập"}
+              SBD: {submission.studentId || "SBD-12058"}
             </span>
             <span className="bg-blue-100 text-blue-900 px-2.5 py-1 rounded-xl font-mono font-bold">
               Mã đề: {submission.examCode}
@@ -171,7 +157,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
         {/* Big Score Display */}
         <div className="inline-flex flex-col items-center justify-center p-6 bg-slate-50 rounded-2xl border border-slate-200">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Tổng Điểm (Thang điểm {Number(submission.maxScore) > 0 ? Number(submission.maxScore).toFixed(2) : "10.00"})
+            Tổng Điểm (Thang điểm 10.0)
           </span>
           <div className="text-5xl font-extrabold text-indigo-700 my-1 font-mono">
             {typeof submission?.score === "number" ? submission.score.toFixed(2) : "0.00"}
@@ -339,7 +325,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
       </div>
 
       {/* Phase 2: AI Diagnostic & Adaptive Remediation Card */}
-      {allowReview && !submission.isLockedDueToCheating && (
+      {!submission.isLockedDueToCheating && (
         <AIDiagnosticCard
           submission={submission}
           variant={variant}
@@ -429,7 +415,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                   <div
                     key={q.questionIndex}
                     className={`p-5 rounded-2xl border text-xs space-y-4 transition-all ${
-                      detail?.isCorrect || Boolean(detail?.isCorrect)
+                      detail?.isCorrect || (detail?.scoreEarned || 0) > 0
                         ? "bg-emerald-50/20 border-emerald-200"
                         : detail?.unanswered
                         ? "bg-slate-50 border-slate-200"
@@ -489,11 +475,11 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                       {detail && (
                         <div className="shrink-0 text-right">
                           <span className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono inline-block ${
-                            (detail.pointsEarned || 0) > 0
+                            (detail.scoreEarned || 0) > 0
                               ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                               : "bg-rose-100 text-rose-800 border border-rose-300"
                           }`}>
-                            +{typeof detail.pointsEarned === "number" ? detail.pointsEarned.toFixed(2) : "0.00"} đ
+                            +{typeof detail.scoreEarned === "number" ? detail.scoreEarned.toFixed(2) : "0.00"} đ
                           </span>
                         </div>
                       )}
@@ -504,8 +490,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {(q.options || []).map((opt, optIdx) => {
                           const isSelected = studentAns === optIdx;
-                          const answerLetter = String(detail?.correctAnswerDisplay || "").trim().toUpperCase();
-                          const isAnswerKey = answerLetter === LETTERS[optIdx] || q.correctIndex === optIdx;
+                          const isAnswerKey = q.correctIndex === optIdx;
 
                           return (
                             <div
@@ -554,7 +539,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                       <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden bg-white">
                         {(q.statements || []).map((stmt: any) => {
                           const studentVal = studentAns?.[stmt.id];
-                          const keyVal = Boolean(stmt.correctValue);
+                          const keyVal = stmt.isCorrect;
                           const isMatch = studentVal !== undefined && studentVal === keyVal;
 
                           return (
@@ -572,7 +557,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                                   </strong>
                                 </span>
                                 <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[11px]">
-                                  Chuẩn: {typeof keyVal === "boolean" ? (keyVal ? "ĐÚNG" : "SAI") : "—"}
+                                  Chuẩn: {keyVal ? "ĐÚNG" : "SAI"}
                                 </span>
                                 {isMatch ? (
                                   <Check className="w-4 h-4 text-emerald-600" />
@@ -597,7 +582,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                             </strong>
                           </span>
                           <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded font-mono font-bold">
-                            Đáp án chuẩn: {detail?.correctAnswerDisplay || q.shortAnswer || (q.acceptableAnswers || []).join(" | ")}
+                            Đáp án chuẩn: {q.shortAnswer || (q.acceptableAnswers || []).join(" | ")}
                           </span>
                         </div>
                       </div>

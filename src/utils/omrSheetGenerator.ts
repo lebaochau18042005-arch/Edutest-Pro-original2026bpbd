@@ -12,8 +12,6 @@ export interface OMRSheetOptions {
   totalPart1?: number; // 12 or 18 or 24 or 40
   totalPart2?: number; // 4
   totalPart3?: number; // 6
-  maxScore?: number; // Thang điểm của bài thi, ví dụ 10
-  scoringSummary?: string; // Tóm tắt cấu hình điểm đã lưu
 }
 
 /**
@@ -40,8 +38,6 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
   const numPart1 = options.totalPart1 || 18;
   const numPart2 = options.totalPart2 || 4;
   const numPart3 = options.totalPart3 || 6;
-  const maxScore = Number(options.maxScore ?? 10);
-  const scoringSummary = (options.scoringSummary || "Chấm theo biểu điểm giáo viên đã lưu trong EduTest Pro").replace(/[<>]/g, "");
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -353,11 +349,6 @@ export function generatePrintableOMRHtml(options: OMRSheetOptions = {}): string 
     <!-- Instructions -->
     <div class="inst-box">
       <b>HƯỚNG DẪN TÔ PHIẾU:</b> Dùng bút chì đen (2B) tô kín ô tròn: <span class="bubble" style="background:#000; color:#fff;">A</span>. Không gạch chéo <span class="bubble">✕</span>, không đánh dấu tích <span class="bubble">✓</span>.
-    </div>
-
-    <div class="inst-box" style="background:#fff;">
-      <b>CẤU HÌNH CHẤM:</b> Thang điểm tối đa: <b>${maxScore}</b> điểm. ${scoringSummary}.
-      <br/><span style="font-size:8.5px;color:#555;">Điểm chỉ được tính sau khi giáo viên duyệt kết quả nhận diện ô tô và đối chiếu với đáp án chuẩn đã lưu.</span>
     </div>
 
     <!-- PART I: MULTIPLE CHOICE -->

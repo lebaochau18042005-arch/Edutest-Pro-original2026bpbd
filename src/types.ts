@@ -30,67 +30,6 @@ export interface TrueFalseStatement {
   explanation?: string;
 }
 
-
-export type PreservationStatus = "PASS" | "NEEDS_REVIEW" | "FAIL";
-
-export interface FormulaAsset {
-  id: string;
-  type: "latex" | "omml" | "mathtype" | "image_formula";
-  latex?: string;
-  originalXml?: string;
-  originalRef?: string;
-  previewUrl?: string;
-  position?: number;
-  needsReview?: boolean;
-}
-
-export interface QuestionImageAsset {
-  id: string;
-  url: string;
-  originalName?: string;
-  mimeType?: string;
-  width?: number;
-  height?: number;
-  position?: number;
-  role?: "question" | "option" | "diagram" | "table" | "experiment" | "other";
-}
-
-export interface RichContentBlock {
-  id: string;
-  type: "text" | "formula" | "image" | "table" | "chemical_equation" | "diagram";
-  text?: string;
-  latex?: string;
-  formulaId?: string;
-  imageId?: string;
-  html?: string;
-}
-
-export interface SourceDocumentRef {
-  fileName: string;
-  fileType: "docx" | "pdf" | "image" | "xlsx" | "text" | "manual";
-  /** IndexedDB/server source-package identifier. Keep this lightweight; never inline binary here. */
-  fileId?: string;
-  storage?: "indexeddb" | "server" | "external";
-  checksumSha256?: string;
-  sourcePreserved?: boolean;
-  originalOrderIndex?: number;
-  /** 1-based question block index inside the original DOCX body for exact OOXML export. */
-  ooxmlQuestionIndex?: number;
-  ooxmlIndexedQuestionCount?: number;
-}
-
-export interface PreservationInfo {
-  status: PreservationStatus;
-  formulaCount: number;
-  imageCount: number;
-  tableCount: number;
-  warnings: string[];
-  extractor?: "deep-ooxml" | "mammoth" | "ai-file" | "manual";
-  embeddingCount?: number;
-  sourcePackageAvailable?: boolean;
-  validatedAt?: string;
-}
-
 export interface Question {
   id: string;
   subject: SubjectType | string;
@@ -117,14 +56,7 @@ export interface Question {
   hasTableOrDiagram?: boolean;
   tableData?: string;
   diagramUrl?: string;
-  // Rich-source preservation metadata for KHTN/Math/Science documents
-  richContent?: RichContentBlock[];
-  formulaAssets?: FormulaAsset[];
-  imageAssets?: QuestionImageAsset[];
-  originalSource?: SourceDocumentRef;
-  preservation?: PreservationInfo;
 }
-
 
 export type ExamStructureType = "3_parts" | "2_parts" | "1_part";
 
@@ -174,11 +106,6 @@ export interface ExamQuestionVariant {
   passageContent?: string;
   hasTableOrDiagram?: boolean;
   diagramUrl?: string;
-  richContent?: RichContentBlock[];
-  formulaAssets?: FormulaAsset[];
-  imageAssets?: QuestionImageAsset[];
-  originalSource?: SourceDocumentRef;
-  preservation?: PreservationInfo;
 }
 
 export interface ExamVariant {
@@ -287,8 +214,6 @@ export interface StudentSubmission {
   status: "in_progress" | "submitted" | "locked";
   classroomId?: string;
   assignmentId?: string;
-  accessCode?: string;
-  gradingPending?: boolean;
 }
 
 export type AppRole = "teacher" | "student";

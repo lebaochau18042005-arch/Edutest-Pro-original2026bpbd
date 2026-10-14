@@ -13,6 +13,8 @@ import {
   Layers,
   ArrowRight,
   Flame,
+  Table,
+  Users,
 } from "lucide-react";
 import { AppRole, TeacherTab, StudentTab } from "../types";
 
@@ -26,6 +28,7 @@ interface DualNavigationBarProps {
   activeExamCount: number;
   submissionCount: number;
   lockedViolationCount: number;
+  classesCount?: number;
   onQuickLaunchStudentTest?: () => void;
 }
 
@@ -39,6 +42,7 @@ export const DualNavigationBar: React.FC<DualNavigationBarProps> = ({
   activeExamCount,
   submissionCount,
   lockedViolationCount,
+  classesCount = 0,
   onQuickLaunchStudentTest,
 }) => {
   return (
@@ -87,6 +91,28 @@ export const DualNavigationBar: React.FC<DualNavigationBarProps> = ({
             >
               <Shuffle className="w-3.5 h-3.5 text-blue-500" />
               <span>Trộn Đề & Cấu Hình</span>
+            </button>
+
+            <button
+              type="button"
+              id="dualnav-teacher-classes"
+              onClick={() => {
+                setCurrentRole("teacher");
+                setTeacherTab("classes");
+              }}
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                currentRole === "teacher" && teacherTab === "classes"
+                  ? "bg-white text-blue-700 shadow-xs border border-blue-200 font-bold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-blue-600" />
+              <span>Lớp Học & Giao Bài</span>
+              {classesCount !== undefined && classesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                  {classesCount}
+                </span>
+              )}
             </button>
 
             <button
@@ -146,10 +172,26 @@ export const DualNavigationBar: React.FC<DualNavigationBarProps> = ({
               }`}
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Chấm Bài AI</span>
               <span className="px-1 py-0.2 rounded-sm text-[9px] font-bold bg-emerald-100 text-emerald-800">
                 OMR
               </span>
+            </button>
+
+            <button
+              type="button"
+              id="dualnav-teacher-matrix"
+              onClick={() => {
+                setCurrentRole("teacher");
+                setTeacherTab("matrix");
+              }}
+              className={`flex items-center justify-center sm:justify-start gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                currentRole === "teacher" && teacherTab === "matrix"
+                  ? "bg-white text-purple-700 shadow-xs border border-purple-200 font-bold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+              }`}
+            >
+              <Table className="w-3.5 h-3.5 text-purple-500" />
+              <span>Ma Trận Đề GDPT 2018</span>
             </button>
           </div>
         </div>
