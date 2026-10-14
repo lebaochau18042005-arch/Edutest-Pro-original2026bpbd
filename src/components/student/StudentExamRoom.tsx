@@ -43,7 +43,7 @@ import {
   ViolationLog,
   QuestionTimeRecord,
 } from "../../types";
-import { LETTERS, gradeSubmission, normalizeExamQuestions3Parts } from "../../utils/examHelpers";
+import { LETTERS, normalizeExamQuestions3Parts } from "../../utils/examHelpers";
 import { FormattedQuestionContent, MathTextRenderer } from "../FormattedQuestionContent";
 
 interface StudentExamRoomProps {
@@ -56,7 +56,7 @@ interface StudentExamRoomProps {
     grade: string;
     studentId?: string;
   };
-  onSubmitExam: (submission: StudentSubmission) => void;
+  onSubmitExam: (submission: StudentSubmission) => Promise<StudentSubmission | null> | StudentSubmission | null;
   onExit: () => void;
 }
 
@@ -68,11 +68,12 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
   onExit,
 }) => {
   // Find Variant & strictly normalize questions
-  const rawVariant: ExamVariant =
-    exam.variants.find((v) => v.examCode === selectedVariantCode) || exam.variants[0];
+  const rawVariant: ExamVariant | undefined =
+    exam.variants.find((v) => v.examCode === selectedVariantCode);
+  const hasValidVariant = Boolean(rawVariant);
 
   const variant: ExamVariant = useMemo(() => {
-    if (!rawVariant) return { examCode: "101", questions: [], answerKey: {} };
+    if (!rawVariant) return { examCode: selectedVariantCode || "", questions: [], answerKey: {} };
     return {
       ...rawVariant,
       questions: normalizeExamQuestions3Parts((rawVariant.questions || []) as any) as unknown as ExamQuestionVariant[],
@@ -129,6 +130,10 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
   const startTimeRef = useRef(Date.now());
   const maxViolations = exam.config.maxTabViolations || 3;
   const isWindowActiveRef = useRef(true);
+  const lastTabViolationAtRef = useRef(0);
+  const submittedRef = useRef(false);
+  const deadlineAtRef = useRef(Date.now() + totalDurationSeconds * 1000);
+  const showTestingControls = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
   const storageKey = `eduexam_exam_cache_${exam.id}_${selectedVariantCode}_${studentInfo.name || "guest"}`;
 
@@ -282,7 +287,14 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
         const parsed = JSON.parse(cached);
         if (parsed.answers) setAnswers(parsed.answers);
         if (parsed.flagged) setFlagged(parsed.flagged);
-        if (parsed.timeLeft && parsed.timeLeft > 10) setTimeLeft(parsed.timeLeft);
+        if (typeof parsed.deadlineAt === "number") {
+          deadlineAtRef.current = parsed.deadlineAt;
+          const remaining = Math.max(0, Math.ceil((parsed.deadlineAt - Date.now()) / 1000));
+          setTimeLeft(Math.min(totalDurationSeconds, remaining));
+        } else if (typeof parsed.timeLeft === "number") {
+          setTimeLeft(Math.max(0, Math.min(totalDurationSeconds, parsed.timeLeft)));
+          deadlineAtRef.current = Date.now() + Math.max(0, Math.min(totalDurationSeconds, parsed.timeLeft)) * 1000;
+        }
         if (parsed.questionTimes) setQuestionTimes(parsed.questionTimes);
         if (parsed.currentQIndex) setCurrentQIndex(parsed.currentQIndex);
         if (parsed.tabSwitchCount) setTabSwitchCount(parsed.tabSwitchCount);
@@ -308,6 +320,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
           answers,
           flagged,
           timeLeft,
+          deadlineAt: deadlineAtRef.current,
           questionTimes,
           currentQIndex,
           tabSwitchCount,
@@ -358,18 +371,17 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
 
   // 4. Timer Countdown & Question Time Tracker
   useEffect(() => {
-    if (isLocked) return;
+    if (isLocked || !hasValidVariant || submittedRef.current) return;
 
     const timer = setInterval(() => {
-      // Countdown overall exam time
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleFinalSubmit(true, "Hết thời gian làm bài");
-          return 0;
-        }
-        return prev - 1;
-      });
+      // Countdown from an absolute deadline so page reload does not reset time.
+      const remaining = Math.max(0, Math.ceil((deadlineAtRef.current - Date.now()) / 1000));
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        handleFinalSubmit(true, "Hết thời gian làm bài");
+        return;
+      }
 
       // Increment active time spent on the current question if tab is in focus
       if (isWindowActiveRef.current) {
@@ -382,7 +394,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isLocked, currentQIndex]);
+  }, [isLocked, currentQIndex, hasValidVariant]);
 
   // Reset active second counter when jumping between questions
   useEffect(() => {
@@ -412,6 +424,9 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
     if (isLocked) return;
 
     const handleTabViolation = (type: "TAB_SWITCH" | "WINDOW_BLUR") => {
+      const now = Date.now();
+      if (now - lastTabViolationAtRef.current < 800) return;
+      lastTabViolationAtRef.current = now;
       isWindowActiveRef.current = false;
       setTabSwitchCount((prevCount) => {
         const newCount = prevCount + 1;
@@ -464,7 +479,9 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
 
     const onBlur = () => {
       isWindowActiveRef.current = false;
-      handleTabViolation("WINDOW_BLUR");
+      // Browser chrome, permission prompts and mobile UI can fire blur while the exam remains visible.
+      // Count a blur only when the document is actually hidden; visibilitychange remains authoritative.
+      if (document.visibilityState === "hidden") handleTabViolation("WINDOW_BLUR");
     };
 
     const onFocus = () => {
@@ -659,7 +676,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
   };
 
   // Final Submit Handler (supports online and offline storage)
-  const handleFinalSubmit = (
+  const handleFinalSubmit = async (
     locked = false,
     reason?: string,
     overrideTabCount?: number,
@@ -668,14 +685,19 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
     overrideSpeedCount?: number,
     overrideLogs?: ViolationLog[]
   ) => {
+    if (submittedRef.current) return;
+    if (!hasValidVariant || variant.questions.length === 0) {
+      alert("Mã đề không hợp lệ hoặc đề không có câu hỏi. Vui lòng quay lại và quét lại mã QR.");
+      return;
+    }
+    submittedRef.current = true;
     const finalTabCount = overrideTabCount ?? tabSwitchCount;
     const finalCopyCount = overrideCopyCount ?? copyPasteCount;
     const finalDevCount = overrideDevToolsCount ?? devToolsCount;
     const finalSpeedCount = overrideSpeedCount ?? suspiciousSpeedCount;
     const finalLogs = overrideLogs ?? violationLogs;
 
-    // Grade submission using standard BGD regulations
-    const graded = gradeSubmission(answers, variant, exam.config.subject || "Toán học");
+    // V16: học sinh chỉ gửi câu trả lời thô; điểm được tính ở backend bằng answer key riêng.
     const durationTakenSeconds = Math.round((Date.now() - startTimeRef.current) / 1000);
 
     const questionTimeRecords: QuestionTimeRecord[] = variant.questions.map((q) => {
@@ -692,6 +714,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
     const submission: StudentSubmission = {
       id: `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       examId: exam.id,
+      accessCode: exam.accessCode,
       examTitle: exam.title,
       examPeriod: exam.config.examPeriod,
       examCode: variant.examCode,
@@ -699,21 +722,21 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
       studentClass: studentInfo.studentClass,
       school: studentInfo.school || exam.config.school,
       grade: studentInfo.grade || exam.config.grade,
-      studentId: studentInfo.studentId || `SBD-${Math.floor(1000 + Math.random() * 9000)}`,
+      studentId: studentInfo.studentId?.trim() || "",
       startedAt: new Date(startTimeRef.current).toISOString(),
       submittedAt: new Date().toISOString(),
       durationTakenSeconds,
       answers,
-      correctCount: graded.correctCount,
-      wrongCount: graded.wrongCount,
-      unansweredCount: graded.unansweredCount,
+      correctCount: 0,
+      wrongCount: 0,
+      unansweredCount: 0,
       totalQuestions,
-      score: graded.score,
-      maxScore: 10.0,
-      part1Score: graded.part1Score,
-      part2Score: graded.part2Score,
-      part3Score: graded.part3Score,
-      detailedResults: graded.detailedResults,
+      score: 0,
+      maxScore: Number(exam.config.maxScore) > 0 ? Number(exam.config.maxScore) : 10,
+      part1Score: 0,
+      part2Score: 0,
+      part3Score: 0,
+      detailedResults: undefined,
       isLockedDueToCheating: locked || finalTabCount >= maxViolations,
       tabSwitchCount: finalTabCount,
       copyPasteCount: finalCopyCount,
@@ -722,8 +745,9 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
       questionTimes,
       questionTimeRecords,
       violationLogs: finalLogs,
-      syncedToGoogleSheet: isOnline,
+      syncedToGoogleSheet: false,
       status: locked || finalTabCount >= maxViolations ? "locked" : "submitted",
+      gradingPending: true,
     };
 
     // Save submission to local backup queue
@@ -734,7 +758,16 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
       localStorage.removeItem(storageKey); // Clear progress cache once submitted
     } catch (e) {}
 
-    onSubmitExam(submission);
+    try {
+      const graded = await onSubmitExam(submission);
+      if (!graded) {
+        submittedRef.current = false;
+        alert("Bài đã được lưu dự phòng trên thiết bị nhưng chưa chấm được trên máy chủ. Vui lòng kết nối mạng và nộp lại.");
+      }
+    } catch (err: any) {
+      submittedRef.current = false;
+      alert("Không thể chấm bài trên máy chủ: " + (err?.message || "Lỗi mạng"));
+    }
   };
 
   // Check if question is answered
@@ -756,6 +789,17 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
   const seconds = timeLeft % 60;
   const isTimeRunningLow = timeLeft < 300;
   const currentQSeconds = questionTimes[currentQIndex] || 0;
+
+  if (!hasValidVariant) {
+    return (
+      <div className="max-w-xl mx-auto my-10 rounded-2xl border border-rose-300 bg-rose-50 p-6 text-center space-y-3">
+        <ShieldAlert className="w-10 h-10 text-rose-600 mx-auto" />
+        <h2 className="font-bold text-rose-900">Không tìm thấy mã đề {selectedVariantCode || "được giao"}</h2>
+        <p className="text-sm text-rose-800">Hệ thống đã chặn việc tự chuyển sang mã đề khác để tránh chấm nhầm. Vui lòng quay lại và quét lại mã QR hoặc liên hệ giáo viên.</p>
+        <button type="button" onClick={onExit} className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold">Quay lại</button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -801,21 +845,21 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
             <div className="bg-white/10 backdrop-blur rounded-xl p-2 border border-white/10">
               <span className="text-[10px] text-slate-300 block">Lớp:</span>
               <strong className="text-emerald-300 font-bold text-xs sm:text-sm truncate block">
-                {studentInfo.studentClass || "12A1"}
+                {studentInfo.studentClass || "Chưa nhập"}
               </strong>
             </div>
 
             <div className="bg-white/10 backdrop-blur rounded-xl p-2 border border-white/10">
               <span className="text-[10px] text-slate-300 block">Trường:</span>
               <strong className="text-indigo-200 font-bold text-xs truncate block" title={studentInfo.school}>
-                {studentInfo.school || exam.config.school || "THPT Chuyên"}
+                {studentInfo.school || exam.config.school || "Chưa nhập"}
               </strong>
             </div>
 
             <div className="bg-white/10 backdrop-blur rounded-xl p-2 border border-white/10">
               <span className="text-[10px] text-slate-300 block">Số Báo Danh (SBD):</span>
               <strong className="text-amber-300 font-mono font-bold text-xs sm:text-sm truncate block">
-                {studentInfo.studentId || "SBD-12058"}
+                {studentInfo.studentId || "Chưa nhập"}
               </strong>
             </div>
           </div>
@@ -979,31 +1023,15 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
             </span>
           </div>
 
-          {/* Quick Testing buttons for simulation */}
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span className="text-slate-400">Thử nghiệm:</span>
-            <button
-              type="button"
-              onClick={triggerTabViolation}
-              className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded border border-amber-500/40 font-bold cursor-pointer"
-            >
-              Thử Chuyển Tab
-            </button>
-            <button
-              type="button"
-              onClick={triggerCopyPasteViolation}
-              className="px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded border border-rose-500/40 font-bold cursor-pointer"
-            >
-              Thử Copy
-            </button>
-            <button
-              type="button"
-              onClick={triggerDevToolsViolation}
-              className="px-2 py-0.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded border border-purple-500/40 font-bold cursor-pointer"
-            >
-              Thử F12
-            </button>
-          </div>
+          {/* Quick Testing buttons are DEV-only and never shown to students in production. */}
+          {showTestingControls && (
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="text-slate-400">Thử nghiệm DEV:</span>
+              <button type="button" onClick={triggerTabViolation} className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded border border-amber-500/40 font-bold">Thử Chuyển Tab</button>
+              <button type="button" onClick={triggerCopyPasteViolation} className="px-2 py-0.5 bg-rose-500/20 text-rose-300 rounded border border-rose-500/40 font-bold">Thử Copy</button>
+              <button type="button" onClick={triggerDevToolsViolation} className="px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded border border-purple-500/40 font-bold">Thử F12</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1284,7 +1312,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
                       {/* Left: Interactive 4-Box Write-in and 4-Column OMR Matrix */}
                       <div className="p-4 bg-white rounded-2xl border-2 border-indigo-200 shadow-sm max-w-sm w-full mx-auto space-y-3">
                         <div className="text-center font-bold text-xs text-indigo-950 uppercase tracking-wide border-b border-slate-100 pb-2">
-                          Mô Phỏng Phiếu Tô Bộ GD&ĐT (Câu {currentQIndex + 1})
+                          Mô Phỏng Phiếu Tô Bộ GD&ĐT (Câu {currentQIndex})
                         </div>
 
                         {/* 4 Write-in Boxes */}
@@ -1748,7 +1776,7 @@ export const StudentExamRoom: React.FC<StudentExamRoomProps> = ({
               <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-left space-y-1">
                 <p>Thí sinh: <strong>{studentInfo.name}</strong> ({studentInfo.studentClass})</p>
                 <p>Trường: <strong>{studentInfo.school}</strong></p>
-                <p>Số Báo Danh: <strong>{studentInfo.studentId || "SBD-12058"}</strong></p>
+                <p>Số Báo Danh: <strong>{studentInfo.studentId || "Chưa nhập"}</strong></p>
                 <p className="text-indigo-700 font-bold">
                   Đã làm: {answeredCount} / {totalQuestions} câu hỏi
                 </p>

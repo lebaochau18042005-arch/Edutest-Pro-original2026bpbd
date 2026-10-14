@@ -294,6 +294,51 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC ĐỊNH NGHĨA.`
   };
 }
 
+function isUnknownMark(value: unknown): boolean {
+  const v = String(value ?? "").trim().toUpperCase();
+  return v === "?" || v === "MULTIPLE" || v === "NHIỀU" || v === "AMBIGUOUS";
+}
+
+function isInvalidPart1Mark(value: unknown): boolean {
+  const v = String(value ?? "").trim().toUpperCase();
+  return v !== "" && !["A", "B", "C", "D"].includes(v);
+}
+
+function isInvalidTrueFalseMark(value: unknown): boolean {
+  const v = String(value ?? "").trim().toUpperCase();
+  return v !== "" && !["Đ", "S", "T", "F", "TRUE", "FALSE"].includes(v);
+}
+
+export function validateReviewedScanForRubric(rubric: any, scan: PaperScan): string[] {
+  const errors: string[] = [];
+  const items: RubricItem[] = rubric?.items || [];
+  let p1 = 0, p2 = 0, p3 = 0;
+  for (const item of items) {
+    const type = rubricType(item);
+    if (type === "multiple_choice") {
+      p1++;
+      const key = item.printedNumber ?? p1;
+      const mark = scan.part1[key];
+      if (isUnknownMark(mark) || isInvalidPart1Mark(mark)) errors.push(`Phần I - câu ${key}: ô tô chưa rõ, tô nhiều hoặc ký hiệu không hợp lệ.`);
+    } else if (type === "true_false") {
+      p2++;
+      const key = item.printedNumber ?? p2;
+      const sub = scan.part2[key] || {};
+      for (const k of ["a","b","c","d"]) {
+        if (isUnknownMark(sub[k]) || isInvalidTrueFalseMark(sub[k])) errors.push(`Phần II - câu ${key}${k}: ô Đ/S chưa rõ, tô nhiều hoặc ký hiệu không hợp lệ.`);
+      }
+    } else if (type === "short_answer") {
+      p3++;
+      const key = item.printedNumber ?? p3;
+      if (isUnknownMark(scan.part3[key])) errors.push(`Phần III - câu ${key}: kết quả tô/ghi chưa rõ.`);
+    }
+  }
+  if (scan.examCode && rubric.examCode && scan.examCode !== rubric.examCode) {
+    errors.push(`Mã đề nhận diện (${scan.examCode}) khác mã đề biểu điểm (${rubric.examCode}).`);
+  }
+  return errors;
+}
+
 /**
  * Stage 2: DETERMINISTIC CODE-BASED GRADING ENGINE
  * Scores the student's OCR markings against the teacher's rubric with 100% mathematical consistency.
@@ -328,7 +373,10 @@ export function gradeScannedPaper(
     const partNum = type === "multiple_choice" ? 1 : type === "true_false" ? 2 : type === "short_answer" ? 3 : 4;
     const partTag = partNum === 1 ? "part1" : partNum === 2 ? "part2" : partNum === 3 ? "part3" : "essay";
 
-    const maxPts = Number(item.points) || (partNum === 2 ? 1.0 : partNum === 3 ? 0.5 : 0.25);
+    const maxPts = Number(item.points);
+    if (!Number.isFinite(maxPts) || maxPts <= 0) {
+      throw new Error(`Câu ${rawQNum} chưa có điểm tối đa hợp lệ. Hãy thiết lập và lưu biểu điểm trước khi chấm.`);
+    }
 
     // ──────────────────────────────────────────
     // 1. PHẦN I: TRẮC NGHIỆM 4 LỰA CHỌN (A, B, C, D)
@@ -347,7 +395,9 @@ export function gradeScannedPaper(
       let status: "correct" | "incorrect" | "ungraded" = "incorrect";
       let feedback = "";
 
-      if (!studentChoice) {
+      if (isUnknownMark(studentChoice) || isInvalidPart1Mark(studentChoice)) {
+        throw new Error(`Phần I - câu ${item.printedNumber ?? part1QuestionCount}: ô tô chưa rõ/tô nhiều. Cần giáo viên duyệt trước khi chấm.`);
+      } else if (!studentChoice) {
         status = "ungraded";
         feedback = `Học sinh chưa tô đáp án / Bỏ trống. Đáp án đúng là: ${teacherLetter}.`;
       } else if (isCorrect) {
@@ -385,6 +435,9 @@ export function gradeScannedPaper(
 
       ["a", "b", "c", "d"].forEach((subKey) => {
         const studentMark = (studentSubMap[subKey] || "").toUpperCase();
+        if (isUnknownMark(studentMark) || isInvalidTrueFalseMark(studentMark)) {
+          throw new Error(`Phần II - câu ${item.printedNumber ?? part2QuestionCount}${subKey}: ô Đ/S chưa rõ/tô nhiều. Cần giáo viên duyệt trước khi chấm.`);
+        }
         const studentBool = studentMark === "Đ" || studentMark === "TRUE" || studentMark === "T" ? true : (studentMark === "S" || studentMark === "FALSE" || studentMark === "F" ? false : null);
         const expectedBool = expectedSubMap[subKey] !== undefined ? expectedSubMap[subKey] : null;
 
@@ -429,6 +482,9 @@ export function gradeScannedPaper(
     if (partNum === 3 || item.questionType === "short_answer") {
       part3QuestionCount++;
       const studentVal = scan.part3[item.printedNumber ?? part3QuestionCount] || "";
+      if (isUnknownMark(studentVal)) {
+        throw new Error(`Phần III - câu ${item.printedNumber ?? part3QuestionCount}: kết quả chưa rõ. Cần giáo viên duyệt trước khi chấm.`);
+      }
       const isMatch = isEquivalentNumeric(studentVal, item.correctAnswer);
       const pointsAwarded = isMatch ? maxPts : 0;
       if (isMatch) p3Correct++;
@@ -472,7 +528,10 @@ export function gradeScannedPaper(
 
   // Calculate final total score
   const totalCalculated = details.reduce((sum, d) => sum + (Number(d.pointsAwarded) || 0), 0);
-  const maxScore = Number(rubric?.maxScore) || round2(details.reduce((sum, d) => sum + d.maxPoints, 0)) || 10.0;
+  const maxScore = Number(rubric?.maxScore);
+  if (!Number.isFinite(maxScore) || maxScore <= 0) {
+    throw new Error("Chưa thiết lập thang điểm tối đa của bài thi.");
+  }
   const finalTotalScore = Math.min(maxScore, Math.max(0, round2(totalCalculated)));
 
   let classification: "Xuất sắc" | "Giỏi" | "Khá" | "Trung bình" | "Yếu" = "Khá";
@@ -525,7 +584,14 @@ export async function recognizeAndGradePaper(
   if (errors.length) throw new Error(errors.join(" "));
   // Step 1: Scan student markings from image (Pure OCR, zero teacher answer bias)
   const initialScan = await scanPaperMarkings(paper, generate);
-  const scanned = reviewScan ? await reviewScan(initialScan) : initialScan;
+  if (!reviewScan) {
+    throw new Error("Bắt buộc giáo viên duyệt kết quả nhận diện phiếu trước khi tính điểm.");
+  }
+  const scanned = await reviewScan(initialScan);
+  const scanErrors = validateReviewedScanForRubric(rubric, scanned);
+  if (scanErrors.length) {
+    throw new Error("Phiếu còn dữ liệu chưa xác nhận:\n" + scanErrors.join("\n"));
+  }
 
   // Step 2: Grade deterministically in code
   const result = gradeScannedPaper(
@@ -534,11 +600,6 @@ export async function recognizeAndGradePaper(
     { fileName: paper.fileName || "bai_lam.jpg", data: paper.data, mimeType: paper.mimeType }
   );
 
-  if (!reviewScan) {
-    result.summaryEvaluation = "CHƯA DUYỆT NHẬN DẠNG — điểm tạm tính. " + result.summaryEvaluation;
-    result.teacherNotes = "Cần đối chiếu đáp án AI đọc với ảnh gốc trước khi sử dụng điểm. " + result.teacherNotes;
-  } else {
-    result.teacherNotes = "Giáo viên đã duyệt đáp án đọc từ phiếu. " + result.teacherNotes;
-  }
+  result.teacherNotes = "Giáo viên đã duyệt đáp án đọc từ phiếu trước khi tính điểm. " + result.teacherNotes;
   return result;
 }

@@ -17,6 +17,13 @@ export function isConfiguredCloudUrl(url?: string): boolean {
 }
 
 const CONFIG_STORAGE_KEY = "edutest_cloud_db_config";
+const ADMIN_TOKEN_STORAGE_KEY = "edutest_admin_token";
+
+function getAdminHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  let token = "";
+  try { token = localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || ""; } catch {}
+  return token.trim() ? { ...extra, "x-edutest-admin-token": token.trim() } : extra;
+}
 
 /**
  * Gets the current Cloud Database configuration from LocalStorage
@@ -90,189 +97,78 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
  */
 export async function publishExamToCloud(
   pkg: ExamPackage
-): Promise<{ success: boolean; cloudKey?: string; message: string }> {
-  if (!pkg || !pkg.accessCode) {
-    return { success: false, message: "Mã đề thi không hợp lệ." };
-  }
-
-  const cleanCode = sanitizeKey(pkg.accessCode);
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-
-  let cloudSuccess = false;
-
-  // 1. Try Cloud Database if configured
-  if (isConfiguredCloudUrl(baseUrl)) {
-    try {
-      const targetUrl = `${baseUrl}/exams/${cleanCode}.json`;
-      const res = await fetchWithTimeout(targetUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...pkg,
-          cloudUpdatedAt: new Date().toISOString(),
-        }),
-      }, 5000);
-
-      if (res.ok) {
-        cloudSuccess = true;
-      }
-    } catch (err: any) {
-      console.warn("Cloud DB publish notice:", err?.message || err);
-    }
-  }
-
-  // 2. Also try local backend if active (port 3000 / localhost)
+): Promise<{ success: boolean; durable?: boolean; cloudKey?: string; message: string }> {
+  if (!pkg || !pkg.accessCode) return { success: false, message: "Mã đề thi không hợp lệ." };
   try {
-    await fetch("/api/exams", {
+    const res = await fetchWithTimeout("/api/exams", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAdminHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(pkg),
-    });
-  } catch (e) {}
-
-  // 3. Cache locally in browser
-  try {
-    const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
-    const filtered = saved.filter(
-      (e: any) => e.accessCode?.toUpperCase() !== pkg.accessCode?.toUpperCase() && e.id !== pkg.id
-    );
-    localStorage.setItem("edutest_active_exams", JSON.stringify([pkg, ...filtered]));
-  } catch (e) {}
-
-  return {
-    success: true,
-    cloudKey: cleanCode,
-    message: `Đã đóng gói và đồng bộ đề thi [${pkg.accessCode}] thành công! Học sinh dùng 4G/Wi-Fi quét mã QR hoặc bấm link là vào thi 100% ngay lập tức.`,
-  };
+    }, 10000);
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      return { success: false, durable: false, message: json?.error || `Máy chủ từ chối lưu đề (HTTP ${res.status}).` };
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+      const filtered = saved.filter((e: any) => e.accessCode?.toUpperCase() !== pkg.accessCode?.toUpperCase() && e.id !== pkg.id);
+      localStorage.setItem("edutest_active_exams", JSON.stringify([pkg, ...filtered]));
+    } catch {}
+    return {
+      success: true,
+      durable: Boolean(json.durable),
+      cloudKey: sanitizeKey(pkg.accessCode),
+      message: json.message || (json.durable ? "Đã lưu đề an toàn trên máy chủ." : "Đề mới chỉ lưu tạm trên máy chủ."),
+    };
+  } catch (err: any) {
+    return { success: false, durable: false, message: `Không thể kết nối máy chủ: ${err?.message || "Lỗi mạng"}.` };
+  }
 }
 
-/**
- * Fetches an Exam Package from the Cloud Database by Access Code.
- */
 export async function fetchExamFromCloud(accessCode: string): Promise<ExamPackage | null> {
   if (!accessCode || !accessCode.trim()) return null;
-
   const upperCode = accessCode.trim().toUpperCase();
-  const cleanKey = sanitizeKey(upperCode);
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-
-  // Strategy 1: Fetch from Cloud Database
-  if (isConfiguredCloudUrl(baseUrl)) {
-    try {
-      const targetUrl = `${baseUrl}/exams/${cleanKey}.json`;
-      const res = await fetchWithTimeout(targetUrl, {}, 4000);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && (data.accessCode || data.title || data.originalQuestions)) {
-          // Cache to localStorage
-          try {
-            const saved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
-            const filtered = saved.filter(
-              (e: any) => e.accessCode?.toUpperCase() !== upperCode && e.id !== data.id
-            );
-            localStorage.setItem("edutest_active_exams", JSON.stringify([data, ...filtered]));
-          } catch (e) {}
-
-          return data as ExamPackage;
-        }
-      }
-    } catch (err) {
-      console.warn("Cloud DB fetch notice:", err);
-    }
-  }
-
-  // Strategy 2: Check Local Backend API (/api/exams/:code)
   try {
-    const res = await fetch(`/api/exams/${encodeURIComponent(upperCode)}`);
-    if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+    const res = await fetchWithTimeout(`/api/exams/${encodeURIComponent(upperCode)}`, {}, 8000);
+    if (res.ok && (res.headers.get("content-type") || "").includes("application/json")) {
       const json = await res.json();
-      if (json && json.success && json.data) {
-        return json.data as ExamPackage;
-      }
+      if (json?.success && json.data) return json.data as ExamPackage;
     }
-  } catch (e) {}
-
-  // Strategy 3: Check LocalStorage
-  try {
-    const localSaved = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
-    const match = localSaved.find(
-      (e: any) => e.accessCode?.toUpperCase() === upperCode || e.id === accessCode
-    );
-    if (match) return match as ExamPackage;
-  } catch (e) {}
-
+  } catch (err) {
+    console.warn("Secure exam fetch failed:", err);
+  }
   return null;
 }
 
-/**
- * Submits a student's completed exam to the Cloud Database.
- */
 export async function submitExamToCloud(
   submission: StudentSubmission
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; durable?: boolean; message: string; data?: StudentSubmission }> {
   if (!submission) return { success: false, message: "Dữ liệu bài nộp rỗng." };
-
-  const examKey = sanitizeKey(submission.examId || "UNKNOWN_EXAM");
-  const subKey = sanitizeKey(submission.id || `sub_${Date.now()}`);
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-
-  let cloudOk = false;
-
-  // 1. Upload to Cloud Database
-  if (isConfiguredCloudUrl(baseUrl)) {
-    try {
-      const targetUrl = `${baseUrl}/submissions/${examKey}/${subKey}.json`;
-      const res = await fetchWithTimeout(targetUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...submission,
-          cloudSubmittedAt: new Date().toISOString(),
-        }),
-      }, 5000);
-
-      if (res.ok) {
-        cloudOk = true;
-      }
-    } catch (err) {
-      console.warn("Failed to upload submission to cloud DB:", err);
-    }
-  }
-
-  // 2. Also try local backend endpoint
   try {
-    await fetch("/api/submissions", {
+    const res = await fetchWithTimeout("/api/submissions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission),
-    });
-  } catch (e) {}
-
-  // 3. Save to localStorage
-  try {
-    const localSubs: StudentSubmission[] = JSON.parse(
-      localStorage.getItem("edutest_submissions") || "[]"
-    );
-    const updated = [submission, ...localSubs.filter((s) => s.id !== submission.id)];
-    localStorage.setItem("edutest_submissions", JSON.stringify(updated));
-  } catch (e) {}
-
-  if (cloudOk) {
+    }, 12000);
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success || !json?.data) {
+      return { success: false, durable: false, message: json?.error || `Máy chủ chưa chấm được bài (HTTP ${res.status}).` };
+    }
+    const graded = json.data as StudentSubmission;
+    try {
+      const localSubs: StudentSubmission[] = JSON.parse(localStorage.getItem("edutest_submissions") || "[]");
+      const updated = [graded, ...localSubs.filter((x) => x.id !== graded.id)];
+      localStorage.setItem("edutest_submissions", JSON.stringify(updated));
+    } catch {}
     return {
       success: true,
-      message: "Đã nộp bài và đồng bộ điểm số lên Đám mây thành công!",
+      durable: Boolean(json.durable),
+      message: json.durable ? "Đã chấm và lưu kết quả bền vững trên máy chủ." : "Đã chấm trên máy chủ; kết quả chưa xác nhận lưu bền vững.",
+      data: graded,
     };
+  } catch (err: any) {
+    return { success: false, durable: false, message: `Không thể gửi bài lên máy chủ: ${err?.message || "Lỗi mạng"}.` };
   }
-
-  return {
-    success: false,
-    message: "Bài thi đã được lưu trên thiết bị và sẽ tự động đồng bộ lại khi có kết nối.",
-  };
 }
 
 /**
@@ -281,117 +177,64 @@ export async function submitExamToCloud(
 export async function fetchSubmissionsFromCloud(
   examCodeOrId?: string
 ): Promise<StudentSubmission[]> {
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-
-  const results: StudentSubmission[] = [];
-  if (!isConfiguredCloudUrl(baseUrl)) return results;
-
   try {
-    let targetUrl = `${baseUrl}/submissions.json`;
-    if (examCodeOrId) {
-      const cleanKey = sanitizeKey(examCodeOrId);
-      targetUrl = `${baseUrl}/submissions/${cleanKey}.json`;
-    }
-
-    const res = await fetchWithTimeout(targetUrl, {}, 4000);
+    const query = examCodeOrId ? `?examId=${encodeURIComponent(examCodeOrId)}` : "";
+    const res = await fetchWithTimeout(`/api/submissions${query}`, { headers: getAdminHeaders() }, 8000);
     if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data === "object") {
-        if (examCodeOrId) {
-          Object.values(data).forEach((sub: any) => {
-            if (sub && sub.studentName) results.push(sub as StudentSubmission);
-          });
-        } else {
-          Object.values(data).forEach((examMap: any) => {
-            if (examMap && typeof examMap === "object") {
-              Object.values(examMap).forEach((sub: any) => {
-                if (sub && sub.studentName) results.push(sub as StudentSubmission);
-              });
-            }
-          });
-        }
-      }
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.data)) return json.data as StudentSubmission[];
     }
   } catch (err) {
-    console.warn("Failed to fetch submissions from cloud DB:", err);
+    console.warn("Secure submissions fetch failed:", err);
   }
-
-  return results;
+  return [];
 }
 
 /**
  * Syncs Classrooms to Cloud Database so student devices can load class roster.
  */
 export async function syncClassroomsToCloud(classrooms: Classroom[]): Promise<boolean> {
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!isConfiguredCloudUrl(baseUrl)) return false;
-
   try {
-    const res = await fetchWithTimeout(`${baseUrl}/classrooms.json`, {
+    const res = await fetchWithTimeout("/api/classrooms", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(classrooms),
-    }, 4000);
-    return res.ok;
+      headers: getAdminHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(classrooms || []),
+    }, 8000);
+    const json = await res.json().catch(() => null);
+    return Boolean(res.ok && json?.success && json?.durable);
   } catch {
     return false;
   }
 }
 
-/**
- * Fetches Classrooms from Cloud Database.
- */
 export async function fetchClassroomsFromCloud(): Promise<Classroom[] | null> {
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!isConfiguredCloudUrl(baseUrl)) return null;
-
   try {
-    const res = await fetchWithTimeout(`${baseUrl}/classrooms.json`, {}, 4000);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) return data as Classroom[];
-    }
+    const res = await fetchWithTimeout("/api/classrooms", { headers: getAdminHeaders() }, 8000);
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success && Array.isArray(json.data)) return json.data as Classroom[];
   } catch {}
   return null;
 }
 
-/**
- * Syncs Class Assignments to Cloud Database.
- */
 export async function syncAssignmentsToCloud(assignments: ClassAssignment[]): Promise<boolean> {
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!isConfiguredCloudUrl(baseUrl)) return false;
-
   try {
-    const res = await fetchWithTimeout(`${baseUrl}/assignments.json`, {
+    const res = await fetchWithTimeout("/api/assignments", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(assignments),
-    }, 4000);
-    return res.ok;
+      headers: getAdminHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(assignments || []),
+    }, 8000);
+    const json = await res.json().catch(() => null);
+    return Boolean(res.ok && json?.success && json?.durable);
   } catch {
     return false;
   }
 }
 
-/**
- * Fetches Class Assignments from Cloud Database.
- */
 export async function fetchAssignmentsFromCloud(): Promise<ClassAssignment[] | null> {
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-  if (!isConfiguredCloudUrl(baseUrl)) return null;
-
   try {
-    const res = await fetchWithTimeout(`${baseUrl}/assignments.json`, {}, 4000);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) return data as ClassAssignment[];
-    }
+    const res = await fetchWithTimeout("/api/assignments", { headers: getAdminHeaders() }, 8000);
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success && Array.isArray(json.data)) return json.data as ClassAssignment[];
   } catch {}
   return null;
 }
@@ -399,52 +242,39 @@ export async function fetchAssignmentsFromCloud(): Promise<ClassAssignment[] | n
 /**
  * Tests connection to the Cloud Database.
  */
-export async function testCloudDatabaseConnection(): Promise<{
+export async function testCloudDatabaseConnection(_databaseUrlOverride?: string): Promise<{
   success: boolean;
   latencyMs: number;
   message: string;
 }> {
   const start = performance.now();
-  const config = getCloudDatabaseConfig();
-  const baseUrl = config.databaseUrl.replace(/\/+$/, "");
-
-  if (!isConfiguredCloudUrl(baseUrl)) {
-    return {
-      success: false,
-      latencyMs: 0,
-      message: "Vui lòng nhập URL Firebase Realtime Database của bạn để kiểm tra kết nối.",
-    };
-  }
-
   try {
-    const testUrl = `${baseUrl}/health.json`;
-    const res = await fetchWithTimeout(testUrl, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ping: Date.now() }),
-    }, 5000);
-
+    const res = await fetchWithTimeout("/api/system-status", {}, 6000);
     const elapsed = Math.round(performance.now() - start);
-
-    if (res.ok) {
-      return {
-        success: true,
-        latencyMs: elapsed,
-        message: `Kết nối Đám mây Cloud Database hoạt động hoàn hảo (Độ trễ: ${elapsed}ms).`,
-      };
-    } else {
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      return { success: false, latencyMs: elapsed, message: `Backend phản hồi HTTP ${res.status}.` };
+    }
+    if (!json.adminTokenConfigured) {
+      return { success: false, latencyMs: elapsed, message: "Backend chưa cấu hình EDUTEST_ADMIN_TOKEN trên Vercel." };
+    }
+    if (!json.durableExamStorageConfigured) {
       return {
         success: false,
         latencyMs: elapsed,
-        message: `Máy chủ Đám mây phản hồi mã lỗi HTTP ${res.status}.`,
+        message: "Backend hoạt động nhưng chưa cấu hình FIREBASE_DATABASE_URL trên Vercel. Chưa nên phát QR thi production.",
       };
     }
+    return {
+      success: true,
+      latencyMs: elapsed,
+      message: `Backend chấm server-side và kho lưu đề bền vững đã sẵn sàng (${elapsed}ms).`,
+    };
   } catch (err: any) {
-    const elapsed = Math.round(performance.now() - start);
     return {
       success: false,
-      latencyMs: elapsed,
-      message: `Không thể kết nối đến Cloud Database: ${err?.message || "Lỗi mạng"}.`,
+      latencyMs: Math.round(performance.now() - start),
+      message: `Không thể kiểm tra backend production: ${err?.message || "Lỗi mạng"}.`,
     };
   }
 }

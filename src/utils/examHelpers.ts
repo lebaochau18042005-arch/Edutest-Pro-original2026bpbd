@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import {
   Question,
   ExamConfig,
@@ -193,7 +194,8 @@ export function isShortAnswerEquivalent(
 export function gradeSubmission(
   answers: Record<number, any>,
   variant: ExamVariant,
-  subject: string = "Toán học"
+  subject: string = "Toán học",
+  targetMaxScore: number = 10
 ): {
   score: number;
   part1Score: number;
@@ -223,6 +225,16 @@ export function gradeSubmission(
   const part1PointPerQ = isEnglish ? 0.25 : isHistoryOrLaw ? 0.25 : isMath ? 0.25 : 0.25;
   const part3PointPerQ = isMath ? 0.5 : 0.25;
 
+  const baseMaxPointsFor = (q: ExamQuestionVariant): number => {
+    if (typeof q.points === "number" && Number.isFinite(q.points) && q.points > 0) return q.points;
+    if (q.part === 2 || q.questionType === "true_false") return 1;
+    if (q.part === 3 || q.questionType === "short_answer") return part3PointPerQ;
+    return part1PointPerQ;
+  };
+  const rawMaxScore = variant.questions.reduce((sum, q) => sum + baseMaxPointsFor(q), 0);
+  const safeTargetMax = Number.isFinite(targetMaxScore) && targetMaxScore > 0 ? targetMaxScore : rawMaxScore || 10;
+  const scale = rawMaxScore > 0 ? safeTargetMax / rawMaxScore : 1;
+
   variant.questions.forEach((q) => {
     const qIndex = q.questionIndex;
     const studentAns = answers[qIndex];
@@ -232,7 +244,8 @@ export function gradeSubmission(
       // PHẦN I: Trắc nghiệm 4 lựa chọn A, B, C, D
       const isUnanswered = studentAns === undefined || studentAns === null || studentAns === -1;
       const isCorrect = !isUnanswered && Number(studentAns) === q.correctIndex;
-      const pointsEarned = isCorrect ? part1PointPerQ : 0;
+      const maxPoints = baseMaxPointsFor(q) * scale;
+      const pointsEarned = isCorrect ? maxPoints : 0;
 
       if (isCorrect) {
         correctCount++;
@@ -249,9 +262,9 @@ export function gradeSubmission(
         questionType: "multiple_choice",
         isCorrect,
         pointsEarned,
-        maxPoints: part1PointPerQ,
+        maxPoints,
         studentAnswerDisplay: isUnanswered ? "Chưa chọn" : LETTERS[Number(studentAns)] || "-",
-        correctAnswerDisplay: LETTERS[q.correctIndex] || "A",
+        correctAnswerDisplay: LETTERS[q.correctIndex] || "CHƯA CÓ ĐÁP ÁN",
       };
     } else if (part === 2 || q.questionType === "true_false") {
       // PHẦN II: Trắc nghiệm Đúng / Sai (4 ý a, b, c, d)
@@ -276,7 +289,8 @@ export function gradeSubmission(
         };
       });
 
-      const qPoints = calculateTrueFalseScore(subCorrectCount);
+      const maxPoints = baseMaxPointsFor(q) * scale;
+      const qPoints = calculateTrueFalseScore(subCorrectCount) * maxPoints;
       part2Score += qPoints;
 
       if (!hasAnyAnswered) {
@@ -303,7 +317,7 @@ export function gradeSubmission(
         questionType: "true_false",
         isCorrect: subCorrectCount === 4,
         pointsEarned: qPoints,
-        maxPoints: 1.0,
+        maxPoints,
         studentAnswerDisplay: hasAnyAnswered ? formatTfAns(studentAnsObj) : "Chưa trả lời",
         correctAnswerDisplay: formatCorrectTf(),
         trueFalseSubResults: subResults,
@@ -314,7 +328,8 @@ export function gradeSubmission(
       const studentStr = typeof studentAns === "string" ? studentAns : studentAns !== undefined && studentAns !== null ? String(studentAns) : "";
       const isUnanswered = !normalizeShortAnswer(studentStr);
       const isCorrect = !isUnanswered && isShortAnswerEquivalent(studentStr, q.shortAnswer, q.acceptableAnswers);
-      const pointsEarned = isCorrect ? part3PointPerQ : 0;
+      const maxPoints = baseMaxPointsFor(q) * scale;
+      const pointsEarned = isCorrect ? maxPoints : 0;
 
       if (isCorrect) {
         correctCount++;
@@ -331,7 +346,7 @@ export function gradeSubmission(
         questionType: "short_answer",
         isCorrect,
         pointsEarned,
-        maxPoints: part3PointPerQ,
+        maxPoints,
         studentAnswerDisplay: isUnanswered ? "Chưa điền" : String(studentAns),
         correctAnswerDisplay: q.shortAnswer || "Đáp án chuẩn",
       };
@@ -339,7 +354,7 @@ export function gradeSubmission(
   });
 
   const rawScore = part1Score + part2Score + part3Score;
-  const score = Math.min(10.0, Math.max(0, Number(rawScore.toFixed(2))));
+  const score = Math.min(safeTargetMax, Math.max(0, Number(rawScore.toFixed(2))));
 
   return {
     score,
@@ -821,12 +836,8 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
           .trim();
       });
 
-      const defOpts = ["Phương án A", "Phương án B", "Phương án C", "Phương án D"];
-      while (finalOptions.length < 4) {
-        finalOptions.push(defOpts[finalOptions.length]);
-      }
-
-      hasMissingSourceData = finalOptions.length !== 4 || finalOptions.every((o) => /^Phương án/i.test(o));
+      // Missing options are evidence loss. Never invent A/B/C/D placeholders.
+      hasMissingSourceData = finalOptions.length !== 4 || finalOptions.some((o) => !String(o || "").trim() || /^Phương án\s+[A-D]$/i.test(String(o).trim()));
     }
 
     // ─── PHẦN II: TRẮC NGHIỆM ĐÚNG / SAI (4 Ý a, b, c, d) ───
@@ -858,7 +869,7 @@ export function normalizeExamQuestions3Parts(rawQuestions: Question[]): Question
             id: ["a", "b", "c", "d"][oIdx] || "a",
             label: `${["a", "b", "c", "d"][oIdx] || "a"})`,
             text: opt,
-            correctValue: oIdx === (q.correctIndex || 0),
+            correctValue: Number.isInteger(q.correctIndex) && q.correctIndex >= 0 ? oIdx === q.correctIndex : undefined,
           }));
         }
       }
@@ -977,8 +988,8 @@ export function generateVariantsFromQuestions(
       questionType: q.questionType,
       content: q.content,
       options: [...(q.options || [])],
-      correctIndex: q.correctIndex ?? 0,
-      originalCorrectIndex: q.correctIndex ?? 0,
+      correctIndex: Number.isInteger(q.correctIndex) && q.correctIndex >= 0 && q.correctIndex < 4 ? q.correctIndex : -1,
+      originalCorrectIndex: Number.isInteger(q.correctIndex) && q.correctIndex >= 0 && q.correctIndex < 4 ? q.correctIndex : -1,
       statements: q.statements ? JSON.parse(JSON.stringify(q.statements)) : undefined,
       shortAnswer: q.shortAnswer,
       acceptableAnswers: q.acceptableAnswers ? [...q.acceptableAnswers] : undefined,
@@ -991,6 +1002,14 @@ export function generateVariantsFromQuestions(
       passageContent: q.passageContent,
       hasTableOrDiagram: q.hasTableOrDiagram,
       diagramUrl: q.diagramUrl,
+      // KHTN preservation payload: never drop rich source metadata while shuffling.
+      richContent: q.richContent ? JSON.parse(JSON.stringify(q.richContent)) : undefined,
+      formulaAssets: q.formulaAssets ? JSON.parse(JSON.stringify(q.formulaAssets)) : undefined,
+      imageAssets: q.imageAssets ? JSON.parse(JSON.stringify(q.imageAssets)) : undefined,
+      originalSource: q.originalSource ? { ...q.originalSource } : undefined,
+      preservation: q.preservation
+        ? { ...q.preservation, warnings: [...(q.preservation.warnings || [])] }
+        : undefined,
     };
   };
 
@@ -1008,7 +1027,7 @@ export function generateVariantsFromQuestions(
     const answerKey: Record<number, string> = {};
     allMapped.forEach((q) => {
       if (q.part === 1 || q.questionType === "multiple_choice") {
-        answerKey[q.questionIndex] = LETTERS[q.correctIndex] || "A";
+        answerKey[q.questionIndex] = LETTERS[q.correctIndex] || "CHƯA DUYỆT";
       } else if (q.part === 2 || q.questionType === "true_false") {
         const tf = (q.statements || []).map((s) => `${s.label.replace(")", "")}:${s.correctValue ? "Đ" : "S"}`).join(",");
         answerKey[q.questionIndex] = tf;
@@ -1085,17 +1104,16 @@ export function generateVariantsFromQuestions(
     const mappedP1: ExamQuestionVariant[] = orderedP1.map((q, pIdx) => {
       globalIdx++;
       let options = [...(q.options || [])];
-      let correctIndex = q.correctIndex ?? 0;
+      let correctIndex = Number.isInteger(q.correctIndex) && q.correctIndex >= 0 && q.correctIndex < options.length ? q.correctIndex : -1;
 
       if (config.shuffleOptions && options.length > 1) {
         const indexedOptions = options.map((opt, optIdx) => ({
           text: opt,
-          isCorrect: optIdx === q.correctIndex,
+          isCorrect: correctIndex >= 0 && optIdx === correctIndex,
         }));
         const shuffled = shuffleArray(indexedOptions);
         options = shuffled.map((item) => item.text);
         correctIndex = shuffled.findIndex((item) => item.isCorrect);
-        if (correctIndex === -1) correctIndex = 0;
       }
 
       return {
@@ -1124,7 +1142,7 @@ export function generateVariantsFromQuestions(
     const answerKey: Record<number, string> = {};
     allOrdered.forEach((q) => {
       if (q.part === 1 || q.questionType === "multiple_choice") {
-        answerKey[q.questionIndex] = LETTERS[q.correctIndex] || "A";
+        answerKey[q.questionIndex] = LETTERS[q.correctIndex] || "CHƯA DUYỆT";
       } else if (q.part === 2 || q.questionType === "true_false") {
         const tf = (q.statements || []).map((s) => `${s.label.replace(")", "")}:${s.correctValue ? "Đ" : "S"}`).join(",");
         answerKey[q.questionIndex] = tf;
@@ -1895,6 +1913,7 @@ export interface WordExportOptions {
   originalExamCode?: string;
   grade?: string;
   includeAnswers?: boolean;
+  download?: boolean;
 }
 
 export function exportQuestionsToWordDoc(
@@ -1967,7 +1986,7 @@ export function exportQuestionsToWordDoc(
               } else if (isP3) {
                 ansDisplay = q.shortAnswer || "-";
               } else {
-                ansDisplay = LETTERS[q.correctIndex ?? 0] || "A";
+                ansDisplay = LETTERS[q.correctIndex] || "CHƯA CÓ ĐÁP ÁN";
               }
               return `<tr>
                 <td style="padding: 5px; text-align: center; font-weight: bold;">Câu ${qNum}</td>
@@ -2130,16 +2149,11 @@ export function exportQuestionsToWordDoc(
               `;
             }
           } else if (isPart2) {
-            const stmts = q.statements && q.statements.length > 0 ? q.statements : [
-              { id: "a", label: "a)", text: "Ý a", correctValue: true },
-              { id: "b", label: "b)", text: "Ý b", correctValue: false },
-              { id: "c", label: "c)", text: "Ý c", correctValue: true },
-              { id: "d", label: "d)", text: "Ý d", correctValue: false },
-            ];
+            const stmts = q.statements && q.statements.length > 0 ? q.statements : [];
 
             optHtml = `
               <div style="margin-left: 15px; margin-top: 4px; margin-bottom: 6px;">
-                ${stmts.map((st) => {
+                ${stmts.length === 0 ? `<div style="padding: 6px; color: #b45309; font-weight: bold;">⚠ Câu Đúng/Sai thiếu mệnh đề nguồn — cần kiểm tra, hệ thống không tự tạo nội dung.</div>` : stmts.map((st) => {
                   const ansTag = isIncludeAnswers
                     ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
                     : "";
@@ -2209,16 +2223,19 @@ export function exportQuestionsToWordDoc(
   const blob = new Blob(['\ufeff' + htmlContent], {
     type: 'application/msword;charset=utf-8'
   });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  const fileSuffix = isIncludeAnswers ? "_kem_dap_an" : "";
-  const cleanFileName = (opts.title || `De_Thi_${subject}_ma_${examCode}`).replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF]/g, "_");
-  link.download = `${cleanFileName}${fileSuffix}.doc`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  if (opts.download !== false) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const fileSuffix = isIncludeAnswers ? "_kem_dap_an" : "";
+    const cleanFileName = (opts.title || `De_Thi_${subject}_ma_${examCode}`).replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF]/g, "_");
+    link.download = `${cleanFileName}${fileSuffix}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+  return blob;
 }
 
 export function exportQuestionsToPrintablePdf(
@@ -2296,7 +2313,7 @@ export function exportQuestionsToPrintablePdf(
               } else if (isP3) {
                 ansDisplay = q.shortAnswer || "-";
               } else {
-                ansDisplay = LETTERS[q.correctIndex ?? 0] || "A";
+                ansDisplay = LETTERS[q.correctIndex] || "CHƯA CÓ ĐÁP ÁN";
               }
               return `<tr>
                 <td style="padding: 5px; text-align: center; font-weight: bold;">Câu ${qNum}</td>
@@ -2459,16 +2476,11 @@ export function exportQuestionsToPrintablePdf(
               `;
             }
           } else if (isPart2) {
-            const stmts = q.statements && q.statements.length > 0 ? q.statements : [
-              { id: "a", label: "a)", text: "Ý a", correctValue: true },
-              { id: "b", label: "b)", text: "Ý b", correctValue: false },
-              { id: "c", label: "c)", text: "Ý c", correctValue: true },
-              { id: "d", label: "d)", text: "Ý d", correctValue: false },
-            ];
+            const stmts = q.statements && q.statements.length > 0 ? q.statements : [];
 
             optHtml = `
               <div style="margin-left: 15px; margin-top: 3px; margin-bottom: 5px;">
-                ${stmts.map((st) => {
+                ${stmts.length === 0 ? `<div style="padding: 6px; color: #b45309; font-weight: bold;">⚠ Câu Đúng/Sai thiếu mệnh đề nguồn — cần kiểm tra, hệ thống không tự tạo nội dung.</div>` : stmts.map((st) => {
                   const ansTag = isIncludeAnswers
                     ? ` <span class="${st.correctValue ? "tf-true" : "tf-false"}">[${st.correctValue ? "ĐÚNG" : "SAI"}]</span>`
                     : "";
@@ -2697,3 +2709,89 @@ export function generateGradedPapersTSV(papers: GradedPaperResult[]): string {
   return lines.join("\n");
 }
 
+
+
+/**
+ * Export ALL shuffled variants and their answer documents into one ZIP.
+ * Includes an Excel answer-key matrix and a JSON manifest for traceability.
+ */
+export async function exportAllExamVariantsBundle(
+  variants: ExamVariant[],
+  options: WordExportOptions & { title?: string } = {}
+): Promise<void> {
+  if (!variants || variants.length === 0) {
+    throw new Error("Chưa có mã đề nào để đóng gói.");
+  }
+
+  const zip = new JSZip();
+  const title = options.title || "Bo_De_Da_Tron";
+  const safeTitle = title.replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1E00-\u1EFF-]/g, "_");
+  const examFolder = zip.folder("01_De_Thi");
+  const answerFolder = zip.folder("02_Dap_An_Theo_Ma");
+
+  for (const variant of variants) {
+    const examBlob = exportQuestionsToWordDoc(variant.questions as any, {
+      ...options,
+      title: `${title}_Ma_${variant.examCode}`,
+      examCode: variant.examCode,
+      includeAnswers: false,
+      download: false,
+    });
+    const answerBlob = exportQuestionsToWordDoc(variant.questions as any, {
+      ...options,
+      title: `${title}_Ma_${variant.examCode}`,
+      examCode: variant.examCode,
+      includeAnswers: true,
+      download: false,
+    });
+
+    examFolder?.file(`MaDe_${variant.examCode}.doc`, examBlob);
+    answerFolder?.file(`DapAn_${variant.examCode}.doc`, answerBlob);
+  }
+
+  const totalQuestions = variants[0].questions.length;
+  const rows: any[] = [];
+  for (let qNum = 1; qNum <= totalQuestions; qNum++) {
+    const qObj = variants[0].questions.find((q) => q.questionIndex === qNum);
+    const partLabel = qObj?.part === 1
+      ? "Phần I (Nhiều lựa chọn)"
+      : qObj?.part === 2
+      ? "Phần II (Đúng/Sai)"
+      : "Phần III (Trả lời ngắn)";
+    const row: any = { "Câu": `Câu ${qNum}`, "Dạng / Phần": partLabel };
+    variants.forEach((v) => {
+      row[`Mã Đề ${v.examCode}`] = v.answerKey[qNum] || "";
+    });
+    rows.push(row);
+  }
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Bảng Đáp Án Ma Trận");
+  const xlsxBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  zip.file("03_Bang_Dap_An_Tong.xlsx", xlsxBuffer);
+
+  zip.file(
+    "00_THONG_TIN_BO_DE.json",
+    JSON.stringify({
+      title,
+      generatedAt: new Date().toISOString(),
+      totalVariants: variants.length,
+      examCodes: variants.map((v) => v.examCode),
+      totalQuestionsPerVariant: totalQuestions,
+      subject: options.subject || "",
+      examPeriod: options.examPeriod || "",
+      note: "Mỗi mã đề có 1 file đề thi và 1 file kèm đáp án. Bảng Excel tổng hợp đáp án của toàn bộ mã đề.",
+    }, null, 2)
+  );
+
+  const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  const url = URL.createObjectURL(zipBlob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeTitle}_TOAN_BO_MA_DE_VA_DAP_AN.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

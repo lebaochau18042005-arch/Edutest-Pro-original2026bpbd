@@ -4,7 +4,7 @@ import { DualNavigationBar } from "./components/DualNavigationBar";
 import { AuthorInfoCard } from "./components/AuthorInfoCard";
 import { TeacherDashboard } from "./components/teacher/TeacherDashboard";
 import { StudentPortal } from "./components/student/StudentPortal";
-import { ModelSettingsModal, getStoredApiKey } from "./components/ModelSettingsModal";
+import { ModelSettingsModal, getStoredApiKey, getStoredAdminToken } from "./components/ModelSettingsModal";
 import { LiveQuizModal } from "./components/game/LiveQuizModal";
 import {
   AppRole,
@@ -17,7 +17,6 @@ import {
   Classroom,
   ClassAssignment,
 } from "./types";
-import { generateVariantsFromQuestions } from "./utils/examHelpers";
 import { exportAppDataBackupFile, importAppDataBackupFile } from "./utils/cloudSyncManager";
 import { decompressExamFromSharing, extractExamPayloadFromUrl } from "./utils/shareUrlHelper";
 import {
@@ -155,219 +154,6 @@ const DEFAULT_CONFIG: ExamConfig = {
   trackQuestionTime: true,
 };
 
-const DEFAULT_INITIAL_EXAMS: ExamPackage[] = [
-  {
-    id: "exam-demo-01",
-    title: "Đề kiểm tra giữa kỳ Toán 12 - Trực Tuyến Chống Gian Lận",
-    config: DEFAULT_CONFIG,
-    originalQuestions: DEFAULT_INITIAL_QUESTIONS,
-    variants: generateVariantsFromQuestions(DEFAULT_INITIAL_QUESTIONS, DEFAULT_CONFIG),
-    createdAt: new Date().toISOString(),
-    status: "published",
-    accessCode: "TOAN12",
-  },
-];
-
-const DEFAULT_INITIAL_SUBMISSIONS: StudentSubmission[] = [
-  {
-    id: "sub-1",
-    examId: "exam-demo-01",
-    examTitle: "Đề kiểm tra giữa kỳ Toán 12 - Trực Tuyến Chống Gian Lận",
-    examCode: "101",
-    studentName: "Nguyễn Thành Nam",
-    studentClass: "12A1",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 12",
-    studentId: "HS202601",
-    startedAt: new Date(Date.now() - 35 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 1800,
-    answers: { 1: 0, 2: 0, 3: 1, 4: 0, 5: 0, 6: 0 },
-    correctCount: 6,
-    wrongCount: 0,
-    unansweredCount: 0,
-    totalQuestions: 6,
-    score: 10.0,
-    isLockedDueToCheating: false,
-    tabSwitchCount: 0,
-    violationLogs: [],
-    syncedToGoogleSheet: true,
-    status: "submitted",
-  },
-  {
-    id: "sub-2",
-    examId: "exam-demo-01",
-    examTitle: "Đề kiểm tra giữa kỳ Toán 12 - Trực Tuyến Chống Gian Lận",
-    examCode: "102",
-    studentName: "Trần Thu Thủy",
-    studentClass: "12A2",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 12",
-    studentId: "HS202602",
-    startedAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 1380,
-    answers: { 1: 0, 2: 1, 3: 1, 4: 0, 5: 2, 6: 0 },
-    correctCount: 4,
-    wrongCount: 2,
-    unansweredCount: 0,
-    totalQuestions: 6,
-    score: 6.67,
-    isLockedDueToCheating: false,
-    tabSwitchCount: 1,
-    violationLogs: [
-      {
-        timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-        type: "TAB_SWITCH",
-        message: "Chuyển sang ứng dụng khác (Lần 1)",
-      },
-    ],
-    syncedToGoogleSheet: true,
-    status: "submitted",
-  },
-  {
-    id: "sub-3",
-    examId: "exam-demo-01",
-    examTitle: "Đề kiểm tra giữa kỳ Toán 12 - Trực Tuyến Chống Gian Lận",
-    examCode: "103",
-    studentName: "Lê Minh Tâm",
-    studentClass: "12A1",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 12",
-    studentId: "HS202603",
-    startedAt: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 480,
-    answers: { 1: 0, 2: 0 },
-    correctCount: 2,
-    wrongCount: 0,
-    unansweredCount: 4,
-    totalQuestions: 6,
-    score: 3.33,
-    isLockedDueToCheating: true,
-    tabSwitchCount: 3,
-    violationLogs: [
-      {
-        timestamp: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
-        type: "TAB_SWITCH",
-        message: "Rời khỏi màn hình làm bài (Lần 1)",
-      },
-      {
-        timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
-        type: "TAB_SWITCH",
-        message: "Chuyển tab sang Google Tìm Kiếm (Lần 2)",
-      },
-      {
-        timestamp: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-        type: "TAB_SWITCH",
-        message: "HỆ THỐNG ĐÃ KHÓA BÀI THI DO VI PHẠM QUÁ 3 LẦN (Lần 3)",
-      },
-    ],
-    syncedToGoogleSheet: true,
-    status: "locked",
-  },
-  {
-    id: "sub-4",
-    examId: "exam-demo-01",
-    examTitle: "Đề khảo sát năng lực chuyên đề - Khối 11",
-    examCode: "101",
-    studentName: "Phạm Hoàng Gia Huy",
-    studentClass: "11A3",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 11",
-    studentId: "HS202604",
-    startedAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 1680,
-    answers: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 },
-    correctCount: 5,
-    wrongCount: 1,
-    unansweredCount: 0,
-    totalQuestions: 6,
-    score: 8.33,
-    isLockedDueToCheating: false,
-    tabSwitchCount: 0,
-    violationLogs: [],
-    syncedToGoogleSheet: true,
-    status: "submitted",
-  },
-  {
-    id: "sub-5",
-    examId: "exam-demo-01",
-    examTitle: "Đề khảo sát năng lực chuyên đề - Khối 11",
-    examCode: "102",
-    studentName: "Vũ Bảo Châu",
-    studentClass: "11A1",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 11",
-    studentId: "HS202605",
-    startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 1320,
-    answers: { 1: 0, 2: 0, 3: 1, 4: 0, 5: 1, 6: 0 },
-    correctCount: 5,
-    wrongCount: 1,
-    unansweredCount: 0,
-    totalQuestions: 6,
-    score: 8.33,
-    isLockedDueToCheating: false,
-    tabSwitchCount: 0,
-    violationLogs: [],
-    syncedToGoogleSheet: true,
-    status: "submitted",
-  },
-  {
-    id: "sub-6",
-    examId: "exam-demo-01",
-    examTitle: "Đề đánh giá kiến thức nền tảng - Khối 10",
-    examCode: "101",
-    studentName: "Đỗ Đăng Khoa",
-    studentClass: "10A2",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 10",
-    studentId: "HS202606",
-    startedAt: new Date(Date.now() - 50 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 2100,
-    answers: { 1: 0, 2: 1, 3: 2, 4: 0, 5: 0, 6: 1 },
-    correctCount: 3,
-    wrongCount: 3,
-    unansweredCount: 0,
-    totalQuestions: 6,
-    score: 5.0,
-    isLockedDueToCheating: false,
-    tabSwitchCount: 0,
-    violationLogs: [],
-    syncedToGoogleSheet: true,
-    status: "submitted",
-  },
-  {
-    id: "sub-7",
-    examId: "exam-demo-01",
-    examTitle: "Đề đánh giá kiến thức nền tảng - Khối 10",
-    examCode: "103",
-    studentName: "Hoàng Yến Nhi",
-    studentClass: "10A1",
-    school: "THPT Chuyên Lê Hồng Phong",
-    grade: "Khối 10",
-    studentId: "HS202607",
-    startedAt: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
-    submittedAt: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-    durationTakenSeconds: 1680,
-    answers: { 1: 0, 2: 0, 3: 1, 4: 0, 5: 0, 6: 0 },
-    correctCount: 6,
-    wrongCount: 0,
-    unansweredCount: 0,
-    totalQuestions: 6,
-    score: 10.0,
-    isLockedDueToCheating: false,
-    tabSwitchCount: 0,
-    violationLogs: [],
-    syncedToGoogleSheet: true,
-    status: "submitted",
-  },
-];
-
 const DEFAULT_INITIAL_CLASSROOMS: Classroom[] = [
   {
     id: "class-12a1",
@@ -424,6 +210,11 @@ const DEFAULT_INITIAL_ASSIGNMENTS: ClassAssignment[] = [
   },
 ];
 
+function adminFetchHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = getStoredAdminToken().trim();
+  return token ? { ...extra, "x-edutest-admin-token": token } : extra;
+}
+
 export default function App() {
   const [isDirectStudentAccess, setIsDirectStudentAccess] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
@@ -467,7 +258,7 @@ export default function App() {
         if (Array.isArray(p) && p.length > 0) return p;
       }
     } catch (e) {}
-    return DEFAULT_INITIAL_QUESTIONS;
+    return [];
   });
 
   const [activeExams, setActiveExams] = useState<ExamPackage[]>(() => {
@@ -478,7 +269,7 @@ export default function App() {
         if (Array.isArray(p) && p.length > 0) return p;
       }
     } catch (e) {}
-    return DEFAULT_INITIAL_EXAMS;
+    return [];
   });
 
   const sanitizeSubmission = (s: any): StudentSubmission => ({
@@ -502,7 +293,7 @@ export default function App() {
         }
       }
     } catch (e) {}
-    return DEFAULT_INITIAL_SUBMISSIONS;
+    return [];
   });
 
   const [classrooms, setClassrooms] = useState<Classroom[]>(() => {
@@ -513,7 +304,7 @@ export default function App() {
         if (Array.isArray(p) && p.length > 0) return p;
       }
     } catch (e) {}
-    return DEFAULT_INITIAL_CLASSROOMS;
+    return [];
   });
 
   const [assignments, setAssignments] = useState<ClassAssignment[]>(() => {
@@ -524,7 +315,7 @@ export default function App() {
         if (Array.isArray(p) && p.length > 0) return p;
       }
     } catch (e) {}
-    return DEFAULT_INITIAL_ASSIGNMENTS;
+    return [];
   });
 
   // Sync to localStorage
@@ -558,12 +349,14 @@ export default function App() {
     } catch (e) {}
   }, [assignments]);
 
-  const [prefillExamId, setPrefillExamId] = useState<string>("TOAN12");
+  const [prefillExamId, setPrefillExamId] = useState<string>("");
   const [prefillExamCode, setPrefillExamCode] = useState<string>("101");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(Boolean(getStoredApiKey()));
   const [isLiveQuizOpen, setIsLiveQuizOpen] = useState(false);
+  const [isResolvingSharedExam, setIsResolvingSharedExam] = useState<boolean>(false);
+  const [sharedExamLoadError, setSharedExamLoadError] = useState<string>("");
 
   // Check API key on load
   useEffect(() => {
@@ -573,10 +366,20 @@ export default function App() {
   // Listen to 1-Click Link / QR Code URL parameters or Hash (#exam=... or ?code=...)
   useEffect(() => {
     const handleUrlExamEntry = async () => {
+      const search = new URLSearchParams(window.location.search);
+      const hash = window.location.hash;
+      const hasSharedExamIntent = Boolean(
+        search.get("exam") || search.get("payload") || search.get("code") || search.get("examId") || (hash && hash.startsWith("#exam="))
+      );
+      if (hasSharedExamIntent) {
+        setIsResolvingSharedExam(true);
+        setSharedExamLoadError("");
+      }
       try {
         const { examPayload, code: urlCode } = extractExamPayloadFromUrl();
 
-        if (examPayload) {
+        const allowLegacyEmbeddedExam = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+        if (examPayload && allowLegacyEmbeddedExam) {
           const decompressedPkg = await decompressExamFromSharing(examPayload);
           if (decompressedPkg) {
             setActiveExams((prev) => {
@@ -591,10 +394,17 @@ export default function App() {
             });
             setPrefillExamId(decompressedPkg.accessCode);
 
-            // Randomly assign one of the variants (101, 102, 103, 104) to this student device
+            // Assign one variant once per device/session and keep it stable across reloads.
             if (decompressedPkg.variants.length > 0) {
-              const randIdx = Math.floor(Math.random() * decompressedPkg.variants.length);
-              setPrefillExamCode(decompressedPkg.variants[randIdx].examCode);
+              const assignmentKey = `edutest_variant_assignment_${decompressedPkg.id || decompressedPkg.accessCode}`;
+              let assignedCode = "";
+              try { assignedCode = sessionStorage.getItem(assignmentKey) || localStorage.getItem(assignmentKey) || ""; } catch {}
+              if (!decompressedPkg.variants.some((v: any) => v.examCode === assignedCode)) {
+                const randIdx = Math.floor(Math.random() * decompressedPkg.variants.length);
+                assignedCode = decompressedPkg.variants[randIdx].examCode;
+                try { sessionStorage.setItem(assignmentKey, assignedCode); } catch {}
+              }
+              setPrefillExamCode(assignedCode);
             }
             setCurrentRole("student");
             setStudentTab("online_test");
@@ -603,13 +413,18 @@ export default function App() {
         }
 
         // Check query params ?code=...
-        const search = new URLSearchParams(window.location.search);
         const code = urlCode || search.get("code") || search.get("examId");
         if (code) {
           const upperCode = code.trim().toUpperCase();
           const rawCode = code.trim();
 
-          let found = activeExams.find(
+          let latestLocalExams: ExamPackage[] = [];
+          try {
+            const parsedLocal = JSON.parse(localStorage.getItem("edutest_active_exams") || "[]");
+            if (Array.isArray(parsedLocal)) latestLocalExams = parsedLocal;
+          } catch (e) {}
+
+          let found = [...latestLocalExams, ...activeExams].find(
             (e) =>
               e.accessCode?.toUpperCase() === upperCode ||
               e.id.toLowerCase() === rawCode.toLowerCase() ||
@@ -658,18 +473,29 @@ export default function App() {
           }
 
           if (found && found.variants && found.variants.length > 0) {
-            const randIdx = Math.floor(Math.random() * found.variants.length);
-            setPrefillExamCode(found.variants[randIdx].examCode);
+            const assignmentKey = `edutest_variant_assignment_${found.id || found.accessCode}`;
+            let assignedCode = "";
+            try { assignedCode = sessionStorage.getItem(assignmentKey) || localStorage.getItem(assignmentKey) || ""; } catch (e) {}
+            if (!found.variants.some((v: any) => v.examCode === assignedCode)) {
+              const randIdx = Math.floor(Math.random() * found.variants.length);
+              assignedCode = found.variants[randIdx].examCode;
+              try { sessionStorage.setItem(assignmentKey, assignedCode); } catch (e) {}
+            }
+            setPrefillExamCode(assignedCode);
+            setActiveExams((prev) => [found!, ...prev.filter((e) => e.id !== found!.id && e.accessCode !== found!.accessCode)]);
+            setCurrentRole("student");
+            setStudentTab("online_test");
           } else {
-            const defaultCodes = ["101", "102", "103", "104"];
-            setPrefillExamCode(defaultCodes[Math.floor(Math.random() * defaultCodes.length)]);
+            setSharedExamLoadError(`Không tìm thấy đề được giao với mã ${upperCode}. Đề mẫu đã bị chặn để tránh học sinh làm nhầm đề.`);
+            setCurrentRole("student");
+            setStudentTab("online_test");
           }
-
-          setCurrentRole("student");
-          setStudentTab("online_test");
         }
       } catch (err) {
         console.warn("Error parsing 1-Click exam URL:", err);
+        setSharedExamLoadError("Không thể tải đề từ liên kết. Vui lòng yêu cầu giáo viên tạo lại mã QR/link sau khi đề đã đồng bộ.");
+      } finally {
+        setIsResolvingSharedExam(false);
       }
     };
 
@@ -686,9 +512,9 @@ export default function App() {
   const refreshData = async () => {
     try {
       const [resQ, resExams, resSubs, cloudSubs, cloudClasses, cloudAssigns] = await Promise.all([
-        fetch("/api/questions").catch(() => null),
-        fetch("/api/exams").catch(() => null),
-        fetch("/api/submissions").catch(() => null),
+        fetch("/api/questions", { headers: adminFetchHeaders() }).catch(() => null),
+        fetch("/api/exams", { headers: adminFetchHeaders() }).catch(() => null),
+        fetch("/api/submissions", { headers: adminFetchHeaders() }).catch(() => null),
         fetchSubmissionsFromCloud().catch(() => []),
         fetchClassroomsFromCloud().catch(() => null),
         fetchAssignmentsFromCloud().catch(() => null),
@@ -700,7 +526,22 @@ export default function App() {
       }
       if (resExams && resExams.ok && resExams.headers.get("content-type")?.includes("application/json")) {
         const d = await resExams.json().catch(() => null);
-        if (d && d.data) setActiveExams(d.data);
+        if (d && Array.isArray(d.data)) {
+          // Merge instead of replacing. Replacing here could erase the exam just loaded
+          // from QR/Cloud and make StudentPortal fall back to the demo exam.
+          setActiveExams((prev) => {
+            const merged = new Map<string, ExamPackage>();
+            for (const exam of prev) merged.set(exam.id || exam.accessCode, exam);
+            for (const exam of d.data) {
+              const key = exam.id || exam.accessCode;
+              const existing = merged.get(key);
+              const existingTime = existing?.createdAt ? Date.parse(existing.createdAt) : 0;
+              const incomingTime = exam?.createdAt ? Date.parse(exam.createdAt) : 0;
+              if (!existing || incomingTime >= existingTime) merged.set(key, exam);
+            }
+            return Array.from(merged.values());
+          });
+        }
       }
       if (resSubs && resSubs.ok && resSubs.headers.get("content-type")?.includes("application/json")) {
         const d = await resSubs.json().catch(() => null);
@@ -773,7 +614,7 @@ export default function App() {
     try {
       await fetch("/api/questions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: adminFetchHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(q),
       });
     } catch (e) {}
@@ -785,7 +626,7 @@ export default function App() {
     try {
       await fetch("/api/questions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: adminFetchHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ questions: qList }),
       });
     } catch (e) {}
@@ -795,7 +636,7 @@ export default function App() {
   const handleDeleteQuestion = async (id: string) => {
     setQuestionBank((prev) => prev.filter((q) => q.id !== id));
     try {
-      await fetch(`/api/questions/${id}`, { method: "DELETE" });
+      await fetch(`/api/questions/${id}`, { method: "DELETE", headers: adminFetchHeaders() });
     } catch (e) {}
   };
 
@@ -809,7 +650,7 @@ export default function App() {
       return updated;
     });
     try {
-      await fetch(`/api/exams/${id}`, { method: "DELETE" });
+      await fetch(`/api/exams/${id}`, { method: "DELETE", headers: adminFetchHeaders() });
     } catch (e) {}
   };
 
@@ -828,48 +669,49 @@ export default function App() {
       setPrefillExamCode(pkg.variants[0].examCode);
     }
 
-    // Auto-publish to Cloud Database
-    publishExamToCloud(pkg).catch((err) => {
-      console.warn("Auto cloud publish error:", err);
-    });
-
-    // Save to local backend endpoint if available
+    let persisted = false;
+    let cloudError: unknown = null;
     try {
-      await fetch("/api/exams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pkg),
-      });
-    } catch (e) {}
+      const cloudResult: any = await publishExamToCloud(pkg);
+      if (cloudResult?.success && (cloudResult?.durable || ["localhost", "127.0.0.1"].includes(window.location.hostname))) persisted = true;
+    } catch (err) {
+      cloudError = err;
+      console.warn("Cloud publish error:", err);
+    }
+
+    if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      try {
+        const response = await fetch("/api/exams", {
+          method: "POST",
+          headers: adminFetchHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(pkg),
+        });
+        if (response.ok) persisted = true;
+      } catch (err) {
+        console.warn("Local API publish error:", err);
+      }
+    }
+
+    if (!persisted) {
+      throw new Error(`Không thể đồng bộ đề lên máy chủ. QR/link chưa được tạo để tránh học sinh nhận nhầm đề.${cloudError ? " Vui lòng kiểm tra kết nối Cloud." : ""}`);
+    }
   };
 
-  // Student Submits Exam
+  // Student submission đã được chấm server-side trong StudentPortal (V16).
   const handleSubmissionComplete = async (sub: StudentSubmission) => {
     const safeSub = sanitizeSubmission(sub);
-    setSubmissions((prev) => [safeSub, ...prev]);
+    setSubmissions((prev) => [safeSub, ...prev.filter((x) => x.id !== safeSub.id)]);
 
-    // Push to Cloud Database
-    submitExamToCloud(safeSub).catch((err) => {
-      console.warn("Auto cloud submit error:", err);
-    });
-
-    try {
-      await fetch("/api/submissions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sub),
-      });
-    } catch (e) {}
-
-    // Auto-sync to Google Sheets Webhook if configured by teacher
-    try {
-      const webhookUrl = localStorage.getItem("edutest_google_sheets_webhook");
-      if (webhookUrl && webhookUrl.trim().startsWith("http")) {
-        syncSubmissionToGoogleSheetsWebhook(sub, webhookUrl.trim()).catch((err) => {
-          console.warn("Auto Google Sheets sync error:", err);
-        });
-      }
-    } catch (e) {}
+    if (!safeSub.gradingPending) {
+      try {
+        const webhookUrl = localStorage.getItem("edutest_google_sheets_webhook");
+        if (webhookUrl && webhookUrl.trim().startsWith("http")) {
+          syncSubmissionToGoogleSheetsWebhook(safeSub, webhookUrl.trim()).catch((err) => {
+            console.warn("Auto Google Sheets sync error:", err);
+          });
+        }
+      } catch {}
+    }
   };
 
   // Unlock Student
@@ -894,7 +736,7 @@ export default function App() {
       )
     );
     try {
-      await fetch(`/api/submissions/${submissionId}/unlock`, { method: "POST" });
+      await fetch(`/api/submissions/${submissionId}/unlock`, { method: "POST", headers: adminFetchHeaders() });
     } catch (e) {}
   };
 
@@ -1157,9 +999,22 @@ export default function App() {
                 }}
                 onRefreshData={refreshData}
               />
+            ) : isResolvingSharedExam ? (
+              <div className="max-w-xl mx-auto mt-10 bg-white border border-blue-200 rounded-2xl p-8 text-center shadow-sm">
+                <div className="text-3xl mb-3">⏳</div>
+                <h3 className="font-bold text-slate-900">Đang tải đề giáo viên đã giao...</h3>
+                <p className="text-sm text-slate-500 mt-2">Vui lòng giữ nguyên trang. Hệ thống đang lấy đúng đề từ mã QR/đường link.</p>
+              </div>
+            ) : sharedExamLoadError ? (
+              <div className="max-w-xl mx-auto mt-10 bg-white border border-rose-200 rounded-2xl p-8 text-center shadow-sm">
+                <div className="text-3xl mb-3">⚠️</div>
+                <h3 className="font-bold text-rose-700">Không tải được đề được giao</h3>
+                <p className="text-sm text-slate-600 mt-2">{sharedExamLoadError}</p>
+                <button type="button" onClick={() => window.location.reload()} className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">Thử tải lại</button>
+              </div>
             ) : (
               <StudentPortal
-                exams={activeExams}
+                exams={activeExams.filter((e) => !isDirectStudentAccess || e.accessCode === prefillExamId || e.id === prefillExamId)}
                 onSubmissionComplete={(handleExamSubmitted) => {
                   handleSubmissionComplete(handleExamSubmitted);
                 }}

@@ -99,7 +99,7 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
 
       if (part === 1 || q.questionType === "multiple_choice") {
         item.o = Array.isArray(q.options) ? q.options : [];
-        item.a = q.correctIndex ?? q.originalCorrectIndex ?? 0;
+        if (Number.isInteger(q.correctIndex ?? q.originalCorrectIndex)) item.a = q.correctIndex ?? q.originalCorrectIndex;
       } else if (part === 2 || q.questionType === "true_false") {
         if (q.statements && Array.isArray(q.statements)) {
           item.s = q.statements.map((st: any) => [st.text || "", Boolean(st.correctValue)]);
@@ -127,14 +127,14 @@ export async function compressExamForSharing(pkg: ExamPackage): Promise<string> 
     const payload: MinifiedExamPayloadV2 = {
       v: 2,
       t: pkg.title || "Đề thi trực tuyến",
-      c: (pkg.accessCode || "THPT2026").toUpperCase(),
+      c: String(pkg.accessCode || "").trim().toUpperCase(),
       cfg: {
         s: pkg.config?.subject || "Khảo thí",
         g: pkg.config?.grade || "Khối 12",
         d: Number(pkg.config?.duration) || 45,
         m: Number(pkg.config?.maxScore) || 10,
         v: Number(pkg.config?.maxTabViolations) || 3,
-        k: pkg.config?.examCodes || ["101", "102", "103", "104"],
+        k: pkg.config?.examCodes || [],
       },
       q: minifiedQuestions,
     };
@@ -218,7 +218,7 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
           questionType: qType,
           content: item.c || "",
           options: item.o || [],
-          correctIndex: item.a ?? 0,
+          correctIndex: Number.isInteger(item.a) ? item.a : undefined,
           statements,
           shortAnswer: item.k,
           passageContent: item.g,
@@ -256,7 +256,7 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
         variants,
         createdAt: new Date().toISOString(),
         status: "published",
-        accessCode: (payload.c || "THPT2026").toUpperCase(),
+        accessCode: String(payload.c || "").trim().toUpperCase(),
       };
     }
 
@@ -290,7 +290,7 @@ export async function decompressExamFromSharing(base64url: string): Promise<Exam
         variants,
         createdAt: new Date().toISOString(),
         status: "published",
-        accessCode: (payload.accessCode || "THPT2026").toUpperCase(),
+        accessCode: String(payload.accessCode || "").trim().toUpperCase(),
       };
     }
 
@@ -326,19 +326,13 @@ export async function buildExamShareLinks(
   // Remove trailing slash
   origin = origin.replace(/\/+$/, "");
 
-  const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
+  const cleanCode = String(pkg.accessCode || "").trim().toUpperCase();
   const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&role=student&auto=1`;
 
-  // Compress exam package (v2 schema)
-  const compressed = await compressExamForSharing(pkg);
+  // SECURITY: production share links never embed the full exam because the payload contains answer keys.
+  // Students receive only the room code; the app must fetch the published exam from the configured source.
   let directLink = simpleCodeLink;
-  let isSelfContained = false;
-
-  if (compressed && compressed.length > 0) {
-    // Put compressed payload in hash (#exam=...) to bypass HTTP length limits and prevent Vercel 414 errors
-    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&role=student&auto=1#exam=${compressed}`;
-    isSelfContained = true;
-  }
+  const isSelfContained = false;
 
   // Generate QR Code locally using 'qrcode' library (no external servers, no URI length limits)
   let qrCodeUrl = "";
@@ -398,12 +392,8 @@ export async function buildClassExamShareLink(
     }
   }
   origin = origin.replace(/\/+$/, "");
-  const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
-  const compressed = await compressExamForSharing(pkg);
+  const cleanCode = String(pkg.accessCode || "").trim().toUpperCase();
   const baseQuery = `?code=${encodeURIComponent(cleanCode)}&classId=${encodeURIComponent(classroomId)}&className=${encodeURIComponent(classroomName)}&role=student&auto=1${assignmentId ? `&assignId=${encodeURIComponent(assignmentId)}` : ""}`;
-  if (compressed && compressed.length > 0) {
-    return `${origin}/${baseQuery}#exam=${compressed}`;
-  }
   return `${origin}/${baseQuery}`;
 }
 
@@ -432,17 +422,11 @@ export async function buildClassExamShareLinks(
   }
   origin = origin.replace(/\/+$/, "");
 
-  const cleanCode = (pkg.accessCode || "THPT2026").trim().toUpperCase();
+  const cleanCode = String(pkg.accessCode || "").trim().toUpperCase();
   const simpleCodeLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&classId=${encodeURIComponent(classroomId)}&className=${encodeURIComponent(classroomName)}&role=student&auto=1${assignmentId ? `&assignId=${encodeURIComponent(assignmentId)}` : ""}`;
 
-  const compressed = await compressExamForSharing(pkg);
   let directLink = simpleCodeLink;
-  let isSelfContained = false;
-
-  if (compressed && compressed.length > 0) {
-    directLink = `${origin}/?code=${encodeURIComponent(cleanCode)}&classId=${encodeURIComponent(classroomId)}&className=${encodeURIComponent(classroomName)}&role=student&auto=1${assignmentId ? `&assignId=${encodeURIComponent(assignmentId)}` : ""}#exam=${compressed}`;
-    isSelfContained = true;
-  }
+  const isSelfContained = false;
 
   let qrCodeUrl = "";
   try {
