@@ -87,6 +87,11 @@ export const AVAILABLE_MODELS: ModelCardInfo[] = [
   },
 ];
 
+export const getStoredAdminToken = (): string => {
+  if (typeof window === "undefined") return "";
+  try { return localStorage.getItem("edutest_admin_token") || ""; } catch { return ""; }
+};
+
 export const getStoredApiKey = (): string => {
   if (typeof window === "undefined") return "";
   return (
@@ -129,6 +134,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
 
   // Cloud Database states
   const [cloudDbUrl, setCloudDbUrl] = useState("");
+  const [adminToken, setAdminToken] = useState("");
   const [isTestingCloud, setIsTestingCloud] = useState(false);
   const [cloudTestResult, setCloudTestResult] = useState<{ success: boolean; msg: string; latency?: number } | null>(null);
 
@@ -140,6 +146,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
       setApiKey(storedKey);
       setSelectedModel(storedModel);
       setCloudDbUrl(cloudCfg.databaseUrl);
+      setAdminToken(getStoredAdminToken());
       setSaveSuccess(false);
       setValidationError("");
       setTestResult(null);
@@ -171,9 +178,11 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
       if (onSaved) onSaved(trimmed, selectedModel);
     } else {
       // Save Cloud DB
-      saveCloudDatabaseConfig({
-        databaseUrl: cloudDbUrl.trim(),
-      });
+      saveCloudDatabaseConfig({ databaseUrl: cloudDbUrl.trim() });
+      try {
+        if (adminToken.trim()) localStorage.setItem("edutest_admin_token", adminToken.trim());
+        else localStorage.removeItem("edutest_admin_token");
+      } catch {}
       setSaveSuccess(true);
     }
 
@@ -186,7 +195,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   const handleTestCloudConnection = async () => {
     setIsTestingCloud(true);
     setCloudTestResult(null);
-    const res = await testCloudDatabaseConnection();
+    const res = await testCloudDatabaseConnection(cloudDbUrl.trim());
     setIsTestingCloud(false);
     setCloudTestResult({
       success: res.success,
@@ -252,17 +261,12 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             });
           }
         } catch (directErr) {
-          if (isValidGoogleAiApiKey(trimmed)) {
-            setTestResult({
-              success: true,
-              msg: "Định dạng API Key chuẩn (AIzaSy...) và đã sẵn sàng sử dụng!",
-            });
-          } else {
-            setTestResult({
-              success: false,
-              msg: "API Key không hợp lệ. Vui lòng lấy key mới tại Google AI Studio.",
-            });
-          }
+          setTestResult({
+            success: false,
+            msg: isValidGoogleAiApiKey(trimmed)
+              ? "Key có định dạng hợp lệ nhưng chưa thể xác minh với máy chủ Google. Vui lòng kiểm tra mạng rồi thử lại."
+              : "API Key không hợp lệ. Vui lòng lấy key mới tại Google AI Studio.",
+          });
         }
       }
     } catch (e: any) {
@@ -500,15 +504,21 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                     <h4 className="font-bold text-sm text-emerald-950">
                       Cơ Sở Dữ Liệu Đám Mây (Cloud Database)
                     </h4>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200 text-emerald-900 flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                      Trực Tuyến Sẵn Sàng
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 ${cloudTestResult?.success ? "bg-emerald-200 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
+                      <span className={`w-2 h-2 rounded-full ${cloudTestResult?.success ? "bg-emerald-600 animate-pulse" : "bg-amber-500"}`} />
+                      {cloudTestResult?.success ? "Đã kiểm tra: Sẵn sàng" : cloudDbUrl.trim() ? "Chưa kiểm tra kết nối" : "Chưa cấu hình Cloud"}
                     </span>
                   </div>
                   <p className="text-emerald-900 leading-relaxed">
-                    Giúp kết nối máy tính của Thầy/Cô và điện thoại của toàn bộ học sinh theo thời gian thực (Real-time). Khi Thầy/Cô xuất bản đề thi, toàn bộ học sinh dùng <strong>4G/5G hoặc Wi-Fi bất kỳ</strong> chỉ cần quét mã QR hoặc gõ mã phòng là vào thi ngay lập tức.
+                    V16 chấm bài ở backend để không gửi đáp án xuống máy học sinh. Với bản Vercel production, cần đặt <strong>FIREBASE_DATABASE_URL</strong> trong Environment Variables của Vercel. Ô URL bên dưới chỉ còn dùng cho các chức năng đồng bộ lớp học kiểu cũ, không phải kho đáp án bảo mật.
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700">Mã quản trị EDUTEST_ADMIN_TOKEN</label>
+                <input type="password" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} placeholder="Nhập đúng token đã đặt trong Vercel" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50 text-xs font-mono" />
+                <p className="text-[11px] text-slate-500">Token này chỉ lưu trên trình duyệt của giáo viên và được gửi trong header quản trị. Không đưa token cho học sinh.</p>
               </div>
 
               {/* Endpoint Input */}
@@ -552,7 +562,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                   ) : (
                     <Globe className="w-4 h-4" />
                   )}
-                  <span>Kiểm Tra Kết Nối Đám Mây (Cloud Speed Test)</span>
+                  <span>Kiểm tra Backend & Kho đề Production</span>
                 </button>
 
                 {cloudTestResult && (
@@ -611,7 +621,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               ) : (
                 <Cloud className="w-3.5 h-3.5 text-emerald-600" />
               )}
-              <span>Kiểm tra Cloud</span>
+              <span>Kiểm tra Production</span>
             </button>
           )}
 

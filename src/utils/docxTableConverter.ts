@@ -10,10 +10,6 @@ export interface DocxConversionResult {
   imageMap: Record<string, string>;
 }
 
-function escapeLatexScript(text: string): string {
-  return text.replace(/\\/g, "\\backslash ").replace(/([{}_%&#])/g, "\\$1");
-}
-
 export function convertDocxHtmlToMarkdown(
   html: string,
   existingImageMap?: Record<string, string>
@@ -42,14 +38,11 @@ export function convertDocxHtmlToMarkdown(
     // Tables: preserve child images, formulas, and text inside cells
     if (tagName === "table") {
       const rows: string[][] = [];
-      const trElements = Array.from(el.querySelectorAll("tr")).filter(
-        (row) => row.closest("table") === el
-      );
+      const trElements = Array.from(el.querySelectorAll("tr"));
 
       trElements.forEach((tr) => {
-        const targetCells = Array.from(tr.children).filter((cell) =>
-          ["th", "td"].includes(cell.tagName.toLowerCase())
-        );
+        const cells = Array.from(tr.querySelectorAll(":scope > th, :scope > td, tr > th, tr > td"));
+        const targetCells = cells.length > 0 ? cells : Array.from(tr.children);
 
         const rowData = targetCells.map((cell) => {
           const inner = Array.from(cell.childNodes).map(processNode).join("");
@@ -63,42 +56,10 @@ export function convertDocxHtmlToMarkdown(
       if (rows.length === 0) return "";
 
       const flatCells = rows.flat().filter(Boolean);
-      const optionLetters = new Set<string>();
-      const statementLetters = new Set<string>();
+      const hasOptions = flatCells.some((c) => /^[A-D][.)/:]\s+/i.test(c));
+      const hasStatements = flatCells.some((c) => /^[a-d][.)/:]\s+/i.test(c));
 
-      flatCells.forEach((c) => {
-        const optMatch = c.trim().match(/^\*{0,2}(?:\[?([A-D])\]?|\(([A-D])\)|([A-D]))[.)/:]/i);
-        if (optMatch) optionLetters.add((optMatch[1] || optMatch[2] || optMatch[3]).toUpperCase());
-
-        const stmtMatch = c.trim().match(/^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?([a-d])\]?|\(([a-d])\)|([a-d]))[.)/:]/i);
-        if (stmtMatch) statementLetters.add((stmtMatch[1] || stmtMatch[2] || stmtMatch[3]).toLowerCase());
-      });
-
-      // Detect if this table is a true DATA TABLE (Bảng số liệu):
-      // - Contains statistical indicators, years, percentages, numbers with units
-      // - Or has a clear header row with descriptive words (Năm, Tiêu chí, Chỉ số, Vùng, x, y, f(x)...)
-      const dataKeywords = /(?:năm|tháng|quốc gia|tỉnh|thành phố|vùng|địa phương|sản lượng|diện tích|dân số|tốc độ|tỉ lệ|tỷ lệ|gdp|xuất khẩu|nhập khẩu|giá trị|doanh thu|khối lượng|thể tích|nhiệt độ|áp suất|nồng độ|thời gian|chỉ số|bảng biến thiên|tần số|tần suất|khoảng biến thiên|\b[xy]\b|f\(x\)|y'|y''|đơn vị|triệu|nghìn|tấn|ha|km|m\^?2|m\^?3|%|USD|VNĐ)/i;
-      const hasDataKeywords = flatCells.some((c) => dataKeywords.test(c));
-      const numericCellsCount = flatCells.filter((c) => /^\d+([.,]\d+)?\s*(%|triệu|tỉ|tấn|ha|km|m|kg|s|h|độ|lần)?$/i.test(c.trim())).length;
-      const hasNumericData = numericCellsCount >= 2;
-
-      // Only treat as layout table if it is STRICTLY options/statements AND NOT a data table
-      const isPureOptionsLayout =
-        !hasDataKeywords &&
-        !hasNumericData &&
-        (optionLetters.size >= 3 || statementLetters.size >= 3) &&
-        rows.length <= 6 &&
-        flatCells.length <= 16 &&
-        flatCells.every((c) => {
-          const t = c.trim();
-          return (
-            !t ||
-            /^\*{0,2}(?:\[?[A-D]\]?|\([A-D]\)|[A-D])[.)/:]/i.test(t) ||
-            /^\*{0,2}(?:(?:Ý|Mệnh đề|Khẳng định|Câu)\s*)?(?:\[?[a-d]\]?|\(([a-d]\)|[a-d]))[.)/:]/i.test(t)
-          );
-        });
-
-      if (isPureOptionsLayout) {
+      if (hasOptions || hasStatements) {
         return "\n" + flatCells.join("\n") + "\n";
       }
 
@@ -139,14 +100,14 @@ export function convertDocxHtmlToMarkdown(
     if (tagName === "sup") {
       const inner = Array.from(el.childNodes).map(processNode).join("").trim();
       if (!inner) return "";
-      return "$" + "{}^{" + escapeLatexScript(inner) + "}$";
+      return inner.length === 1 ? `^${inner}` : `^{${inner}}`;
     }
 
     // Subscripts (Math indices, e.g. x_1, u_n, log_2)
     if (tagName === "sub") {
       const inner = Array.from(el.childNodes).map(processNode).join("").trim();
       if (!inner) return "";
-      return "$" + "{}_{" + escapeLatexScript(inner) + "}$";
+      return inner.length === 1 ? `_${inner}` : `_{${inner}}`;
     }
 
     // MathML or math tags

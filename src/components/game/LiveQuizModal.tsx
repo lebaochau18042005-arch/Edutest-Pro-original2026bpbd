@@ -1,111 +1,22 @@
-import React, { useState } from "react";
-import { LiveQuizHostView } from "./LiveQuizHostView";
-import { LiveQuizPlayerView } from "./LiveQuizPlayerView";
-import { Question, ExamConfig } from "../../types";
-import { Gamepad2, ScreenShare, Smartphone, X } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { X, ChevronRight, RotateCcw } from "lucide-react";
+import type { ExamConfig, Question } from "../../types";
 
-interface LiveQuizModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  questions: Question[];
-  config?: Partial<ExamConfig>;
-}
-
-export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
-  isOpen,
-  onClose,
-  questions,
-  config,
-}) => {
-  const [mode, setMode] = useState<"select" | "host" | "player">("select");
-
+export function LiveQuizModal({ isOpen, onClose, questions, config }: { isOpen: boolean; onClose: () => void; questions: Question[]; config?: ExamConfig }) {
+  const usable = useMemo(() => (questions || []).filter((q: any) => (q.part || 1) === 1 && Array.isArray(q.options) && q.options.length > 1), [questions]);
+  const [index, setIndex] = useState(0);
+  const [revealed, setRevealed] = useState(false);
   if (!isOpen) return null;
-
-  if (mode === "host") {
-    return (
-      <LiveQuizHostView
-        questions={questions}
-        config={config}
-        onClose={() => {
-          setMode("select");
-          onClose();
-        }}
-      />
-    );
-  }
-
-  if (mode === "player") {
-    return (
-      <LiveQuizPlayerView
-        onClose={() => {
-          setMode("select");
-          onClose();
-        }}
-      />
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 text-center space-y-6 text-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-red-500 flex items-center justify-center text-xl shadow-lg">
-              🎮
-            </div>
-            <div className="text-left">
-              <h3 className="text-base font-extrabold text-white">Đấu Trường Live Quiz</h3>
-              <p className="text-xs text-slate-400">Chọn vai trò để bắt đầu trải nghiệm</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Host Mode */}
-          <button
-            type="button"
-            onClick={() => setMode("host")}
-            className="p-5 rounded-2xl bg-gradient-to-b from-indigo-900/50 to-slate-800 border-2 border-indigo-500/50 hover:border-indigo-400 hover:scale-[1.02] flex flex-col items-center justify-center space-y-3 transition-all text-center group cursor-pointer"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-              <ScreenShare className="w-6 h-6" />
-            </div>
-            <div>
-              <span className="font-extrabold text-sm text-white block">Màn Hình Giáo Viên (Host)</span>
-              <span className="text-[11px] text-slate-400 mt-1 block leading-relaxed">
-                Chiếu máy chiếu cho cả lớp: Mã PIN, đồng hồ đếm ngược, xếp hạng Top 5 và Podium.
-              </span>
-            </div>
-          </button>
-
-          {/* Player Mode */}
-          <button
-            type="button"
-            onClick={() => setMode("player")}
-            className="p-5 rounded-2xl bg-gradient-to-b from-amber-950/40 to-slate-800 border-2 border-amber-500/50 hover:border-amber-400 hover:scale-[1.02] flex flex-col items-center justify-center space-y-3 transition-all text-center group cursor-pointer"
-          >
-            <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-              <Smartphone className="w-6 h-6" />
-            </div>
-            <div>
-              <span className="font-extrabold text-sm text-white block">Màn Hình Thí Sinh (Player)</span>
-              <span className="text-[11px] text-slate-400 mt-1 block leading-relaxed">
-                Giao diện điện thoại 4 nút màu cảm ứng, phản hồi đúng/sai tức thì và tính điểm tốc độ.
-              </span>
-            </div>
-          </button>
-        </div>
-
-        <p className="text-[11px] text-slate-400">
-          Hiện có <strong>{questions.length} câu hỏi</strong> sẵn sàng cho vòng thi đấu!
-        </p>
-      </div>
+  const q: any = usable[index];
+  return <div className="fixed inset-0 z-[90] bg-slate-950/80 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div className="bg-white rounded-3xl max-w-3xl w-full p-6 space-y-5 shadow-2xl">
+      <div className="flex justify-between items-center"><div><h2 className="font-black text-lg">Đấu trường Quiz</h2><p className="text-xs text-slate-500">{config?.subject || "Ôn tập nhanh"}</p></div><button onClick={onClose} className="p-2"><X /></button></div>
+      {!q ? <p className="p-8 text-center text-slate-500">Chưa có câu trắc nghiệm 4 lựa chọn để chơi.</p> : <>
+        <div className="text-sm font-bold text-indigo-700">Câu {index + 1}/{usable.length}</div>
+        <div className="text-lg font-semibold">{q.content}</div>
+        <div className="grid sm:grid-cols-2 gap-3">{q.options.map((o: string, i: number) => <button key={i} onClick={() => setRevealed(true)} className={`text-left p-4 rounded-xl border ${revealed && i === q.correctIndex ? "bg-emerald-100 border-emerald-400" : "bg-slate-50"}`}>{String.fromCharCode(65+i)}. {o}</button>)}</div>
+        <div className="flex justify-between"><button onClick={() => {setIndex(0);setRevealed(false)}} className="px-3 py-2 border rounded-xl flex gap-1"><RotateCcw className="w-4 h-4"/>Làm lại</button><button onClick={() => {setIndex((index+1)%usable.length);setRevealed(false)}} className="px-4 py-2 bg-indigo-600 text-white rounded-xl flex gap-1">Câu tiếp<ChevronRight className="w-4 h-4"/></button></div>
+      </>}
     </div>
-  );
-};
+  </div>;
+}

@@ -43,7 +43,7 @@ import {
   exportGradedPapersToExcel,
   generateGradedPapersTSV,
 } from "../../utils/examHelpers";
-import { getStoredApiKey, getStoredSelectedModel } from "../ModelSettingsModal";
+import { getStoredApiKey, getStoredSelectedModel, getStoredAdminToken } from "../ModelSettingsModal";
 import { clientExtractRubric, clientGradePaper } from "../../utils/clientAI";
 import { GradedPaperReview } from "./GradedPaperReview";
 import { RubricEditor } from "./RubricEditor";
@@ -57,6 +57,11 @@ interface AIGraderViewProps {
   onOpenStudentExam?: (examId: string, examCode: string) => void;
 }
 
+const graderAdminHeaders = (extra: Record<string, string> = {}) => {
+  const token = getStoredAdminToken().trim();
+  return token ? { ...extra, "x-edutest-admin-token": token } : extra;
+};
+
 export const AIGraderView: React.FC<AIGraderViewProps> = ({
   exams = [],
   questionBank = [],
@@ -66,7 +71,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
   // Rubric state
   const [rubrics, setRubrics] = useState<ExamRubric[]>([]);
-  const [selectedRubricId, setSelectedRubricId] = useState<string>("default-math12");
+  const [selectedRubricId, setSelectedRubricId] = useState<string>("");
   const [activeRubric, setActiveRubric] = useState<ExamRubric | null>(null);
   const [scanReview, setScanReview] = useState<{ scan: PaperScan; rubric: ExamRubric; imageUrl: string; mimeType: string } | null>(null);
   const reviewWaiter = useRef<{ resolve: (scan: PaperScan) => void; reject: (error: Error) => void } | null>(null);
@@ -129,78 +134,40 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const rubricFileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize Default Rubric and Fetch Results on mount
-  useEffect(() => {
-    // Built-in Default Demo Rubric
-    const defaultRubric: ExamRubric = {
-      id: "default-math12",
-      title: "Đề Kiểm Tra 1 Tiết Toán 12 - Chuẩn BGD 2026",
-      subject: "Toán học",
-      grade: "Khối 12",
-      maxScore: 10.0,
-      examCode: "101",
-      sourceType: "manual_text",
-      createdAt: new Date().toISOString(),
-      items: [
-        {
-          questionIndex: 1,
-          content: "Cho hàm số f(x) liên tục trên ℝ. Khẳng định nào sau đây là đúng?",
-          correctAnswer: "A (∫ f'(x)dx = f(x) + C)",
-          points: 1.0,
-          criteria: "Chọn phương án A",
-          questionType: "multiple_choice",
-        },
-        {
-          questionIndex: 2,
-          content: "Trong không gian Oxyz, phương trình mặt phẳng đi qua M(1; -2; 3) và n = (2; -1; 4)...",
-          correctAnswer: "A (2x - y + 4z - 16 = 0)",
-          points: 1.0,
-          criteria: "Chọn phương án A",
-          questionType: "multiple_choice",
-        },
-        {
-          questionIndex: 3,
-          content: "Tìm m để hàm số y = x³ - 3mx² + 3(m² - 1)x đồng biến trên (1; +∞)",
-          correctAnswer: "m ≤ 0",
-          points: 1.0,
-          criteria: "Điều kiện y' ≥ 0 với mọi x > 1 => m ≤ 0",
-          questionType: "short_answer",
-        },
-        {
-          questionIndex: 4,
-          content: "Với a > 0, log₂(a³) bằng:",
-          correctAnswer: "3 log₂ a",
-          points: 1.0,
-          criteria: "Áp dụng đúng công thức hạ bậc logarit",
-          questionType: "multiple_choice",
-        },
-        {
-          questionIndex: 5,
-          content: "Tự luận: Tính tích phân I = ∫[0->1] (2x + 1)e^x dx",
-          correctAnswer: "I = 2e - 1",
-          points: 2.0,
-          criteria: "Đặt u = 2x+1, dv = e^x dx (1đ); Tính I = (2x+1)e^x - 2e^x = 2e - 1 (1đ)",
-          questionType: "essay",
-        },
-        {
-          questionIndex: 6,
-          content: "Tự luận: Tìm tọa độ hình chiếu vuông góc của điểm A(1, 2, 3) lên mặt phẳng (P)",
-          correctAnswer: "H(2, 0, 1)",
-          points: 4.0,
-          criteria: "Lập phương trình đường thẳng AH qua A vuông góc (P) (2đ); Tọa độ giao điểm H = AH ∩ (P) là (2, 0, 1) (2đ)",
-          questionType: "essay",
-        },
-      ],
-    };
+  // Load ONLY teacher-saved rubrics. Never inject a demo answer key into real grading.
+  const persistRubrics = (next: ExamRubric[]) => {
+    try {
+      localStorage.setItem("edutest_grading_rubrics_v1", JSON.stringify(next));
+    } catch (err) {
+      console.warn("Could not persist grading rubrics:", err);
+    }
+  };
 
+  const upsertAndActivateRubric = (rubric: ExamRubric) => {
+    setRubrics((prev) => {
+      const next = [rubric, ...prev.filter((r) => r.id !== rubric.id)];
+      persistRubrics(next);
+      return next;
+    });
+    setSelectedRubricId(rubric.id);
+    setActiveRubric(rubric);
+  };
+
+  useEffect(() => {
     let saved: ExamRubric[] = [];
     try {
       const stored = JSON.parse(localStorage.getItem("edutest_grading_rubrics_v1") || "[]");
-      if (Array.isArray(stored)) saved = stored.filter(r => r && Array.isArray(r.items) && typeof r.title === "string");
-    } catch { /* Keep the editor available when saved data is invalid. */ }
-    setRubrics(saved.length ? saved : [defaultRubric]);
-    setActiveRubric(saved[0] || defaultRubric);
-    setSelectedRubricId(saved[0]?.id || defaultRubric.id);
+      if (Array.isArray(stored)) {
+        saved = stored.filter(
+          (r) => r && Array.isArray(r.items) && typeof r.title === "string" && !String(r.id || "").startsWith("default-")
+        );
+      }
+    } catch {
+      saved = [];
+    }
+    setRubrics(saved);
+    setActiveRubric(saved[0] || null);
+    setSelectedRubricId(saved[0]?.id || "");
     fetchGradedResults();
   }, []);
 
@@ -208,7 +175,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const fetchGradedResults = async () => {
     setIsLoadingResults(true);
     try {
-      const res = await fetch("/api/grader/results").catch(() => null);
+      const res = await fetch("/api/grader/results", { headers: graderAdminHeaders() }).catch(() => null);
       if (res && res.ok && res.headers.get("content-type")?.includes("application/json")) {
         const json = await res.json().catch(() => null);
         if (json && json.success && Array.isArray(json.data)) {
@@ -229,16 +196,15 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
     const variant = examCode ? exam.variants.find(v => v.examCode === examCode) : exam.variants[0];
     if (!variant) return;
-    const isMath = (exam.config.subject || "").toLowerCase().includes("toán");
     const items: RubricItem[] = variant.questions.map((q) => {
-      let points = 0.25;
-      if (q.part === 2 || q.questionType === "true_false") points = 1.0;
-      else if (q.part === 3 || q.questionType === "short_answer") points = isMath ? 0.5 : 0.25;
+      // Never infer points silently. Use only points explicitly stored on the exam question.
+      // If missing, RubricEditor + validation will force the teacher to configure it before grading.
+      const points = Number(q.points) > 0 ? Number(q.points) : 0;
 
       let corAns = "";
       if (q.part === 1 || q.questionType === "multiple_choice") {
         const letter = ["A", "B", "C", "D"][q.correctIndex] || "";
-        const optVal = q.options && q.options[q.correctIndex ?? 0] ? `: ${q.options[q.correctIndex ?? 0]}` : "";
+        const optVal = Number.isInteger(q.correctIndex) && q.options && q.options[q.correctIndex] ? `: ${q.options[q.correctIndex]}` : "";
         corAns = `${letter}${optVal}`;
       } else if (q.part === 2 || q.questionType === "true_false") {
         corAns = (q.statements || []).map((s) => `${s.label || s.id}: ${s.correctValue ? "Đúng" : "Sai"}`).join(" | ");
@@ -271,9 +237,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
       createdAt: new Date().toISOString(),
     };
 
-    setRubrics((prev) => [newRubric, ...prev.filter((r) => r.id !== newRubric.id)]);
-    setSelectedRubricId(newRubric.id);
-    setActiveRubric(newRubric);
+    upsertAndActivateRubric(newRubric);
   };
 
   // Extract rubric from uploaded doc/image/PDF
@@ -305,9 +269,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
             ...json.data,
             sourceType: "uploaded_doc",
           };
-          setRubrics((prev) => [newRubric, ...prev]);
-          setSelectedRubricId(newRubric.id);
-          setActiveRubric(newRubric);
+          upsertAndActivateRubric(newRubric);
           setActiveStep("upload_grade");
         } else {
           setRubricExtractError(json.error || "Không thể trích xuất biểu điểm.");
@@ -343,9 +305,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
           ...json.data,
           sourceType: "manual_text",
         };
-        setRubrics((prev) => [newRubric, ...prev]);
-        setSelectedRubricId(newRubric.id);
-        setActiveRubric(newRubric);
+        upsertAndActivateRubric(newRubric);
         setActiveStep("upload_grade");
       } else {
         setRubricExtractError(json.error || "Không thể phân tích biểu điểm.");
@@ -421,6 +381,30 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     const settingsErrors = validateRubricSettings(activeRubric);
     if (settingsErrors.length) {
       alert(settingsErrors.join("\n"));
+      setActiveStep("rubric_setup");
+      return;
+    }
+
+    const rubricItemErrors: string[] = [];
+    let configuredPointTotal = 0;
+    activeRubric.items.forEach((item, idx) => {
+      const label = item.questionIndex ?? idx + 1;
+      const answer = String(item.correctAnswer || "").trim();
+      const pts = Number(item.points);
+      if (!answer) rubricItemErrors.push(`Câu ${label}: chưa có đáp án chuẩn của giáo viên.`);
+      if (!Number.isFinite(pts) || pts <= 0) rubricItemErrors.push(`Câu ${label}: chưa thiết lập điểm tối đa hợp lệ.`);
+      if (Number.isFinite(pts) && pts > 0) configuredPointTotal += pts;
+    });
+    const rubricMax = Number(activeRubric.maxScore);
+    if (!Number.isFinite(rubricMax) || rubricMax <= 0) {
+      rubricItemErrors.push("Chưa thiết lập thang điểm tối đa của bài thi.");
+    } else if (Math.abs(configuredPointTotal - rubricMax) > 0.01) {
+      rubricItemErrors.push(
+        `Tổng điểm từng câu (${configuredPointTotal.toFixed(2)}) chưa khớp thang điểm bài thi (${rubricMax.toFixed(2)}).`
+      );
+    }
+    if (rubricItemErrors.length) {
+      alert("CHƯA THỂ CHẤM BÀI:\n" + rubricItemErrors.join("\n"));
       setActiveStep("rubric_setup");
       return;
     }
@@ -517,7 +501,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const handleDeleteGradedPaper = async (id: string) => {
     if (!confirm("Bạn có chắc chắn muốn xóa kết quả chấm của bài này?")) return;
     try {
-      await fetch(`/api/grader/results/${id}`, { method: "DELETE" });
+      await fetch(`/api/grader/results/${id}`, { method: "DELETE", headers: graderAdminHeaders() });
       setGradedPapers((prev) => prev.filter((p) => p.id !== id));
       if (selectedPaperForModal?.id === id) {
         setSelectedPaperForModal(null);
@@ -553,10 +537,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     );
 
     let classification: any = selectedPaperForModal.gradeClassification;
-    if (newTotal >= 9.0) classification = "Xuất sắc";
-    else if (newTotal >= 8.0) classification = "Giỏi";
-    else if (newTotal >= 6.5) classification = "Khá";
-    else if (newTotal >= 5.0) classification = "Trung bình";
+    const maxScoreForScale = Number(selectedPaperForModal.maxScore) || 10;
+    const scaledScore = maxScoreForScale > 0 ? (newTotal / maxScoreForScale) * 10 : 0;
+    if (scaledScore >= 9.0) classification = "Xuất sắc";
+    else if (scaledScore >= 8.0) classification = "Giỏi";
+    else if (scaledScore >= 6.5) classification = "Khá";
+    else if (scaledScore >= 5.0) classification = "Trung bình";
     else classification = "Yếu";
 
     const updatedPaper: GradedPaperResult = {
@@ -574,7 +560,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     try {
       await fetch(`/api/grader/results/${updatedPaper.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: graderAdminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(updatedPaper),
       });
     } catch (err) {
@@ -592,7 +578,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     try {
       await fetch(`/api/grader/results/${updatedPaper.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: graderAdminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(updatedPaper),
       });
     } catch (err) {
@@ -1062,7 +1048,8 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                     <p className="font-bold text-slate-800">Quy trình xử lý của AI:</p>
                     <p>1. Nhận diện Họ tên, Lớp, Số báo danh trên đầu bài.</p>
                     <p>2. Đọc OCR câu trả lời trắc nghiệm, điền khuyết và bài giải tự luận.</p>
-                    <p>3. Đối chiếu đáp án chuẩn, tính điểm từng phần và sinh nhận xét góp ý.</p>
+                    <p>3. Giáo viên duyệt kết quả nhận diện; ô mờ/tô nhiều/tẩy xóa phải sửa trước khi chấm.</p>
+                    <p>4. Mã nguồn đối chiếu với đáp án GV đã lưu và tính điểm theo thang điểm đã thiết lập.</p>
                   </div>
                 </div>
 
@@ -1369,13 +1356,12 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
 
           <label className="block font-bold">Biểu điểm đã lưu
             <select className="ml-3 border rounded-lg p-2" value={selectedRubricId} onChange={e => { const selected = rubrics.find(r => r.id === e.target.value); if (selected) { setActiveRubric(selected); setSelectedRubricId(selected.id); } }}>
+              {rubrics.length === 0 && <option value="">Chưa có biểu điểm đã lưu</option>}
               {rubrics.map(r => <option key={r.id} value={r.id}>{r.title} — {r.examCode || "Chưa có mã đề"}</option>)}
             </select>
           </label>
           <RubricEditor rubric={activeRubric} onSave={value => {
-            const updated = [value, ...rubrics.filter(r => r.id !== value.id)];
-            localStorage.setItem("edutest_grading_rubrics_v1", JSON.stringify(updated));
-            setRubrics(updated); setActiveRubric(value); setSelectedRubricId(value.id);
+            upsertAndActivateRubric(value);
           }} />
           {/* Active Rubric Inspection & Edit Table */}
           {activeRubric && (
