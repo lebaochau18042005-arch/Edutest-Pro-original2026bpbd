@@ -1,15 +1,19 @@
+import { firebaseAdminConfigStatus, firebaseAdminHealthCheck } from "../src/server/firebaseAdmin";
+
 export default async function handler(req: any, res: any) {
   const requestedPath = typeof req.query.__path === "string" ? req.query.__path : "";
 
   // Keep lightweight health checks independent from the full Express backend.
   // This lets Vercel report configuration/storage status even if another backend module fails to initialize.
   if (requestedPath === "system-status") {
-    const firebaseUrl = String(process.env.FIREBASE_DATABASE_URL || "").trim();
     const adminToken = String(process.env.EDUTEST_ADMIN_TOKEN || "").trim();
+    const firebaseAdmin = firebaseAdminConfigStatus();
     return res.status(200).json({
       success: true,
       secureServerGrading: true,
-      durableExamStorageConfigured: Boolean(firebaseUrl),
+      durableExamStorageConfigured: firebaseAdmin.ready,
+      firebaseAdminConfigured: firebaseAdmin.ready,
+      firebaseAdmin,
       adminTokenConfigured: Boolean(adminToken),
       demoDataEnabled: process.env.ENABLE_DEMO_DATA === "true",
       runtime: "vercel-serverless",
@@ -26,112 +30,11 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ success: false, error: "Mã quản trị không đúng hoặc chưa được gửi." });
     }
 
-    const databaseUrl = String(process.env.FIREBASE_DATABASE_URL || "").trim().replace(/\/+$/, "");
-    if (!databaseUrl) {
-      return res.status(503).json({ success: false, error: "Chưa cấu hình FIREBASE_DATABASE_URL trên Vercel." });
+    const result = await firebaseAdminHealthCheck();
+    if (!result.success) {
+      return res.status(result.phase === "config" ? 503 : 502).json(result);
     }
-
-    const firebaseAuth = String(process.env.FIREBASE_DATABASE_AUTH || "").trim();
-    const authQuery = firebaseAuth ? `?auth=${encodeURIComponent(firebaseAuth)}` : "";
-    const marker = {
-      source: "edutest-pro-v16",
-      nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      createdAt: new Date().toISOString(),
-    };
-    const key = marker.nonce.replace(/[^A-Za-z0-9_-]/g, "_");
-    const endpoint = `${databaseUrl}/healthChecks/${key}.json${authQuery}`;
-
-    let writeOk = false;
-    let readOk = false;
-    let deleteOk = false;
-    let firebaseStatus = 0;
-    let firebaseMessage = "";
-
-    try {
-      const put = await fetch(endpoint, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(marker),
-      });
-      firebaseStatus = put.status;
-      writeOk = put.ok;
-      if (!put.ok) {
-        firebaseMessage = (await put.text().catch(() => "")).slice(0, 500);
-        return res.status(502).json({
-          success: false,
-          phase: "write",
-          writeOk,
-          readOk,
-          deleteOk,
-          firebaseStatus,
-          authConfigured: Boolean(firebaseAuth),
-          error: firebaseMessage || `Firebase từ chối ghi dữ liệu (HTTP ${put.status}).`,
-        });
-      }
-
-      const get = await fetch(endpoint, { method: "GET" });
-      firebaseStatus = get.status;
-      if (get.ok) {
-        const data = await get.json().catch(() => null);
-        readOk = Boolean(data && data.nonce === marker.nonce && data.source === marker.source);
-      } else {
-        firebaseMessage = (await get.text().catch(() => "")).slice(0, 500);
-      }
-
-      const del = await fetch(endpoint, { method: "DELETE" });
-      deleteOk = del.ok;
-
-      if (!readOk) {
-        return res.status(502).json({
-          success: false,
-          phase: "read",
-          writeOk,
-          readOk,
-          deleteOk,
-          firebaseStatus,
-          authConfigured: Boolean(firebaseAuth),
-          error: firebaseMessage || "Đã ghi được nhưng không đọc xác nhận lại đúng dữ liệu.",
-        });
-      }
-
-      if (!deleteOk) {
-        return res.status(502).json({
-          success: false,
-          phase: "cleanup",
-          writeOk,
-          readOk,
-          deleteOk,
-          firebaseStatus: del.status,
-          authConfigured: Boolean(firebaseAuth),
-          error: "Đọc/ghi thành công nhưng không xóa được bản ghi kiểm tra.",
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        writeOk,
-        readOk,
-        deleteOk,
-        authConfigured: Boolean(firebaseAuth),
-        message: "Firebase đã vượt qua kiểm tra ghi, đọc và xóa dữ liệu thật.",
-      });
-    } catch (err: any) {
-      if (writeOk && !deleteOk) {
-        try {
-          const del = await fetch(endpoint, { method: "DELETE" });
-          deleteOk = del.ok;
-        } catch {}
-      }
-      return res.status(502).json({
-        success: false,
-        phase: "network",
-        writeOk,
-        readOk,
-        deleteOk,
-        authConfigured: Boolean(firebaseAuth),
-        error: err?.message || "Không thể kết nối Firebase.",
-      });
-    }
+    return res.status(200).json(result);
   }
 
   if (requestedPath) {
