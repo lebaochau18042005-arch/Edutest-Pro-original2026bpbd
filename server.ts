@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { adminDelete, adminGet, adminPut } from "./src/server/firebaseAdmin";
 
 dotenv.config();
 
@@ -426,59 +427,35 @@ let activeExams: any[] = process.env.ENABLE_DEMO_DATA === "true" ? [
 ] : [];
 
 
-const FIREBASE_DATABASE_URL = String(process.env.FIREBASE_DATABASE_URL || "").replace(/\/+$/, "");
-const FIREBASE_DATABASE_AUTH = String(process.env.FIREBASE_DATABASE_AUTH || "").trim();
-
 function safeDbKey(value: string): string {
   return encodeURIComponent(String(value || "").trim().toUpperCase().replace(/[.#$[\]/]/g, "_"));
 }
 
-function firebaseServerUrl(pathname: string): string {
-  if (!FIREBASE_DATABASE_URL) return "";
-  const base = `${FIREBASE_DATABASE_URL}/${pathname.replace(/^\/+/, "")}.json`;
-  if (!FIREBASE_DATABASE_AUTH) return base;
-  const joiner = base.includes("?") ? "&" : "?";
-  return `${base}${joiner}auth=${encodeURIComponent(FIREBASE_DATABASE_AUTH)}`;
-}
-
 async function firebaseServerPut(pathname: string, value: any): Promise<boolean> {
-  const url = firebaseServerUrl(pathname);
-  if (!url) return false;
   try {
-    const r = await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(value),
-    });
-    return r.ok;
+    await adminPut(pathname, value);
+    return true;
   } catch (err) {
-    console.warn("Firebase server PUT failed:", err);
+    console.warn("Firebase Admin PUT failed:", err);
     return false;
   }
 }
 
 async function firebaseServerGet(pathname: string): Promise<any | null> {
-  const url = firebaseServerUrl(pathname);
-  if (!url) return null;
   try {
-    const r = await fetch(url, { method: "GET" });
-    if (!r.ok) return null;
-    const data = await r.json();
-    return data || null;
+    return await adminGet(pathname);
   } catch (err) {
-    console.warn("Firebase server GET failed:", err);
+    console.warn("Firebase Admin GET failed:", err);
     return null;
   }
 }
 
 async function firebaseServerDelete(pathname: string): Promise<boolean> {
-  const url = firebaseServerUrl(pathname);
-  if (!url) return false;
   try {
-    const r = await fetch(url, { method: "DELETE" });
-    return r.ok;
+    await adminDelete(pathname);
+    return true;
   } catch (err) {
-    console.warn("Firebase server DELETE failed:", err);
+    console.warn("Firebase Admin DELETE failed:", err);
     return false;
   }
 }
