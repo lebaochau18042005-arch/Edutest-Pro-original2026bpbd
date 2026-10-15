@@ -249,32 +249,54 @@ export async function testCloudDatabaseConnection(_databaseUrlOverride?: string)
 }> {
   const start = performance.now();
   try {
-    const res = await fetchWithTimeout("/api/system-status", {}, 6000);
-    const elapsed = Math.round(performance.now() - start);
-    const json = await res.json().catch(() => null);
-    if (!res.ok || !json?.success) {
-      return { success: false, latencyMs: elapsed, message: `Backend phản hồi HTTP ${res.status}.` };
+    const statusRes = await fetchWithTimeout("/api/system-status", {}, 6000);
+    const statusJson = await statusRes.json().catch(() => null);
+    if (!statusRes.ok || !statusJson?.success) {
+      const elapsed = Math.round(performance.now() - start);
+      return { success: false, latencyMs: elapsed, message: `Backend phản hồi HTTP ${statusRes.status}.` };
     }
-    if (!json.adminTokenConfigured) {
+    if (!statusJson.adminTokenConfigured) {
+      const elapsed = Math.round(performance.now() - start);
       return { success: false, latencyMs: elapsed, message: "Backend chưa cấu hình EDUTEST_ADMIN_TOKEN trên Vercel." };
     }
-    if (!json.durableExamStorageConfigured) {
+    if (!statusJson.durableExamStorageConfigured) {
+      const elapsed = Math.round(performance.now() - start);
       return {
         success: false,
         latencyMs: elapsed,
         message: "Backend hoạt động nhưng chưa cấu hình FIREBASE_DATABASE_URL trên Vercel. Chưa nên phát QR thi production.",
       };
     }
+
+    const firebaseRes = await fetchWithTimeout("/api/firebase-health", {
+      method: "POST",
+      headers: getAdminHeaders({ "Content-Type": "application/json" }),
+    }, 10000);
+    const elapsed = Math.round(performance.now() - start);
+    const firebaseJson = await firebaseRes.json().catch(() => null);
+
+    if (!firebaseRes.ok || !firebaseJson?.success) {
+      const phase = firebaseJson?.phase ? ` (bước ${firebaseJson.phase})` : "";
+      const hint = firebaseJson?.authConfigured
+        ? ""
+        : " Firebase đang ở chế độ khóa; có thể cần FIREBASE_DATABASE_AUTH hoặc cơ chế xác thực máy chủ phù hợp.";
+      return {
+        success: false,
+        latencyMs: elapsed,
+        message: `${firebaseJson?.error || `Firebase kiểm tra thất bại HTTP ${firebaseRes.status}`}${phase}.${hint}`,
+      };
+    }
+
     return {
       success: true,
       latencyMs: elapsed,
-      message: `Backend chấm server-side và kho lưu đề bền vững đã sẵn sàng (${elapsed}ms).`,
+      message: `Backend và Firebase đã kiểm tra ghi/đọc/xóa dữ liệu thật thành công (${elapsed}ms).`,
     };
   } catch (err: any) {
     return {
       success: false,
       latencyMs: Math.round(performance.now() - start),
-      message: `Không thể kiểm tra backend production: ${err?.message || "Lỗi mạng"}.`,
+      message: `Không thể kiểm tra backend/Firebase production: ${err?.message || "Lỗi mạng"}.`,
     };
   }
 }
