@@ -261,10 +261,18 @@ export async function testCloudDatabaseConnection(_databaseUrlOverride?: string)
     }
     if (!statusJson.durableExamStorageConfigured) {
       const elapsed = Math.round(performance.now() - start);
+      const missing: string[] = [];
+      const cfg = statusJson.firebaseAdmin || {};
+      if (!cfg.databaseUrlConfigured) missing.push("FIREBASE_DATABASE_URL");
+      if (!cfg.projectIdConfigured) missing.push("FIREBASE_PROJECT_ID");
+      if (!cfg.clientEmailConfigured) missing.push("FIREBASE_CLIENT_EMAIL");
+      if (!cfg.privateKeyConfigured) missing.push("FIREBASE_PRIVATE_KEY");
       return {
         success: false,
         latencyMs: elapsed,
-        message: "Backend hoạt động nhưng chưa cấu hình FIREBASE_DATABASE_URL trên Vercel. Chưa nên phát QR thi production.",
+        message: missing.length
+          ? `Backend hoạt động nhưng Firebase Admin chưa đủ cấu hình trên Vercel. Còn thiếu: ${missing.join(", ")}.`
+          : "Backend hoạt động nhưng Firebase Admin chưa sẵn sàng. Chưa nên phát QR thi production.",
       };
     }
 
@@ -277,9 +285,9 @@ export async function testCloudDatabaseConnection(_databaseUrlOverride?: string)
 
     if (!firebaseRes.ok || !firebaseJson?.success) {
       const phase = firebaseJson?.phase ? ` (bước ${firebaseJson.phase})` : "";
-      const hint = firebaseJson?.authConfigured
-        ? ""
-        : " Firebase đang ở chế độ khóa; có thể cần FIREBASE_DATABASE_AUTH hoặc cơ chế xác thực máy chủ phù hợp.";
+      const hint = firebaseJson?.phase === "config"
+        ? " Hãy cấu hình đủ FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL và FIREBASE_PRIVATE_KEY cho Preview."
+        : "";
       return {
         success: false,
         latencyMs: elapsed,
