@@ -38,7 +38,7 @@ export default async function handler(req: any, res: any) {
     }
 
     try {
-      const mod = await import("../src/server/firebaseAdmin");
+      const mod = await import("../firebaseAdmin");
       const result = await mod.firebaseAdminHealthCheck();
       if (!result.success) {
         return res.status(result.phase === "config" ? 503 : 502).json(result);
