@@ -291,7 +291,7 @@ export async function testCloudDatabaseConnection(_databaseUrlOverride?: string)
       return {
         success: false,
         latencyMs: elapsed,
-        message: `${firebaseJson?.error || `Firebase kiểm tra thất bại HTTP ${firebaseRes.status}`}${phase}.${hint}`,
+        message: `${firebaseJson?.error || `Firebase kiểm tra thất bại HTTP ${firebaseRes.status}`}${firebaseJson?.detail ? ` Chi tiết: ${firebaseJson.detail}` : ""}${phase}.${hint}`,
       };
     }
 
