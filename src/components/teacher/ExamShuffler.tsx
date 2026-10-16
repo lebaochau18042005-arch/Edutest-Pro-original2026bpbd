@@ -401,6 +401,7 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [isLiveQuizModalOpen, setIsLiveQuizModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isOpeningShareModal, setIsOpeningShareModal] = useState(false);
 
   // View modes: list or student simulation
   const [extractedViewMode, setExtractedViewMode] = useState<"list" | "student">("list");
@@ -1306,60 +1307,84 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
 
   // Open 1-Click Share & QR Modal safely with automatic fallback package generation
   const handleOpenShareModal = async () => {
-    const questionsForCheck: any[] = selectedQuestions.length > 0
-      ? selectedQuestions
-      : generatedVariants[0]?.questions || [];
-    if (questionsForCheck.length > 0) {
-      const publishIssues = validateQuestionsForPublishing(questionsForCheck as Question[]);
-      if (publishIssues.length > 0) {
-        setShowReviewModal(true);
-        alert(`Chưa thể tạo link/QR. Cần kiểm duyệt đề trước:
-${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.length > 10 ? "\n..." : ""}`);
-        return;
+    if (isOpeningShareModal) return;
+    setIsOpeningShareModal(true);
+    try {
+      const questionsForCheck: any[] = selectedQuestions.length > 0
+        ? selectedQuestions
+        : generatedVariants[0]?.questions || [];
+
+      if (questionsForCheck.length > 0) {
+        const publishIssues = validateQuestionsForPublishing(questionsForCheck as Question[]);
+        if (publishIssues.length > 0) {
+          setShowReviewModal(true);
+          alert(`Chưa thể tạo link/QR. Cần kiểm duyệt đề trước:\n${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.length > 10 ? "\n..." : ""}`);
+          return;
+        }
+
+        const preservationReport = await validateQuestionsWithSourceStore(questionsForCheck);
+        if (!preservationReport.ok) {
+          const detail = preservationReport.blockingIssues
+            .slice(0, 8)
+            .map((i) => `- ${i.questionId}: ${i.message}`)
+            .join("\n");
+          alert(`Chưa thể tạo link/QR vì dữ liệu nguồn chưa an toàn:\n${detail}`);
+          return;
+        }
       }
-      const preservationReport = await validateQuestionsWithSourceStore(questionsForCheck);
-      if (!preservationReport.ok) {
-        const detail = preservationReport.blockingIssues.slice(0, 8).map((i) => `- ${i.questionId}: ${i.message}`).join("\n");
-        alert(`Chưa thể tạo link/QR vì dữ liệu nguồn chưa an toàn:\n${detail}`);
-        return;
+
+      let pkg = publishedExam;
+      if (!pkg) {
+        const questionsToUse =
+          selectedQuestions.length > 0
+            ? selectedQuestions
+            : generatedVariants[0]?.questions || [];
+
+        if (questionsToUse.length === 0 && generatedVariants.length === 0) {
+          alert("Vui lòng tải file đề thi hoặc chuẩn bị câu hỏi trước khi tạo mã QR phát đề!");
+          return;
+        }
+
+        const variantsToUse =
+          generatedVariants.length > 0
+            ? generatedVariants
+            : generateVariantsFromQuestions(questionsToUse, config);
+
+        if (generatedVariants.length === 0) {
+          setGeneratedVariants(variantsToUse);
+        }
+
+        pkg = {
+          id: `exam-${Date.now()}`,
+          title: examTitle || `${config.subject} - ${config.examPeriod}`,
+          config,
+          originalQuestions: questionsToUse,
+          variants: variantsToUse,
+          createdAt: new Date().toISOString(),
+          status: "published",
+          accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
+        };
+      } else {
+        pkg = {
+          ...pkg,
+          status: "published",
+          accessCode: (pkg.accessCode || accessCode || makeAccessCode()).trim().toUpperCase(),
+        };
       }
-    }
-    let pkg = publishedExam;
-    if (!pkg) {
-      const questionsToUse =
-        selectedQuestions.length > 0
-          ? selectedQuestions
-          : generatedVariants[0]?.questions || [];
-      if (questionsToUse.length === 0 && generatedVariants.length === 0) {
-        alert("Vui lòng tải file đề thi hoặc chuẩn bị câu hỏi trước khi tạo mã QR phát đề!");
-        return;
-      }
-      const variantsToUse =
-        generatedVariants.length > 0
-          ? generatedVariants
-          : generateVariantsFromQuestions(questionsToUse, config);
-      if (generatedVariants.length === 0) {
-        setGeneratedVariants(variantsToUse);
-      }
-      pkg = {
-        id: `exam-${Date.now()}`,
-        title: examTitle || `${config.subject} - ${config.examPeriod}`,
-        config,
-        originalQuestions: questionsToUse,
-        variants: variantsToUse,
-        createdAt: new Date().toISOString(),
-        status: "published",
-        accessCode: accessCode.trim().toUpperCase() || makeAccessCode(),
-      };
-      setPublishedExam(pkg);
+
+      // Publish first; only expose QR after the server confirms durable storage.
       await Promise.resolve(onPublishExam(pkg));
-    } else {
-      pkg = { ...pkg, status: "published", accessCode: (pkg.accessCode || accessCode || makeAccessCode()).trim().toUpperCase() };
       setPublishedExam(pkg);
-      // Re-publish the existing package before exposing the QR/link so Cloud is definitely current.
-      await Promise.resolve(onPublishExam(pkg));
+      setIsShareModalOpen(true);
+    } catch (err: any) {
+      console.error("Open QR/share modal failed:", err);
+      alert(
+        "Chưa thể mở Mã QR & Link 1-Chạm. " +
+        (err?.message || "Máy chủ chưa xác nhận lưu đề. Vui lòng kiểm tra Cloud Database rồi thử lại.")
+      );
+    } finally {
+      setIsOpeningShareModal(false);
     }
-    setIsShareModalOpen(true);
   };
 
   const handleSafeWordExport = async (variantQuestions: any[], includeAnswers: boolean) => {
@@ -1506,11 +1531,12 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
             <button
               type="button"
               onClick={handleOpenShareModal}
-              className="px-4 py-2 text-sm font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-1.5 cursor-pointer ring-2 ring-emerald-400/30 active:scale-95"
+              disabled={isOpeningShareModal}
+              className="px-4 py-2 text-sm font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-60 disabled:cursor-wait rounded-lg shadow-sm hover:shadow transition-all flex items-center gap-1.5 cursor-pointer ring-2 ring-emerald-400/30 active:scale-95"
               title="Mở mã QR và link 1-chạm phát đề cho học sinh"
             >
-              <QrCode className="w-4 h-4" />
-              <span>📱 Mã QR & Link 1-Chạm</span>
+              {isOpeningShareModal ? <RefreshCw className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+              <span>{isOpeningShareModal ? "Đang xuất bản & tạo QR..." : "📱 Mã QR & Link 1-Chạm"}</span>
             </button>
           </div>
         </div>
@@ -3343,11 +3369,12 @@ ${publishIssues.slice(0, 10).map(x => `- ${x}`).join("\n")}${publishIssues.lengt
                   <button
                     type="button"
                     onClick={handleOpenShareModal}
-                    className="px-3.5 py-1.5 text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 rounded-lg flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer ring-2 ring-emerald-400/30"
+                    disabled={isOpeningShareModal}
+                    className="px-3.5 py-1.5 text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-60 disabled:cursor-wait rounded-lg flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer ring-2 ring-emerald-400/30"
                     title="Mở Mã QR và Link 1-Chạm cho học sinh quét vào thi ngay"
                   >
-                    <QrCode className="w-3.5 h-3.5 text-emerald-200" />
-                    <span>📱 Mã QR & Link 1-Chạm</span>
+                    {isOpeningShareModal ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <QrCode className="w-3.5 h-3.5 text-emerald-200" />}
+                    <span>{isOpeningShareModal ? "Đang tạo QR..." : "📱 Mã QR & Link 1-Chạm"}</span>
                   </button>
 
                   {/* Live Quiz Arena */}
