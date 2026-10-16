@@ -3,7 +3,13 @@ import { createSign } from "node:crypto";
 const DATABASE_URL = String(process.env.FIREBASE_DATABASE_URL || "").trim().replace(/\/+$/, "");
 const PROJECT_ID = String(process.env.FIREBASE_PROJECT_ID || "").trim();
 const CLIENT_EMAIL = String(process.env.FIREBASE_CLIENT_EMAIL || "").trim();
-const PRIVATE_KEY = String(process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n").trim();
+const PRIVATE_KEY = String(process.env.FIREBASE_PRIVATE_KEY || "")
+  .trim()
+  .replace(/^"(.*)"$/s, "$1")
+  .replace(/\\n/g, "\n")
+  .replace(/-----BEGIN_PRIVATE_KEY-----/g, "-----BEGIN PRIVATE KEY-----")
+  .replace(/-----END_PRIVATE_KEY-----/g, "-----END PRIVATE KEY-----")
+  .trim();
 
 let cachedAccessToken = "";
 let cachedAccessTokenExp = 0;
