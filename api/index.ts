@@ -1,5 +1,3 @@
-import { firebaseAdminConfigStatus, firebaseAdminHealthCheck } from "../src/server/firebaseAdmin";
-
 export default async function handler(req: any, res: any) {
   const requestedPath = typeof req.query.__path === "string" ? req.query.__path : "";
 
@@ -7,13 +5,22 @@ export default async function handler(req: any, res: any) {
   // This lets Vercel report configuration/storage status even if another backend module fails to initialize.
   if (requestedPath === "system-status") {
     const adminToken = String(process.env.EDUTEST_ADMIN_TOKEN || "").trim();
-    const firebaseAdmin = firebaseAdminConfigStatus();
+    const firebaseAdmin = {
+      databaseUrlConfigured: Boolean(String(process.env.FIREBASE_DATABASE_URL || "").trim()),
+      projectIdConfigured: Boolean(String(process.env.FIREBASE_PROJECT_ID || "").trim()),
+      clientEmailConfigured: Boolean(String(process.env.FIREBASE_CLIENT_EMAIL || "").trim()),
+      privateKeyConfigured: Boolean(String(process.env.FIREBASE_PRIVATE_KEY || "").trim()),
+    };
+    const ready = firebaseAdmin.databaseUrlConfigured &&
+      firebaseAdmin.projectIdConfigured &&
+      firebaseAdmin.clientEmailConfigured &&
+      firebaseAdmin.privateKeyConfigured;
     return res.status(200).json({
       success: true,
       secureServerGrading: true,
-      durableExamStorageConfigured: firebaseAdmin.ready,
-      firebaseAdminConfigured: firebaseAdmin.ready,
-      firebaseAdmin,
+      durableExamStorageConfigured: ready,
+      firebaseAdminConfigured: ready,
+      firebaseAdmin: { ...firebaseAdmin, ready },
       adminTokenConfigured: Boolean(adminToken),
       demoDataEnabled: process.env.ENABLE_DEMO_DATA === "true",
       runtime: "vercel-serverless",
@@ -30,11 +37,21 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ success: false, error: "Mã quản trị không đúng hoặc chưa được gửi." });
     }
 
-    const result = await firebaseAdminHealthCheck();
-    if (!result.success) {
-      return res.status(result.phase === "config" ? 503 : 502).json(result);
+    try {
+      const mod = await import("../src/server/firebaseAdmin");
+      const result = await mod.firebaseAdminHealthCheck();
+      if (!result.success) {
+        return res.status(result.phase === "config" ? 503 : 502).json(result);
+      }
+      return res.status(200).json(result);
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        phase: "admin-sdk-load",
+        error: "Không tải được Firebase Admin SDK trên Vercel.",
+        detail: String(err?.message || err || "").slice(0, 500),
+      });
     }
-    return res.status(200).json(result);
   }
 
   if (requestedPath) {
