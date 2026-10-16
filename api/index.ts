@@ -28,8 +28,17 @@ async function getFirebaseServiceAccountToken(): Promise<string> {
   if (cachedAccessToken && cachedAccessTokenExp - 60 > now) return cachedAccessToken;
 
   const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || "").trim();
-  const privateKey = String(process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n").trim();
+  const rawPrivateKey = String(process.env.FIREBASE_PRIVATE_KEY || "").trim();
+  const privateKey = rawPrivateKey
+    .replace(/^"(.*)"$/s, "$1")
+    .replace(/\\n/g, "\n")
+    .replace(/-----BEGIN_PRIVATE_KEY-----/g, "-----BEGIN PRIVATE KEY-----")
+    .replace(/-----END_PRIVATE_KEY-----/g, "-----END PRIVATE KEY-----")
+    .trim();
   if (!clientEmail || !privateKey) throw new Error("Thiếu FIREBASE_CLIENT_EMAIL hoặc FIREBASE_PRIVATE_KEY.");
+  if (!privateKey.includes("-----BEGIN PRIVATE KEY-----") || !privateKey.includes("-----END PRIVATE KEY-----")) {
+    throw new Error("FIREBASE_PRIVATE_KEY sai định dạng PEM. Phải có BEGIN PRIVATE KEY và END PRIVATE KEY.");
+  }
 
   const cryptoKey = await crypto.subtle.importKey(
     "pkcs8",
@@ -179,8 +188,8 @@ export default async function handler(req: any, res: any) {
     } catch (err: any) {
       return res.status(500).json({
         success: false,
-        phase: "admin-sdk-load",
-        error: "Không tải được Firebase Admin SDK trên Vercel.",
+        phase: "service-account-auth",
+        error: "Không thể xác thực Firebase Service Account trên Vercel.",
         detail: String(err?.message || err || "").slice(0, 500),
       });
     }
