@@ -4,7 +4,7 @@ import path from "path";
 import os from "os";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { adminDelete, adminGet, adminPut } from "./src/server/firebaseAdmin";
+import { adminDelete, adminGet, adminPut } from "./firebaseAdmin";
 
 dotenv.config();
 
