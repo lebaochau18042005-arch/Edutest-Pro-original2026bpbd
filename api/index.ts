@@ -140,8 +140,141 @@ async function runFirebaseServiceAccountHealthCheck() {
   }
 }
 
+function safeFirebaseKey(value: string): string {
+  return encodeURIComponent(String(value || "").trim().toUpperCase().replace(/[.#$[\]/]/g, "_"));
+}
+
+async function firebaseDbRequest(pathname: string, method: "GET" | "PUT" | "DELETE", body?: unknown): Promise<any> {
+  const databaseUrl = String(process.env.FIREBASE_DATABASE_URL || "").trim().replace(/\/+$/, "");
+  if (!databaseUrl) throw new Error("Thiếu FIREBASE_DATABASE_URL.");
+  const token = await getFirebaseServiceAccountToken();
+  const url = `${databaseUrl}/${pathname.replace(/^\/+/, "")}.json`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`Firebase ${method} thất bại HTTP ${res.status}: ${text.slice(0, 300)}`);
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function sanitizeQuestionForStudentApi(q: any): any {
+  const out: any = { ...(q || {}) };
+  delete out.correctIndex;
+  delete out.originalCorrectIndex;
+  delete out.shortAnswer;
+  delete out.acceptableAnswers;
+  delete out.explanation;
+  delete out.answer;
+  delete out.correctAnswer;
+  delete out.answerKey;
+  if (Array.isArray(out.statements)) {
+    out.statements = out.statements.map((st: any) => {
+      const s = { ...st };
+      delete s.correctValue;
+      delete s.isCorrect;
+      delete s.answer;
+      delete s.explanation;
+      return s;
+    });
+  }
+  return out;
+}
+
+function sanitizeExamForStudentApi(exam: any): any {
+  if (!exam) return exam;
+  const out: any = {
+    ...exam,
+    originalQuestions: Array.isArray(exam.originalQuestions)
+      ? exam.originalQuestions.map(sanitizeQuestionForStudentApi)
+      : [],
+    variants: Array.isArray(exam.variants)
+      ? exam.variants.map((v: any) => ({
+          ...v,
+          questions: Array.isArray(v.questions) ? v.questions.map(sanitizeQuestionForStudentApi) : [],
+          answerKey: {},
+        }))
+      : [],
+  };
+  delete out.answerKey;
+  return out;
+}
+
+function validateExamPackageForStore(pkg: any): string[] {
+  const issues: string[] = [];
+  if (!pkg || typeof pkg !== "object") issues.push("Gói đề không hợp lệ.");
+  if (!String(pkg?.accessCode || "").trim()) issues.push("Thiếu mã phòng thi.");
+  if (!Array.isArray(pkg?.originalQuestions) || pkg.originalQuestions.length === 0) issues.push("Đề không có câu hỏi.");
+  if (!Array.isArray(pkg?.variants) || pkg.variants.length === 0) issues.push("Đề chưa có mã đề.");
+  for (const [i, q] of (pkg?.originalQuestions || []).entries()) {
+    if (!String(q?.content || "").trim()) issues.push(`Câu ${i + 1} thiếu nội dung.`);
+    if (q?.needsReview) issues.push(`Câu ${i + 1} chưa được giáo viên kiểm duyệt.`);
+    const part = q?.part || (q?.questionType === "true_false" ? 2 : q?.questionType === "short_answer" ? 3 : 1);
+    if (part === 1 && (!Number.isInteger(q?.correctIndex) || q.correctIndex < 0)) issues.push(`Câu ${i + 1} chưa có đáp án đúng.`);
+    if (part === 2) {
+      const st = Array.isArray(q?.statements) ? q.statements : [];
+      if (st.length !== 4 || st.some((x: any) => typeof x?.correctValue !== "boolean")) issues.push(`Câu ${i + 1} Đúng/Sai chưa đủ đáp án.`);
+    }
+    if (part === 3 && !String(q?.shortAnswer || "").trim()) issues.push(`Câu ${i + 1} chưa có đáp án trả lời ngắn.`);
+  }
+  return issues.slice(0, 20);
+}
+
 export default async function handler(req: any, res: any) {
   const requestedPath = typeof req.query.__path === "string" ? req.query.__path : "";
+
+  // Lightweight durable exam store for Vercel. This bypasses the full Express bundle
+  // so QR publishing/loading uses the same verified Service Account path as the health check.
+  if (requestedPath === "exams" && String(req.method || "GET").toUpperCase() === "POST") {
+    const configuredToken = String(process.env.EDUTEST_ADMIN_TOKEN || "").trim();
+    const providedToken = String(req.headers?.["x-edutest-admin-token"] || "").trim();
+    if (!configuredToken) return res.status(503).json({ success: false, error: "Chưa cấu hình EDUTEST_ADMIN_TOKEN trên Vercel." });
+    if (!providedToken || providedToken !== configuredToken) return res.status(401).json({ success: false, error: "Mã quản trị không đúng hoặc chưa được gửi." });
+
+    try {
+      const pkg = req.body;
+      const issues = validateExamPackageForStore(pkg);
+      if (issues.length) return res.status(400).json({ success: false, error: "Đề chưa đủ điều kiện xuất bản.", issues });
+
+      const accessCode = String(pkg.accessCode).trim().toUpperCase();
+      const stored = { ...pkg, accessCode, serverUpdatedAt: new Date().toISOString() };
+      await firebaseDbRequest(`privateExams/${safeFirebaseKey(accessCode)}`, "PUT", stored);
+      return res.status(200).json({
+        success: true,
+        durable: true,
+        data: sanitizeExamForStudentApi(stored),
+        message: "Đã lưu đề an toàn vào Firebase bằng Service Account.",
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        durable: false,
+        error: "Không thể lưu đề lên Firebase.",
+        detail: String(err?.message || err || "").slice(0, 500),
+      });
+    }
+  }
+
+  if (requestedPath.startsWith("exams/") && String(req.method || "GET").toUpperCase() === "GET") {
+    try {
+      const code = decodeURIComponent(requestedPath.slice("exams/".length)).trim().toUpperCase();
+      if (!code) return res.status(400).json({ success: false, error: "Thiếu mã phòng thi." });
+      const exam = await firebaseDbRequest(`privateExams/${safeFirebaseKey(code)}`, "GET");
+      if (!exam) return res.status(404).json({ success: false, error: `Không tìm thấy đề kiểm tra với mã ${code}` });
+      return res.status(200).json({ success: true, data: sanitizeExamForStudentApi(exam) });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: "Không thể tải đề từ Firebase.",
+        detail: String(err?.message || err || "").slice(0, 500),
+      });
+    }
+  }
 
   // Keep lightweight health checks independent from the full Express backend.
   // This lets Vercel report configuration/storage status even if another backend module fails to initialize.
