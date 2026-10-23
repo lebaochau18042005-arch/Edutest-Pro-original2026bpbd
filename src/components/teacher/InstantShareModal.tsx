@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { ExamPackage } from "../../types";
 import { buildExamShareLinks } from "../../utils/shareUrlHelper";
-import { publishExamToCloud } from "../../utils/cloudExamDatabase";
+import { fetchExamFromCloud } from "../../utils/cloudExamDatabase";
 
 interface InstantShareModalProps {
   isOpen: boolean;
@@ -84,36 +84,52 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
       .catch(() => {});
   }, []);
 
-  // Sync to Cloud Database on open
+  // The parent flow already publishes the exam before opening this modal.
+  // Here we only verify that the student-facing endpoint can retrieve the exact exam.
   useEffect(() => {
     if (!isOpen || !exam) return;
 
     let isMounted = true;
     setCloudSyncStatus("syncing");
-    setCloudSyncMsg("Đang đồng bộ đề thi lên Cloud Database...");
+    setCloudSyncMsg("Đang xác minh đề đã sẵn sàng cho học sinh...");
 
-    publishExamToCloud(exam)
-      .then((res) => {
+    const accessCode = String(exam.accessCode || "").trim().toUpperCase();
+    if (!accessCode) {
+      setCloudSyncStatus("error");
+      setCloudSyncMsg("Đề chưa có mã phòng thi hợp lệ.");
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    fetchExamFromCloud(accessCode)
+      .then((remoteExam) => {
         if (!isMounted) return;
-        const usable = res.success && (networkMode === "wifi" || res.durable === true);
-        if (usable) {
+        const sameExam = Boolean(
+          remoteExam &&
+          String(remoteExam.accessCode || "").trim().toUpperCase() === accessCode &&
+          Array.isArray(remoteExam.variants) &&
+          remoteExam.variants.length > 0
+        );
+
+        if (sameExam) {
           setCloudSyncStatus("synced");
-          setCloudSyncMsg(res.message || "Đã đồng bộ đề thi lên nguồn lưu trữ phù hợp.");
+          setCloudSyncMsg("Đề đã được lưu và học sinh có thể tải bằng mã phòng thi.");
         } else {
           setCloudSyncStatus("error");
-          setCloudSyncMsg(res.message || "Không thể đồng bộ đề thi lên Cloud Database.");
+          setCloudSyncMsg("Máy chủ chưa trả về đúng đề đã xuất bản. Chưa phát QR để tránh học sinh nhận nhầm đề.");
         }
       })
       .catch((err: any) => {
         if (!isMounted) return;
         setCloudSyncStatus("error");
-        setCloudSyncMsg(err?.message || "Không thể đồng bộ đề thi lên Cloud Database.");
+        setCloudSyncMsg(err?.message || "Không xác minh được đề trên máy chủ.");
       });
 
     return () => {
       isMounted = false;
     };
-  }, [isOpen, exam, cloudSyncAttempt, networkMode]);
+  }, [isOpen, exam, cloudSyncAttempt]);
 
   useEffect(() => {
     if (!isOpen || !exam) return;
