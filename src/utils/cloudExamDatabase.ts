@@ -100,7 +100,7 @@ export async function publishExamToCloud(
 ): Promise<{ success: boolean; durable?: boolean; cloudKey?: string; message: string }> {
   if (!pkg || !pkg.accessCode) return { success: false, message: "Mã đề thi không hợp lệ." };
   try {
-    const res = await fetchWithTimeout("/api/exams", {
+    const res = await fetchWithTimeout("/api?__path=exams", {
       method: "POST",
       headers: getAdminHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(pkg),
@@ -129,7 +129,7 @@ export async function fetchExamFromCloud(accessCode: string): Promise<ExamPackag
   if (!accessCode || !accessCode.trim()) return null;
   const upperCode = accessCode.trim().toUpperCase();
   try {
-    const res = await fetchWithTimeout(`/api/exams/${encodeURIComponent(upperCode)}`, {}, 8000);
+    const res = await fetchWithTimeout(`/api?__path=${encodeURIComponent(`exams/${upperCode}`)}`, {}, 8000);
     if (res.ok && (res.headers.get("content-type") || "").includes("application/json")) {
       const json = await res.json();
       if (json?.success && json.data) return json.data as ExamPackage;
