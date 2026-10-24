@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { ExamPackage } from "../../types";
 import { buildExamShareLinks } from "../../utils/shareUrlHelper";
-import { fetchExamFromCloud } from "../../utils/cloudExamDatabase";
 
 interface InstantShareModalProps {
   isOpen: boolean;
@@ -102,7 +101,17 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
       };
     }
 
-    fetchExamFromCloud(accessCode)
+    fetch(`/api/exams/${encodeURIComponent(accessCode)}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(payload?.error || `Không xác minh được đề trên máy chủ (HTTP ${response.status}).`);
+        }
+        return payload?.data ?? null;
+      })
       .then((remoteExam) => {
         if (!isMounted) return;
         const sameExam = Boolean(
