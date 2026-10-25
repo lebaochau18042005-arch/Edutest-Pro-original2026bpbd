@@ -669,31 +669,15 @@ export default function App() {
       setPrefillExamCode(pkg.variants[0].examCode);
     }
 
-    let persisted = false;
-    let cloudError: unknown = null;
-    try {
-      const cloudResult: any = await publishExamToCloud(pkg);
-      if (cloudResult?.success && (cloudResult?.durable || ["localhost", "127.0.0.1"].includes(window.location.hostname))) persisted = true;
-    } catch (err) {
-      cloudError = err;
-      console.warn("Cloud publish error:", err);
+    const cloudResult: any = await publishExamToCloud(pkg);
+    if (!cloudResult?.success || !cloudResult?.durable) {
+      throw new Error(cloudResult?.message || "Không thể xuất bản đề lên máy chủ.");
     }
 
-    if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
-      try {
-        const response = await fetch("/api/exams", {
-          method: "POST",
-          headers: adminFetchHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify(pkg),
-        });
-        if (response.ok) persisted = true;
-      } catch (err) {
-        console.warn("Local API publish error:", err);
-      }
-    }
-
-    if (!persisted) {
-      throw new Error(`Không thể đồng bộ đề lên máy chủ. QR/link chưa được tạo để tránh học sinh nhận nhầm đề.${cloudError ? " Vui lòng kiểm tra kết nối Cloud." : ""}`);
+    const verifiedExam = await fetchExamFromCloud(pkg.accessCode);
+    const verifiedCode = String(verifiedExam?.accessCode || "").trim().toUpperCase();
+    if (!verifiedExam || verifiedCode !== String(pkg.accessCode || "").trim().toUpperCase()) {
+      throw new Error("Máy chủ chưa xác minh đọc lại đúng đề vừa xuất bản. QR/link chưa được tạo.");
     }
   };
 
