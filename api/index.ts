@@ -228,6 +228,82 @@ function validateExamPackageForStore(pkg: any): string[] {
 export default async function handler(req: any, res: any) {
   const requestedPath = typeof req.query.__path === "string" ? req.query.__path : "";
 
+  // V16 single-path online exam API: no dynamic path parsing, no rewrite dependency.
+  if (requestedPath === "publish-exam" && String(req.method || "GET").toUpperCase() === "POST") {
+    const configuredToken = String(process.env.EDUTEST_ADMIN_TOKEN || "").trim();
+    const providedToken = String(req.headers?.["x-edutest-admin-token"] || "").trim();
+    if (!configuredToken) return res.status(503).json({ success: false, error: "Chưa cấu hình EDUTEST_ADMIN_TOKEN trên Vercel." });
+    if (!providedToken || providedToken !== configuredToken) return res.status(401).json({ success: false, error: "Mã quản trị không đúng hoặc chưa được gửi." });
+
+    try {
+      const pkg = req.body;
+      const issues = validateExamPackageForStore(pkg);
+      if (issues.length) return res.status(400).json({ success: false, error: "Đề chưa đủ điều kiện xuất bản.", issues });
+
+      const accessCode = String(pkg.accessCode).trim().toUpperCase();
+      const storagePath = `privateExams/${safeFirebaseKey(accessCode)}`;
+      const stored = { ...pkg, accessCode, serverUpdatedAt: new Date().toISOString() };
+
+      await firebaseDbRequest(storagePath, "PUT", stored);
+
+      // Mandatory read-after-write verification before the server reports success.
+      const verified = await firebaseDbRequest(storagePath, "GET");
+      if (!verified || String(verified.accessCode || "").trim().toUpperCase() !== accessCode) {
+        return res.status(502).json({
+          success: false,
+          durable: false,
+          verified: false,
+          error: "Máy chủ đã ghi nhưng không đọc xác nhận được đúng đề vừa lưu.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        durable: true,
+        verified: true,
+        accessCode,
+        data: sanitizeExamForStudentApi(verified),
+        message: "Đã lưu và xác minh lại đề trên Firebase thành công.",
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        durable: false,
+        verified: false,
+        error: "Không thể xuất bản đề lên Firebase.",
+        detail: String(err?.message || err || "").slice(0, 500),
+      });
+    }
+  }
+
+  if (requestedPath === "student-exam" && String(req.method || "GET").toUpperCase() === "GET") {
+    try {
+      const rawCode = Array.isArray(req.query?.code) ? req.query.code[0] : req.query?.code;
+      const code = String(rawCode || "").trim().toUpperCase();
+      if (!code) return res.status(400).json({ success: false, error: "Thiếu mã phòng thi." });
+
+      const exam = await firebaseDbRequest(`privateExams/${safeFirebaseKey(code)}`, "GET");
+      if (!exam) return res.status(404).json({ success: false, error: `Không tìm thấy đề kiểm tra với mã ${code}` });
+
+      const storedCode = String(exam.accessCode || "").trim().toUpperCase();
+      if (storedCode !== code) {
+        return res.status(409).json({ success: false, error: "Mã đề lưu trên máy chủ không khớp yêu cầu." });
+      }
+
+      return res.status(200).json({
+        success: true,
+        accessCode: code,
+        data: sanitizeExamForStudentApi(exam),
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: "Không thể tải đề từ Firebase.",
+        detail: String(err?.message || err || "").slice(0, 500),
+      });
+    }
+  }
+
   // Lightweight durable exam store for Vercel. This bypasses the full Express bundle
   // so QR publishing/loading uses the same verified Service Account path as the health check.
   if (requestedPath === "exams" && String(req.method || "GET").toUpperCase() === "POST") {
