@@ -101,7 +101,7 @@ export const InstantShareModal: React.FC<InstantShareModalProps> = ({
       };
     }
 
-    fetch(`/api?__path=${encodeURIComponent(`exams/${accessCode}`)}`, {
+    fetch(`/api?__path=student-exam&code=${encodeURIComponent(accessCode)}`, {
       method: "GET",
       headers: { Accept: "application/json" },
     })
