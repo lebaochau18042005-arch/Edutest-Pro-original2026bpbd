@@ -309,6 +309,98 @@ function restoreFormulaTokensInQuestions(
   });
 }
 
+
+interface SourceQuestionAssetAnchor {
+  questionNumber?: number;
+  rawBlock: string;
+  imageTokens: string[];
+  formulaTokens: string[];
+}
+
+function buildSourceQuestionAssetAnchors(markdown: string): SourceQuestionAssetAnchor[] {
+  const src = String(markdown || "");
+  if (!src.trim()) return [];
+
+  const re = /^\s*(?:Câu|Bài|Question)\s*(\d+)\s*[.):-]?/gim;
+  const starts: Array<{ index: number; number: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    starts.push({ index: m.index, number: Number(m[1]) });
+  }
+  if (!starts.length) return [];
+
+  return starts.map((start, idx) => {
+    const end = idx + 1 < starts.length ? starts[idx + 1].index : src.length;
+    const rawBlock = src.slice(start.index, end);
+    const imageTokens = Array.from(new Set(rawBlock.match(/__IMG_TOKEN_\d+__/g) || []));
+    const formulaTokens = Array.from(new Set(rawBlock.match(/__FORMULA_TOKEN_\d+__/g) || []));
+    return { questionNumber: start.number, rawBlock, imageTokens, formulaTokens };
+  });
+}
+
+function ensureQuestionAssetsFromSourceAnchors(
+  questions: Question[],
+  anchors: SourceQuestionAssetAnchor[],
+  imageMap: Record<string, string>,
+  formulaMap: Record<string, any>
+): Question[] {
+  if (!anchors.length) return questions;
+
+  return questions.map((q, idx) => {
+    const anchor = anchors[idx];
+    if (!anchor) return q;
+
+    let content = String(q.content || "");
+    const existingText = [
+      content,
+      ...(q.options || []),
+      ...(q.statements || []).map((s) => s.text),
+      q.passageContent || "",
+      q.explanation || "",
+    ].join("\n");
+
+    const missingImageTokens = anchor.imageTokens.filter((token) => !existingText.includes(token));
+    if (missingImageTokens.length) {
+      const preserved = missingImageTokens
+        .map((token, imageIdx) => imageMap[token] ? `![Hình/Bảng bảo toàn ${imageIdx + 1}](${token})` : "")
+        .filter(Boolean)
+        .join("\n");
+      if (preserved) content = `${content}\n${preserved}`.trim();
+    }
+
+    const sourceImageTokens = anchor.imageTokens.filter((token) => Boolean(imageMap[token]));
+    const imageAssets = sourceImageTokens.map((token, imageIdx) => ({
+      id: `${q.id || `q_${idx + 1}`}_img_${imageIdx + 1}`,
+      url: imageMap[token],
+      position: imageIdx,
+      role: "diagram" as const,
+    }));
+
+    const sourceFormulaTokens = anchor.formulaTokens.filter((token) => Boolean(formulaMap[token]));
+    const sourceFormulaAssets = sourceFormulaTokens.map((token, formulaIdx) => {
+      const asset = formulaMap[token] || {};
+      return {
+        id: asset.id || `${q.id || `q_${idx + 1}`}_formula_${formulaIdx + 1}`,
+        type: asset.type === "mathtype" ? "mathtype" as const : "omml" as const,
+        latex: asset.latex,
+        originalXml: asset.originalXml,
+        originalRef: asset.originalRef || token,
+        needsReview: asset.type === "mathtype" && !asset.latex,
+      };
+    });
+
+    return {
+      ...q,
+      content,
+      imageAssets: imageAssets.length ? imageAssets : q.imageAssets,
+      formulaAssets: sourceFormulaAssets.length
+        ? [...(q.formulaAssets || []).filter((f: any) => !sourceFormulaAssets.some((sf: any) => sf.originalRef === f.originalRef)), ...sourceFormulaAssets]
+        : q.formulaAssets,
+      hasTableOrDiagram: Boolean(q.hasTableOrDiagram || imageAssets.length),
+    };
+  });
+}
+
 interface ExamShufflerProps {
   questionBank: Question[];
   exams?: ExamPackage[];
@@ -851,11 +943,16 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
               comparableLength(deepMarkdown) >= comparableLength(mammothMarkdown) * 0.85);
 
           let textToUse = useDeepExtraction ? deepMarkdown : mammothMarkdown;
+          // IMPORTANT: never merge token maps from two extractors.
+          // Both extractors number tokens from __IMG_TOKEN_0__, so merging can silently
+          // overwrite a valid asset with an unrelated one. Use only the map belonging
+          // to the markdown source that is actually sent to AI.
           const finalImageMap = useDeepExtraction
-            ? { ...(docxHtmlResult.imageMap || {}), ...(deepResult?.imageMap || {}) }
-            : { ...(deepResult?.imageMap || {}), ...(docxHtmlResult.imageMap || {}) };
+            ? { ...(deepResult?.imageMap || {}) }
+            : { ...(docxHtmlResult.imageMap || {}) };
 
           combinedImageMap = { ...combinedImageMap, ...finalImageMap };
+          const sourceAssetAnchors = buildSourceQuestionAssetAnchors(textToUse);
 
           if (!textToUse) {
             const raw = await mammoth.extractRawText({ arrayBuffer });
@@ -874,8 +971,15 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
           });
 
           if (parsed.success && parsed.data && parsed.data.length > 0) {
-            // Restore exact OMML-derived LaTeX only AFTER AI splitting, then restore images.
-            const formulaRestored = restoreFormulaTokensInQuestions(parsed.data, deepResult?.formulaMap || {});
+            // Lock source assets back onto their original question BEFORE replacing tokens.
+            // AI may classify/split text, but it is never allowed to silently drop source figures/formulas.
+            const anchored = ensureQuestionAssetsFromSourceAnchors(
+              parsed.data,
+              sourceAssetAnchors,
+              finalImageMap,
+              deepResult?.formulaMap || {}
+            );
+            const formulaRestored = restoreFormulaTokensInQuestions(anchored, deepResult?.formulaMap || {});
             const restored = restoreMarkdownImagesInQuestions(formulaRestored, finalImageMap);
             const startIndex = currentQuestionsList.length;
             const formulaCount = Number(
@@ -900,9 +1004,11 @@ export const ExamShuffler: React.FC<ExamShufflerProps> = ({
 
             const newQuestions = restored.map((q, qIdx) => {
               const questionFormulaCount = q.formulaAssets?.length || 0;
-              const questionImageCount = [q.content, ...(q.options || []), ...(q.statements || []).map((st) => st.text)]
-                .join("\n")
-                .match(/!\[[^\]]*\]\((?:data:image|https?:|\/)/g)?.length || (q.diagramUrl ? 1 : 0);
+              const questionImageCount =
+                (q.imageAssets?.length || 0) ||
+                ([q.content, ...(q.options || []), ...(q.statements || []).map((st) => st.text)]
+                  .join("\n")
+                  .match(/!\[[^\]]*\]\((?:data:image|https?:|\/)/g)?.length || (q.diagramUrl ? 1 : 0));
               const questionTableCount = (q.content.match(/^\s*\|.*\|\s*$/gm) || []).length > 1 ? 1 : 0;
               return {
                 ...q,
