@@ -1,6 +1,96 @@
 import * as WMF from "wmf";
 import { convertWmfToDataUrl, convertEmfToDataUrl } from "emf-converter";
 
+
+async function cropWhitespaceFromPngDataUrl(dataUrl: string): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith("data:image/png")) return dataUrl;
+  if (typeof document === "undefined") return dataUrl;
+
+  try {
+    const img = new Image();
+    const loaded = new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("Không giải mã được PNG sau chuyển đổi WMF/EMF."));
+    });
+    img.src = dataUrl;
+    await loaded;
+
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    if (!width || !height) return dataUrl;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return dataUrl;
+    ctx.drawImage(img, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const d = imageData.data;
+
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    // Treat near-white pixels as background. This is intentionally conservative
+    // so black/colored vectors, graphs and variation tables are preserved.
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const r = d[i];
+        const g = d[i + 1];
+        const b = d[i + 2];
+        const a = d[i + 3];
+        const isVisibleInk = a > 20 && (r < 248 || g < 248 || b < 248);
+        if (isVisibleInk) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < minX || maxY < minY) return dataUrl;
+
+    const inkW = maxX - minX + 1;
+    const inkH = maxY - minY + 1;
+
+    // If the converter already produced a tight image, do not resample it.
+    const occupancy = (inkW * inkH) / (width * height);
+    const verticalWaste = 1 - inkH / height;
+    const horizontalWaste = 1 - inkW / width;
+    if (occupancy > 0.72 && verticalWaste < 0.18 && horizontalWaste < 0.18) {
+      return dataUrl;
+    }
+
+    const pad = Math.max(8, Math.round(Math.max(inkW, inkH) * 0.03));
+    const sx = Math.max(0, minX - pad);
+    const sy = Math.max(0, minY - pad);
+    const ex = Math.min(width - 1, maxX + pad);
+    const ey = Math.min(height - 1, maxY + pad);
+    const sw = ex - sx + 1;
+    const sh = ey - sy + 1;
+
+    // Avoid pathological crops caused by a single stray pixel.
+    if (sw < 12 || sh < 12) return dataUrl;
+
+    const out = document.createElement("canvas");
+    out.width = sw;
+    out.height = sh;
+    const outCtx = out.getContext("2d");
+    if (!outCtx) return dataUrl;
+    outCtx.fillStyle = "#ffffff";
+    outCtx.fillRect(0, 0, sw, sh);
+    outCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    return out.toDataURL("image/png");
+  } catch {
+    return dataUrl;
+  }
+}
+
 /**
  * Strips the 22-byte Aldus Placeable Metafile (APM) header if present.
  * APM header magic: 0x9AC6CDD7 (D7 CD C6 9A)
@@ -39,7 +129,7 @@ export async function convertMetafileBufferToPng(
     try {
       const pngUrl = await convertWmfToDataUrl(buffer, { maxWidth: 1000, maxHeight: 800, dpiScale: 1.5 });
       if (pngUrl && pngUrl.startsWith("data:image/png") && pngUrl.length > 200) {
-        return pngUrl;
+        return await cropWhitespaceFromPngDataUrl(pngUrl);
       }
     } catch (err1) {
       // Continue to next attempts
@@ -49,7 +139,7 @@ export async function convertMetafileBufferToPng(
     try {
       const emfUrl = await convertEmfToDataUrl(buffer, { maxWidth: 1000, maxHeight: 800, dpiScale: 1.5 });
       if (emfUrl && emfUrl.startsWith("data:image/png") && emfUrl.length > 200) {
-        return emfUrl;
+        return await cropWhitespaceFromPngDataUrl(emfUrl);
       }
     } catch (err2) {
       // Continue
@@ -61,14 +151,14 @@ export async function convertMetafileBufferToPng(
     try {
       WMF.draw_canvas(stripped, canvas);
       if (canvas.width > 0 && canvas.height > 0) {
-        return canvas.toDataURL("image/png");
+        return await cropWhitespaceFromPngDataUrl(canvas.toDataURL("image/png"));
       }
     } catch (wmfErr) {
       // Try raw buffer without stripping
       try {
         WMF.draw_canvas(u8, canvas);
         if (canvas.width > 0 && canvas.height > 0) {
-          return canvas.toDataURL("image/png");
+          return await cropWhitespaceFromPngDataUrl(canvas.toDataURL("image/png"));
         }
       } catch (e3) {
         // Fallback failed
