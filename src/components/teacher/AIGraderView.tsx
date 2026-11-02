@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import * as XLSX from "xlsx";
 import {
   Sparkles,
   Upload,
@@ -238,6 +239,171 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     };
 
     upsertAndActivateRubric(newRubric);
+  };
+
+
+  const normalizeExcelHeader = (value: any) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/[^a-z0-9]+/g, "");
+
+  const excelCell = (row: Record<string, any>, aliases: string[]) => {
+    const keys = Object.keys(row);
+    for (const alias of aliases) {
+      const wanted = normalizeExcelHeader(alias);
+      const key = keys.find((k) => normalizeExcelHeader(k) === wanted);
+      if (key && row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "") return row[key];
+    }
+    return undefined;
+  };
+
+  const inferExcelQuestionType = (answer: string, explicit?: any): "multiple_choice" | "true_false" | "short_answer" => {
+    const type = normalizeExcelHeader(explicit);
+    if (type.includes("dungsai") || type.includes("truefalse") || type === "tf") return "true_false";
+    if (type.includes("traloingan") || type.includes("short") || type.includes("dienso")) return "short_answer";
+    if (type.includes("tracnghiem") || type.includes("multiplechoice") || type.includes("mcq")) return "multiple_choice";
+    const a = String(answer || "").trim();
+    if (/^[ĐDSđsTFtf]{4}$/i.test(a) || /a\s*[:=.-]\s*(?:Đ|D|S|T|F|true|false)/i.test(a)) return "true_false";
+    if (/^[A-D]$/i.test(a) || /^[A-D][).:\-]/i.test(a)) return "multiple_choice";
+    return "short_answer";
+  };
+
+  const buildRubricsFromExcelRows = (rows: Record<string, any>[], sourceName: string): ExamRubric[] => {
+    if (!rows.length) return [];
+
+    const horizontal = rows.some((row) =>
+      Object.keys(row).some((key) =>
+        /^(cau|q|question)\s*\d+$/i.test(
+          String(key).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        )
+      )
+    );
+
+    if (horizontal) {
+      return rows.map((row, rowIndex) => {
+        const examCode = String(excelCell(row, ["Mã đề", "Ma de", "Exam Code", "Code"]) || ("M" + (rowIndex + 1))).trim().toUpperCase();
+        const items: RubricItem[] = [];
+        for (const [key, raw] of Object.entries(row)) {
+          const match = String(key).normalize("NFD").replace(/[\u0300-\u036f]/g, "").match(/^(?:cau|q|question)\s*(\d+)$/i);
+          if (!match || String(raw ?? "").trim() === "") continue;
+          const qn = Number(match[1]);
+          const answer = String(raw).trim();
+          const questionType = inferExcelQuestionType(answer);
+          items.push({
+            questionIndex: qn,
+            printedNumber: qn,
+            part: questionType === "multiple_choice" ? 1 : questionType === "true_false" ? 2 : 3,
+            questionType,
+            correctAnswer: answer,
+            points: 0,
+          });
+        }
+        return {
+          id: "rubric-xlsx-" + Date.now() + "-" + rowIndex,
+          title: "Đáp án Excel: " + sourceName + " — Mã đề " + examCode,
+          subject: rubricSubject,
+          grade: rubricGrade,
+          maxScore: 10,
+          examCode,
+          sourceType: "uploaded_excel",
+          items: items.sort((a, b) => Number(a.questionIndex) - Number(b.questionIndex)),
+          createdAt: new Date().toISOString(),
+        } as ExamRubric;
+      }).filter((r) => r.items.length > 0);
+    }
+
+    const grouped = new Map<string, RubricItem[]>();
+    rows.forEach((row, rowIndex) => {
+      const qRaw = excelCell(row, ["Câu", "Cau", "Question", "Question No", "STT", "Số câu", "So cau"]);
+      const ansRaw = excelCell(row, ["Đáp án", "Dap an", "Answer", "Key", "Đáp án đúng", "Dap an dung", "Correct Answer"]);
+      if (qRaw === undefined || ansRaw === undefined) return;
+
+      const qNum = Number(String(qRaw).replace(/\D/g, "")) || rowIndex + 1;
+      const answer = String(ansRaw).trim();
+      if (!answer) return;
+
+      const examCode = String(excelCell(row, ["Mã đề", "Ma de", "Exam Code", "Code"]) || "GOC").trim().toUpperCase();
+      const pointRaw = excelCell(row, ["Điểm", "Diem", "Points", "Score", "Điểm câu", "Diem cau"]);
+      const partRaw = excelCell(row, ["Phần", "Phan", "Part"]);
+      const typeRaw = excelCell(row, ["Loại câu", "Loai cau", "Question Type", "Type", "Dạng", "Dang"]);
+      const questionType = inferExcelQuestionType(answer, typeRaw);
+      const part = Number(String(partRaw ?? "").replace(/\D/g, "")) || (questionType === "multiple_choice" ? 1 : questionType === "true_false" ? 2 : 3);
+      const parsedPoint = Number(String(pointRaw ?? "").replace(",", "."));
+
+      const item: RubricItem = {
+        questionIndex: qNum,
+        printedNumber: qNum,
+        part,
+        questionType,
+        correctAnswer: answer,
+        points: Number.isFinite(parsedPoint) && parsedPoint > 0 ? parsedPoint : 0,
+      };
+
+      if (!grouped.has(examCode)) grouped.set(examCode, []);
+      grouped.get(examCode)!.push(item);
+    });
+
+    return Array.from(grouped.entries()).map(([examCode, items], index) => {
+      const configuredTotal = items.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+      return {
+        id: "rubric-xlsx-" + Date.now() + "-" + index,
+        title: "Đáp án Excel: " + sourceName + (examCode === "GOC" ? "" : " — Mã đề " + examCode),
+        subject: rubricSubject,
+        grade: rubricGrade,
+        maxScore: configuredTotal > 0 ? configuredTotal : 10,
+        examCode: examCode === "GOC" ? undefined : examCode,
+        sourceType: "uploaded_excel",
+        items: items.sort((a, b) => Number(a.questionIndex) - Number(b.questionIndex)),
+        createdAt: new Date().toISOString(),
+      } as ExamRubric;
+    });
+  };
+
+  const handleUploadAnswerExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setRubricExtractError("");
+    setIsExtractingRubric(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
+      const created: ExamRubric[] = [];
+
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: "" });
+        created.push(...buildRubricsFromExcelRows(rows, file.name + " / " + sheetName));
+      }
+
+      if (!created.length) {
+        throw new Error("Không nhận diện được đáp án. Excel cần có cột Câu + Đáp án, hoặc các cột Câu 1, Câu 2, ...");
+      }
+
+      setRubrics((prev) => {
+        const next = [...created, ...prev];
+        persistRubrics(next);
+        return next;
+      });
+      setActiveRubric(created[0]);
+      setSelectedRubricId(created[0].id);
+
+      const missingPoints = created.some((rubric) => rubric.items.some((item) => !(Number(item.points) > 0)));
+      setRubricExtractError(
+        missingPoints
+          ? "Đã nhập " + created.length + " bộ đáp án từ Excel. Một số câu chưa có cột Điểm; hãy bổ sung điểm trong Biểu điểm trước khi chấm."
+          : "Đã nhập thành công " + created.length + " bộ đáp án từ Excel."
+      );
+    } catch (err: any) {
+      setRubricExtractError(err?.message || "Không đọc được file Excel đáp án.");
+    } finally {
+      setIsExtractingRubric(false);
+      e.target.value = "";
+    }
   };
 
   // Extract rubric from uploaded doc/image/PDF
@@ -1260,18 +1426,22 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                 <input
                   type="file"
                   ref={rubricFileInputRef}
-                  accept="image/*,application/pdf,.docx"
+                  accept="image/*,application/pdf,.docx,.xlsx,.xls"
                   className="hidden"
-                  onChange={handleUploadRubricFile}
+                  onChange={(e) => {
+                    const selected = e.target.files?.[0];
+                    if (selected && /\.(xlsx|xls)$/i.test(selected.name)) handleUploadAnswerExcel(e);
+                    else handleUploadRubricFile(e);
+                  }}
                 />
                 <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mx-auto">
                   <Upload className="w-6 h-6" />
                 </div>
                 <p className="font-bold text-slate-800 text-sm">
-                  Chọn file Ảnh / PDF / Word Đề & Đáp án
+                  Chọn file Ảnh / PDF / Word / Excel Đề & Đáp án
                 </p>
                 <p className="text-xs text-slate-500">
-                  AI sẽ tự động phân tích và trích xuất từng câu hỏi, đáp án đúng và điểm tối đa.
+                  Excel được đọc trực tiếp, không dùng AI đoán đáp án. Ảnh/PDF/Word vẫn dùng AI để trích xuất biểu điểm.
                 </p>
               </div>
 
