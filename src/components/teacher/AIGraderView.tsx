@@ -1004,14 +1004,20 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                   handlePaperFilesSelected(e.dataTransfer.files);
                 }}
                 className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50/60 hover:bg-blue-50/20 rounded-3xl p-8 text-center transition-all cursor-pointer space-y-4 group"
-                onClick={() => paperFileInputRef.current?.click()}
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest("button, label, input, select, textarea")) return;
+                  paperFileInputRef.current?.click();
+                }}
               >
                 <input
+                  id="student-paper-file-input"
                   type="file"
                   ref={paperFileInputRef}
                   multiple
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                  className="hidden"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf"
+                  className="sr-only"
+                  onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }}
                   onChange={(e) => handlePaperFilesSelected(e.target.files)}
                 />
                 <input
@@ -1038,16 +1044,13 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      paperFileInputRef.current?.click();
-                    }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                  <label
+                    htmlFor="student-paper-file-input"
+                    onClick={(e) => e.stopPropagation()}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                   >
                     Chọn file từ máy tính
-                  </button>
+                  </label>
 
                   <button
                     type="button"
@@ -1420,29 +1423,32 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
               </div>
 
               <div
-                onClick={() => rubricFileInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 rounded-2xl p-6 text-center cursor-pointer space-y-2"
+                className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 rounded-2xl p-6 text-center space-y-2"
               >
                 <input
+                  id="rubric-answer-file-input"
                   type="file"
                   ref={rubricFileInputRef}
-                  accept="image/*,application/pdf,.docx,.xlsx,.xls"
-                  className="hidden"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.xls,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  className="sr-only"
+                  onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }}
                   onChange={(e) => {
                     const selected = e.target.files?.[0];
                     if (selected && /\.(xlsx|xls)$/i.test(selected.name)) handleUploadAnswerExcel(e);
                     else handleUploadRubricFile(e);
                   }}
                 />
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mx-auto">
-                  <Upload className="w-6 h-6" />
-                </div>
-                <p className="font-bold text-slate-800 text-sm">
-                  Chọn file Ảnh / PDF / Word / Excel Đề & Đáp án
-                </p>
-                <p className="text-xs text-slate-500">
-                  Excel được đọc trực tiếp, không dùng AI đoán đáp án. Ảnh/PDF/Word vẫn dùng AI để trích xuất biểu điểm.
-                </p>
+                <label htmlFor="rubric-answer-file-input" className="block cursor-pointer space-y-2">
+                  <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mx-auto">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <p className="font-bold text-slate-800 text-sm">
+                    Chọn file Ảnh / PDF / Word / Excel Đề & Đáp án
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Excel được đọc trực tiếp, không dùng AI đoán đáp án. Ảnh/PDF/Word vẫn dùng AI để trích xuất biểu điểm.
+                  </p>
+                </label>
               </div>
 
               {isExtractingRubric && (
