@@ -443,7 +443,7 @@ export interface ExamRubric {
   grade: string;
   maxScore: number;
   examCode?: string;
-  sourceType: "system_exam" | "uploaded_doc" | "manual_text";
+  sourceType: "system_exam" | "uploaded_doc" | "uploaded_excel" | "manual_text";
   rawContent?: string;
   items: RubricItem[];
   createdAt: string;
