@@ -119,14 +119,23 @@ export async function scanPaperMarkings(
 Nhiệm vụ duy nhất của bạn là QUAN SÁT ẢNH và ĐỌC CHÍNH XÁC các ô tròn thí sinh đã dùng bút chì / bút mực TÔ ĐEN (shaded bubble) trên phiếu.
 BẠN TUYỆT ĐỐI KHÔNG BIẾT VÀ KHÔNG ĐƯỢC ĐOÁN ĐÁP ÁN ĐÚNG.
 
-CẤU TRÚC PHIẾU TRẮC NGHIỆM TRÊN ẢNH:
+NGUYÊN TẮC NHẬN DIỆN MỌI MẪU PHIẾU:
+- Phiếu có thể do EduTest Pro tạo hoặc từ đơn vị/nhà trường/phần mềm khác.
+- KHÔNG được giả định vị trí cố định, số cột cố định, kích thước cố định, hay thứ tự câu theo mẫu EduTest Pro.
+- Hãy đọc trực tiếp các nhãn in trên phiếu: SBD, Mã đề, số câu, A/B/C/D, Đ/S, các ô số và ký hiệu.
+- Phiếu có thể xoay nhẹ, chụp nghiêng, bố cục nhiều cột, hoặc chỉ có một phần trắc nghiệm.
+- Chỉ đọc phần thực sự nhìn thấy. Không tự tạo câu hoặc ô không có trên phiếu.
+- Nếu không chắc vị trí một vùng, đánh dấu "?" thay vì suy đoán.
+- TUYỆT ĐỐI không dùng nội dung câu hỏi hay đáp án giáo viên để suy luận ô học sinh đã tô.
+
+CẤU TRÚC CÓ THỂ GẶP TRÊN PHIẾU:
 1. KHUNG THÔNG TIN ĐẦU TRANG:
    - Họ và tên học sinh (chữ viết tay).
    - Lớp (chữ viết tay).
    - Khung 'SỐ BÁO DANH' (gồm 6 cột số 0 đến 9): Đọc 6 chữ số tương ứng với các ô tròn được tô đen ở mỗi cột từ trái sang phải.
    - Khung 'MÃ ĐỀ THI' (gồm 3 hoặc 4 cột số 0 đến 9): Đọc 3 hoặc 4 chữ số tương ứng với các ô tròn được tô đen ở mỗi cột từ trái sang phải (ví dụ: '9001', '101', '102'...).
 
-2. PHẦN I. CÂU TRẮC NGHIỆM NHIỀU LỰA CHỌN (12 câu hoặc 40 câu):
+2. PHẦN I. CÂU TRẮC NGHIỆM NHIỀU LỰA CHỌN (có thể 10, 12, 20, 40, 50 câu hoặc số lượng khác):
    - Phiếu được chia thành các CỘT BẢNG rõ ràng:
      * Đọc SỐ CÂU IN trên mỗi hàng, không giả định thứ tự giữa các cột. Phiếu có thể xếp cột trái 1–4 rồi 9–12, cột phải 5–8 hoặc bố cục khác.
    - Mỗi câu có 4 ô tròn theo hàng ngang: [A] [B] [C] [D] từ trái sang phải.
@@ -148,12 +157,12 @@ CẤU TRÚC PHIẾU TRẮC NGHIỆM TRÊN ẢNH:
      * Câu 11: Thí sinh tô ô nào? (A/B/C/D)
      * Câu 12: Thí sinh tô ô nào? (A/B/C/D)
 
-3. PHẦN II. CÂU TRẮC NGHIỆM ĐÚNG SAI (4 câu):
+3. PHẦN II. CÂU TRẮC NGHIỆM ĐÚNG SAI (nếu phiếu có; số câu có thể thay đổi):
    - Gồm 4 khối: Câu 1, Câu 2, Câu 3, Câu 4.
    - Mỗi câu có 4 dòng a, b, c, d. Mỗi dòng có 2 ô: cột [Đ] (Đúng) bên trái và cột [S] (Sai) bên phải.
    - Đọc xem từng dòng thí sinh tô vào ô [Đ] hay [S]. Trả về a: "Đ"|"S", b: "Đ"|"S", c: "Đ"|"S", d: "Đ"|"S".
 
-4. PHẦN III. CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN (6 câu):
+4. PHẦN III. CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN / ĐIỀN SỐ (nếu phiếu có; số câu có thể thay đổi):
    - Gồm 6 khối: Câu 1, Câu 2, Câu 3, Câu 4, Câu 5, Câu 6.
    - Đọc giá trị số thí sinh viết ở ô trên và các cột số tô đen ở dưới (ví dụ: "40", "-2.5", "12", "0.75").
 
