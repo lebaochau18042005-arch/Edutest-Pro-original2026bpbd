@@ -45,7 +45,7 @@ import {
   generateGradedPapersTSV,
 } from "../../utils/examHelpers";
 import { getStoredApiKey, getStoredSelectedModel, getStoredAdminToken } from "../ModelSettingsModal";
-import { clientExtractRubric, clientGradePaper } from "../../utils/clientAI";
+import { clientExtractRubric, clientGradePaper, clientScanBatchPdf, clientGradeBatchScans } from "../../utils/clientAI";
 import { GradedPaperReview } from "./GradedPaperReview";
 import { RubricEditor } from "./RubricEditor";
 import { PaperScanReview } from "./PaperScanReview";
@@ -114,6 +114,12 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const [isGradingBatch, setIsGradingBatch] = useState<boolean>(false);
   const [gradingProgress, setGradingProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [gradingStrictness, setGradingStrictness] = useState<"standard" | "strict" | "lenient">("standard");
+  const [batchPdfMode, setBatchPdfMode] = useState<"one_page" | "two_pages" | "auto">("auto");
+  const [batchPdfFile, setBatchPdfFile] = useState<File | null>(null);
+  const [batchPdfData, setBatchPdfData] = useState<string>("");
+  const [batchPdfScans, setBatchPdfScans] = useState<any[]>([]);
+  const [isScanningBatchPdf, setIsScanningBatchPdf] = useState(false);
+  const [batchPdfError, setBatchPdfError] = useState("");
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -526,6 +532,44 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     setUploadQueue((prev) => [...prev, ...newItems]);
   };
 
+  const handleBatchPdfSelected = async (file: File | null) => {
+    if (!file) return;
+    setBatchPdfError(""); setBatchPdfScans([]);
+    if (!file.type.includes("pdf") && !/\.pdf$/i.test(file.name)) { setBatchPdfError("Vui lòng chọn file PDF."); return; }
+    setBatchPdfFile(file);
+    const data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    setBatchPdfData(data);
+  };
+
+  const handleScanBatchPdf = async () => {
+    if (!batchPdfFile || !batchPdfData) { setBatchPdfError("Chưa chọn file PDF tổng."); return; }
+    setIsScanningBatchPdf(true); setBatchPdfError("");
+    try {
+      const json = await clientScanBatchPdf({
+        paperFile: { data: batchPdfData, mimeType: batchPdfFile.type || "application/pdf", fileName: batchPdfFile.name },
+        mode: batchPdfMode, apiKey: getStoredApiKey(), model: getStoredSelectedModel(),
+      });
+      if (!json.success || !json.data?.length) { setBatchPdfError(json.error || "Không nhận diện được học sinh nào trong PDF."); return; }
+      setBatchPdfScans(json.data);
+    } catch (err: any) { setBatchPdfError(err?.message || "Lỗi nhận diện PDF nhiều học sinh."); }
+    finally { setIsScanningBatchPdf(false); }
+  };
+
+  const handleGradeBatchPdf = () => {
+    if (!activeRubric) { setBatchPdfError("Hãy chọn biểu điểm/đáp án trước khi chấm."); setActiveStep("rubric_setup"); return; }
+    if (!batchPdfFile || !batchPdfScans.length) { setBatchPdfError("Chưa có danh sách học sinh đã nhận diện từ PDF."); return; }
+    const rubricErrors = validateRubricSettings(activeRubric);
+    if (rubricErrors.length) { setBatchPdfError(rubricErrors.join("\n")); return; }
+    const result = clientGradeBatchScans({ scans: batchPdfScans, rubric: activeRubric, sourceFileName: batchPdfFile.name });
+    if (!result.success || !result.data?.length) { setBatchPdfError(result.error || "Không thể chấm PDF tổng."); return; }
+    setGradedPapers((prev) => [...result.data!, ...prev]);
+    setActiveStep("results_table");
+  };
   // Remove item from queue
   const handleRemoveQueueItem = (id: string) => {
     setUploadQueue((prev) => prev.filter((item) => item.id !== id));
@@ -1248,6 +1292,49 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                 </button>
               </div>
 
+              <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">PDF nhiều học sinh</h3>
+                    <p className="text-xs text-slate-500 mt-1">Tải một file PDF chứa nhiều bài/phiếu. Hệ thống nhận diện từng học sinh trước, sau đó mới chấm theo biểu điểm đang chọn.</p>
+                  </div>
+                  <FileText className="w-5 h-5 text-blue-600 shrink-0" />
+                </div>
+                {batchPdfError && <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 whitespace-pre-line">{batchPdfError}</div>}
+                <input id="batch-pdf-input" type="file" accept=".pdf,application/pdf" className="sr-only" onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }} onChange={(e) => handleBatchPdfSelected(e.target.files?.[0] || null)} />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <label htmlFor="batch-pdf-input" className="flex-1 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 cursor-pointer text-xs font-bold text-slate-800 text-center">{batchPdfFile ? batchPdfFile.name : "Chọn PDF tổng"}</label>
+                  <select value={batchPdfMode} onChange={(e) => setBatchPdfMode(e.target.value as any)} className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs">
+                    <option value="auto">Tự phát hiện học sinh</option>
+                    <option value="one_page">Mỗi trang = 1 học sinh</option>
+                    <option value="two_pages">Mỗi 2 trang = 1 học sinh</option>
+                  </select>
+                  <button type="button" disabled={!batchPdfFile || isScanningBatchPdf} onClick={handleScanBatchPdf} className="px-4 py-2.5 rounded-xl bg-blue-600 disabled:bg-slate-300 text-white text-xs font-bold">{isScanningBatchPdf ? "Đang nhận diện..." : "Nhận diện PDF"}</button>
+                </div>
+                {batchPdfScans.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="text-xs font-semibold text-emerald-700">Đã nhận diện {batchPdfScans.length} học sinh. Hãy kiểm tra trước khi chấm.</div>
+                    <div className="max-h-64 overflow-auto border rounded-xl">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 sticky top-0"><tr><th className="p-2 text-left">STT</th><th className="p-2 text-left">Trang</th><th className="p-2 text-left">SBD</th><th className="p-2 text-left">Họ tên</th><th className="p-2 text-left">Lớp</th><th className="p-2 text-left">Mã đề</th></tr></thead>
+                        <tbody>
+                          {batchPdfScans.map((scan, idx) => (
+                            <tr key={idx} className="border-t">
+                              <td className="p-2">{idx + 1}</td>
+                              <td className="p-2">{scan.sourceLabel || ((scan.pageStart || "?") + "-" + (scan.pageEnd || "?"))}</td>
+                              <td className="p-2"><input value={scan.sbd || ""} onChange={(e) => setBatchPdfScans(prev => prev.map((x,i)=>i===idx?{...x,sbd:e.target.value}:x))} className="w-20 border rounded px-2 py-1" /></td>
+                              <td className="p-2"><input value={scan.studentName || ""} onChange={(e) => setBatchPdfScans(prev => prev.map((x,i)=>i===idx?{...x,studentName:e.target.value}:x))} className="w-36 border rounded px-2 py-1" /></td>
+                              <td className="p-2"><input value={scan.studentClass || ""} onChange={(e) => setBatchPdfScans(prev => prev.map((x,i)=>i===idx?{...x,studentClass:e.target.value}:x))} className="w-20 border rounded px-2 py-1" /></td>
+                              <td className="p-2"><input value={scan.examCode || ""} onChange={(e) => setBatchPdfScans(prev => prev.map((x,i)=>i===idx?{...x,examCode:e.target.value}:x))} className="w-20 border rounded px-2 py-1" /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button type="button" onClick={handleGradeBatchPdf} className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">Xác nhận danh sách & chấm tất cả</button>
+                  </div>
+                )}
+              </div>
               {/* Tips & Guidance Card */}
               <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-5 space-y-2 text-xs text-emerald-900">
                 <div className="flex items-center space-x-2 font-bold text-sm text-emerald-800">
