@@ -1,4 +1,4 @@
-import { recognizeAndGradePaper } from "./paperGrading";
+import { recognizeAndGradePaper, scanBatchPdfMarkings, gradeScannedPaper } from "./paperGrading";
 import { withGradingTimeout } from "./gradingTimeout";
 /**
  * clientAI.ts - Client-side Gemini API adapter for Vercel SPA and offline/online deployment
@@ -2185,6 +2185,62 @@ export async function clientGradePaper(payload: {
     return { success: true, data: gradedPaper };
   } catch (err: any) {
     return { success: false, error: err.message || "Lỗi chấm bài thi bằng AI" };
+  }
+}
+
+
+export async function clientScanBatchPdf(payload: {
+  paperFile: { data: string; mimeType: string; fileName: string };
+  mode?: "one_page" | "two_pages" | "auto";
+  apiKey?: string;
+  model?: string;
+}): Promise<{ success: boolean; data?: any[]; error?: string }> {
+  try {
+    const { paperFile, mode = "auto", apiKey, model } = payload;
+    if (!paperFile?.data || !paperFile.mimeType?.includes("pdf")) {
+      throw new Error("Chế độ PDF nhiều học sinh chỉ nhận file PDF.");
+    }
+    const deadline = Date.now() + 120000;
+    const scans = await scanBatchPdfMarkings(
+      paperFile,
+      (contents, config) => generateWithFallback(contents, apiKey, model, config, deadline),
+      mode
+    );
+    return { success: true, data: scans };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Không thể nhận diện PDF nhiều học sinh." };
+  }
+}
+
+export function clientGradeBatchScans(payload: {
+  scans: any[];
+  rubric: any;
+  sourceFileName: string;
+}): { success: boolean; data?: any[]; error?: string } {
+  try {
+    const { scans, rubric, sourceFileName } = payload;
+    if (!Array.isArray(scans) || !scans.length) throw new Error("Chưa có danh sách học sinh đã nhận diện.");
+    const results = scans.map((scan, index) => {
+      const graded = gradeScannedPaper(
+        rubric,
+        scan,
+        { fileName: sourceFileName + " - " + (scan.sourceLabel || ("HS " + (index + 1))), mimeType: "application/pdf" },
+        { studentName: scan.studentName || undefined, studentClass: scan.studentClass || undefined }
+      );
+      return {
+        ...graded,
+        id: "graded_batch_" + Date.now() + "_" + index,
+        fileName: sourceFileName,
+        fileType: "pdf",
+        teacherNotes:
+          "Nguồn: " + (scan.sourceLabel || "PDF tổng") +
+          ". Giáo viên cần kiểm tra SBD, mã đề và đáp án nhận diện trước khi công nhận điểm. " +
+          (graded.teacherNotes || ""),
+      };
+    });
+    return { success: true, data: results };
+  } catch (err: any) {
+    return { success: false, error: err.message || "Không thể chấm danh sách PDF." };
   }
 }
 
