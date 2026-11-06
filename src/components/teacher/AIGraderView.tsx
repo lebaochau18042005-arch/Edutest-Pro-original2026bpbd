@@ -91,6 +91,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const [rubricGrade, setRubricGrade] = useState<string>("Khối 12");
   const [isExtractingRubric, setIsExtractingRubric] = useState<boolean>(false);
   const [rubricExtractError, setRubricExtractError] = useState<string>("");
+  const [rubricImportStatus, setRubricImportStatus] = useState<string>("");
 
   // Graded Papers state
   const [gradedPapers, setGradedPapers] = useState<GradedPaperResult[]>([]);
@@ -369,89 +370,113 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     });
   };
 
-  const handleUploadAnswerExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
 
-    setRubricExtractError("");
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Không đọc được file."));
+      reader.readAsDataURL(file);
+    });
+
+  const processAnswerExcelFile = async (file: File): Promise<ExamRubric[]> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: "array" });
+    const created: ExamRubric[] = [];
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: "" });
+      if (!rows.length) continue;
+      created.push(...buildRubricsFromExcelRows(rows, file.name + " / " + sheetName));
+    }
+
+    if (!created.length) {
+      throw new Error("Không nhận diện được đáp án trong Excel. Cần có cột Câu + Đáp án, hoặc Câu 1, Câu 2, ...");
+    }
+    return created;
+  };
+
+  const processRubricDocumentFile = async (file: File): Promise<ExamRubric[]> => {
+    const base64 = await readFileAsDataUrl(file);
+    const json = await clientExtractRubric({
+      fileData: base64,
+      mimeType: file.type || "application/pdf",
+      fileName: file.name,
+      subject: rubricSubject,
+      grade: rubricGrade,
+      apiKey: getStoredApiKey(),
+      model: getStoredSelectedModel(),
+    });
+
+    if (!json.success || !json.data) {
+      throw new Error(json.error || "Không thể trích xuất biểu điểm.");
+    }
+
+    return [{
+      ...json.data,
+      id: json.data.id || ("rubric-upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7)),
+      title: json.data.title || ("Đáp án & Biểu điểm: " + file.name),
+      sourceType: "uploaded_doc",
+    } as ExamRubric];
+  };
+
+  const handleUploadRubricFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
     setIsExtractingRubric(true);
+    setRubricExtractError("");
+    setRubricImportStatus("");
+
+    const imported: ExamRubric[] = [];
+    const failed: string[] = [];
+
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array" });
-      const created: ExamRubric[] = [];
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        setRubricImportStatus("Đang xử lý " + (index + 1) + "/" + files.length + ": " + file.name);
 
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: "" });
-        created.push(...buildRubricsFromExcelRows(rows, file.name + " / " + sheetName));
+        try {
+          const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+          const rubricsFromFile = isExcel
+            ? await processAnswerExcelFile(file)
+            : await processRubricDocumentFile(file);
+
+          rubricsFromFile.forEach((rubric, subIndex) => {
+            imported.push({
+              ...rubric,
+              id: rubric.id + "-batch-" + Date.now() + "-" + index + "-" + subIndex,
+            });
+          });
+        } catch (err: any) {
+          failed.push(file.name + ": " + (err?.message || "Lỗi không xác định"));
+        }
       }
 
-      if (!created.length) {
-        throw new Error("Không nhận diện được đáp án. Excel cần có cột Câu + Đáp án, hoặc các cột Câu 1, Câu 2, ...");
+      if (imported.length) {
+        setRubrics((prev) => {
+          const next = [...imported, ...prev];
+          persistRubrics(next);
+          return next;
+        });
+        setActiveRubric(imported[0]);
+        setSelectedRubricId(imported[0].id);
       }
 
-      setRubrics((prev) => {
-        const next = [...created, ...prev];
-        persistRubrics(next);
-        return next;
-      });
-      setActiveRubric(created[0]);
-      setSelectedRubricId(created[0].id);
-
-      const missingPoints = created.some((rubric) => rubric.items.some((item) => !(Number(item.points) > 0)));
-      setRubricExtractError(
-        missingPoints
-          ? "Đã nhập " + created.length + " bộ đáp án từ Excel. Một số câu chưa có cột Điểm; hãy bổ sung điểm trong Biểu điểm trước khi chấm."
-          : "Đã nhập thành công " + created.length + " bộ đáp án từ Excel."
+      const successFiles = files.length - failed.length;
+      setRubricImportStatus(
+        "Đã xử lý " + files.length + " file: " +
+        successFiles + " file thành công, tạo " + imported.length + " bộ đáp án/biểu điểm" +
+        (failed.length ? ", " + failed.length + " file lỗi." : ".")
       );
-    } catch (err: any) {
-      setRubricExtractError(err?.message || "Không đọc được file Excel đáp án.");
+
+      if (failed.length) {
+        setRubricExtractError(failed.join("\n"));
+      }
     } finally {
       setIsExtractingRubric(false);
       e.target.value = "";
-    }
-  };
-
-  // Extract rubric from uploaded doc/image/PDF
-  const handleUploadRubricFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsExtractingRubric(true);
-    setRubricExtractError("");
-
-    try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = reader.result as string;
-        const apiKey = getStoredApiKey();
-        const model = getStoredSelectedModel();
-        const json = await clientExtractRubric({
-          fileData: base64,
-          mimeType: file.type || "application/pdf",
-          fileName: file.name,
-          subject: rubricSubject,
-          grade: rubricGrade,
-          apiKey,
-          model,
-        });
-
-        if (json.success && json.data) {
-          const newRubric: ExamRubric = {
-            ...json.data,
-            sourceType: "uploaded_doc",
-          };
-          upsertAndActivateRubric(newRubric);
-          setActiveStep("upload_grade");
-        } else {
-          setRubricExtractError(json.error || "Không thể trích xuất biểu điểm.");
-        }
-        setIsExtractingRubric(false);
-      };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setRubricExtractError(err.message || "Lỗi đọc file biểu điểm.");
-      setIsExtractingRubric(false);
     }
   };
 
@@ -1482,6 +1507,11 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                   {rubricExtractError}
                 </div>
               )}
+              {rubricImportStatus && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold">
+                  {rubricImportStatus}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
@@ -1516,24 +1546,21 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
                   id="rubric-answer-file-input"
                   type="file"
                   ref={rubricFileInputRef}
+                  multiple
                   accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.xls,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                   className="sr-only"
                   onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }}
-                  onChange={(e) => {
-                    const selected = e.target.files?.[0];
-                    if (selected && /\.(xlsx|xls)$/i.test(selected.name)) handleUploadAnswerExcel(e);
-                    else handleUploadRubricFile(e);
-                  }}
+                  onChange={handleUploadRubricFiles}
                 />
                 <label htmlFor="rubric-answer-file-input" className="block cursor-pointer space-y-2">
                   <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mx-auto">
                     <Upload className="w-6 h-6" />
                   </div>
                   <p className="font-bold text-slate-800 text-sm">
-                    Chọn file Ảnh / PDF / Word / Excel Đề & Đáp án
+                    Chọn nhiều file Đề & Đáp án cùng lúc
                   </p>
                   <p className="text-xs text-slate-500">
-                    Excel được đọc trực tiếp, không dùng AI đoán đáp án. Ảnh/PDF/Word vẫn dùng AI để trích xuất biểu điểm.
+                    Hỗ trợ chọn đồng thời nhiều Word, PDF, ảnh, Excel. Mỗi file được xử lý riêng và lưu thành bộ đáp án/biểu điểm độc lập.
                   </p>
                 </label>
               </div>
