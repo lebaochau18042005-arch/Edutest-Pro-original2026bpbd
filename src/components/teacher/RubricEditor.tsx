@@ -13,16 +13,16 @@ function editable(rubric: ExamRubric): ExamRubric {
   }) };
 }
 
-export function RubricEditor({ rubric, onSave }: { rubric: ExamRubric | null; onSave: (value: ExamRubric) => void }) {
+export function RubricEditor({ rubric, onSave, onCreateNew }: { rubric: ExamRubric | null; onSave: (value: ExamRubric) => void; onCreateNew?: () => void }) {
   const blank = (): ExamRubric => ({ id: `rubric-${Date.now()}`, title: "Bài kiểm tra mới", subject: "", grade: "", maxScore: 10, gradeWeight: 1, assessmentType: "regular", sourceType: "manual_text", items: [], createdAt: new Date().toISOString() });
   const [draft, setDraft] = useState<ExamRubric>(() => rubric ? editable(rubric) : blank());
   const [message, setMessage] = useState("");
-  useEffect(() => { if (rubric) setDraft(editable(rubric)); setMessage(""); }, [rubric]);
+  useEffect(() => { setDraft(rubric ? editable(rubric) : blank()); setMessage(""); }, [rubric]);
   const update = (patch: Partial<ExamRubric>) => { setDraft(d => ({ ...d, ...patch })); setMessage(""); };
   const updateItem = (index: number, patch: Partial<RubricItem>) => update({ items: draft.items.map((item, i) => i === index ? { ...item, ...patch } : item) });
   const errors = validateRubricSettings(draft);
   return <section className="bg-white rounded-3xl border border-blue-200 p-6 space-y-4">
-    <div className="flex justify-between gap-3"><h3 className="font-bold">Thiết lập đáp án và biểu điểm (không cần AI)</h3><button type="button" onClick={() => { setDraft(blank()); setMessage(""); }} className="text-blue-700 font-bold">Tạo bài mới</button></div>
+    <div className="flex justify-between gap-3"><h3 className="font-bold">Thiết lập đáp án và biểu điểm (không cần AI)</h3><button type="button" onClick={() => { onCreateNew?.(); setDraft(blank()); setMessage(""); }} className="text-blue-700 font-bold">Tạo bài mới</button></div>
     <div className="grid sm:grid-cols-3 gap-3">
       <label>Tên bài<input className={field} value={draft.title} onChange={e => update({ title: e.target.value })} /></label>
       <label>Môn học<input className={field} value={draft.subject} onChange={e => update({ subject: e.target.value })} /></label>
