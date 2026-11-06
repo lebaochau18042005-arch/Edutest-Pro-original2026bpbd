@@ -1623,9 +1623,17 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
               {rubrics.map(r => <option key={r.id} value={r.id}>{r.title} — {r.examCode || "Chưa có mã đề"}</option>)}
             </select>
           </label>
-          <RubricEditor rubric={activeRubric} onSave={value => {
-            upsertAndActivateRubric(value);
-          }} />
+          <RubricEditor
+            rubric={activeRubric}
+            onCreateNew={() => {
+              setActiveRubric(null);
+              setSelectedRubricId("");
+              setRubricExtractError("");
+            }}
+            onSave={value => {
+              upsertAndActivateRubric(value);
+            }}
+          />
           {/* Active Rubric Inspection & Edit Table */}
           {activeRubric && (
             <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
