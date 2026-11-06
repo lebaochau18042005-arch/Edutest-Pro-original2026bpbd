@@ -303,6 +303,124 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC ĐỊNH NGHĨA.`
   };
 }
 
+export interface BatchPaperScan extends PaperScan {
+  pageStart?: number;
+  pageEnd?: number;
+  sourceLabel?: string;
+}
+
+export async function scanBatchPdfMarkings(
+  paper: { data: string; mimeType: string },
+  generate: Generate,
+  mode: "one_page" | "two_pages" | "auto" = "auto"
+): Promise<BatchPaperScan[]> {
+  const cleanBase64 = paper.data.replace(/^data:[^;]+;base64,/, "");
+  const modeInstruction =
+    mode === "one_page"
+      ? "Quy ước: mỗi trang PDF là một học sinh."
+      : mode === "two_pages"
+      ? "Quy ước: mỗi 2 trang liên tiếp là một học sinh."
+      : "Tự xác định điểm bắt đầu bài mới dựa vào Họ tên, SBD, Mã đề và khung thông tin đầu bài.";
+
+  const prompt = [
+    "Bạn là hệ thống OMR/OCR chuyên đọc MỘT FILE PDF CHỨA NHIỀU BÀI LÀM HỌC SINH.",
+    modeInstruction,
+    "",
+    "NHIỆM VỤ:",
+    "1. Xác định từng học sinh/bài làm riêng biệt trong toàn bộ PDF.",
+    "2. Với mỗi học sinh, đọc pageStart, pageEnd, studentName, studentClass, sbd, examCode và các phần trả lời.",
+    "3. TUYỆT ĐỐI KHÔNG BIẾT ĐÁP ÁN ĐÚNG VÀ KHÔNG SUY ĐOÁN.",
+    "4. Ô tô không rõ, tô hai đáp án, bị cắt hoặc tẩy xóa khó đọc: trả ?.",
+    "5. Không tự tạo câu không xuất hiện trên phiếu.",
+    "6. Nếu một bài kéo dài nhiều trang, gom đúng các trang của cùng học sinh.",
+    "7. Không trộn câu trả lời giữa hai học sinh.",
+    "8. part1 là A/B/C/D; part2 là a,b,c,d với Đ/S; part3 là giá trị trả lời ngắn.",
+  ].join("\n");
+
+  const config = {
+    responseMimeType: "application/json",
+    responseSchema: {
+      type: Type.OBJECT,
+      properties: {
+        students: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              pageStart: { type: Type.INTEGER },
+              pageEnd: { type: Type.INTEGER },
+              studentName: { type: Type.STRING },
+              studentClass: { type: Type.STRING },
+              sbd: { type: Type.STRING },
+              examCode: { type: Type.STRING },
+              part1: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: { question: { type: Type.INTEGER }, selected: { type: Type.STRING } },
+                  required: ["question", "selected"],
+                },
+              },
+              part2: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question: { type: Type.INTEGER },
+                    a: { type: Type.STRING }, b: { type: Type.STRING }, c: { type: Type.STRING }, d: { type: Type.STRING },
+                  },
+                  required: ["question"],
+                },
+              },
+              part3: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: { question: { type: Type.INTEGER }, value: { type: Type.STRING } },
+                  required: ["question", "value"],
+                },
+              },
+            },
+            required: ["pageStart", "pageEnd", "part1", "part2", "part3"],
+          },
+        },
+      },
+      required: ["students"],
+    },
+  };
+
+  const responseText = await generate([{
+    role: "user",
+    parts: [
+      { inlineData: { mimeType: paper.mimeType || "application/pdf", data: cleanBase64 } },
+      { text: prompt },
+    ],
+  }], config);
+
+  let raw: any;
+  try { raw = JSON.parse(responseText); }
+  catch { throw new Error("AI không trả được danh sách bài làm hợp lệ từ PDF."); }
+  if (!Array.isArray(raw?.students) || raw.students.length === 0) throw new Error("Không nhận diện được học sinh nào trong PDF.");
+
+  return raw.students.map((s: any, idx: number) => {
+    const part1: Record<number, string> = {};
+    (s.part1 || []).forEach((x: any) => { const q = Number(x.question); if (q) part1[q] = String(x.selected ?? "").trim().toUpperCase(); });
+    const part2: Record<number, Record<string, string>> = {};
+    (s.part2 || []).forEach((x: any) => {
+      const q = Number(x.question);
+      if (q) part2[q] = { a: String(x.a ?? "").trim().toUpperCase(), b: String(x.b ?? "").trim().toUpperCase(), c: String(x.c ?? "").trim().toUpperCase(), d: String(x.d ?? "").trim().toUpperCase() };
+    });
+    const part3: Record<number, string> = {};
+    (s.part3 || []).forEach((x: any) => { const q = Number(x.question); if (q) part3[q] = String(x.value ?? "").trim(); });
+    const pageStart = Number(s.pageStart) || idx + 1;
+    const pageEnd = Number(s.pageEnd) || pageStart;
+    return {
+      studentName: s.studentName || "", studentClass: s.studentClass || "", sbd: s.sbd || "", examCode: s.examCode || "",
+      part1, part2, part3, bubbleCoordinates: [], pageStart, pageEnd,
+      sourceLabel: "Trang " + pageStart + "-" + pageEnd,
+    } as BatchPaperScan;
+  });
+}
 function isUnknownMark(value: unknown): boolean {
   const v = String(value ?? "").trim().toUpperCase();
   return v === "?" || v === "MULTIPLE" || v === "NHIỀU" || v === "AMBIGUOUS";
