@@ -12,9 +12,9 @@ import { normalizeExamQuestions3Parts } from "./examHelpers";
 export const FALLBACK_MODELS = [
   "gemini-3.8-flash",
   "gemini-3.6-flash",
-  "gemini-3-flash-preview",
   "gemini-3.5-flash-lite",
-  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash-preview",
 ];
 
 function getAI(apiKey?: string): GoogleGenAI | null {
@@ -42,29 +42,66 @@ export async function generateWithFallback(
   }
 
   const selectedModel = preferredModel || getStoredSelectedModel() || "gemini-3.8-flash";
-  const modelsToTry = [
+  const modelsToTry = Array.from(new Set([
     selectedModel,
-    ...FALLBACK_MODELS.filter((m) => m !== selectedModel),
-  ];
+    ...FALLBACK_MODELS,
+  ]));
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isTransient = (err: any) => {
+    const msg = String(err?.message || err || "").toLowerCase();
+    const status = Number(err?.status || err?.code || 0);
+    return (
+      status === 429 || status === 500 || status === 502 || status === 503 || status === 504 ||
+      msg.includes("high demand") ||
+      msg.includes("overloaded") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("temporarily unavailable") ||
+      msg.includes("try again later") ||
+      msg.includes("rate limit")
+    );
+  };
 
   let lastError: any;
-  for (const model of (deadline ? modelsToTry.slice(0, 2) : modelsToTry)) {
-    if (deadline && Date.now() >= deadline) throw new Error("Chấm bài quá thời gian chờ. Vui lòng thử lại.");
-    try {
-      const request = (abortSignal?: AbortSignal) => ai.models.generateContent({
-        model,
-        contents,
-        config: abortSignal ? { ...config, abortSignal } : config,
-      });
-      const resp = deadline
-        ? await withGradingTimeout(request, Math.min(45000, deadline - Date.now()))
-        : await request();
-      return resp.text ?? "";
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Model ${model} failed, trying fallback...`, err?.message || err);
-      if (err?.status === 400 && (err?.message?.includes("API key not valid") || err?.message?.includes("API_KEY_INVALID"))) {
-        throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại Google AI Studio API Key của bạn.");
+  const attempted: string[] = [];
+
+  for (const model of modelsToTry) {
+    if (deadline && Date.now() >= deadline) break;
+    attempted.push(model);
+
+    // One immediate retry for transient provider overload, then move to another model.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (deadline && Date.now() >= deadline) break;
+      try {
+        const remaining = deadline ? Math.max(1000, deadline - Date.now()) : 30000;
+        const perRequestMs = Math.min(22000, remaining);
+        const request = (abortSignal?: AbortSignal) => ai.models.generateContent({
+          model,
+          contents,
+          config: abortSignal ? { ...config, abortSignal } : config,
+        });
+        const resp = deadline
+          ? await withGradingTimeout(request, perRequestMs)
+          : await request();
+
+        if (typeof window !== "undefined" && model !== selectedModel) {
+          localStorage.setItem("gemini_selected_model", model);
+        }
+        return resp.text ?? "";
+      } catch (err: any) {
+        lastError = err;
+        const msg = String(err?.message || err || "");
+        console.warn(`Model ${model} attempt ${attempt + 1} failed:`, msg);
+
+        if (
+          err?.status === 400 &&
+          (msg.includes("API key not valid") || msg.includes("API_KEY_INVALID"))
+        ) {
+          throw new Error("API Key không hợp lệ. Vui lòng kiểm tra lại Google AI Studio API Key của bạn.");
+        }
+
+        if (!isTransient(err)) break;
+        if (attempt === 0) await sleep(700);
       }
     }
   }
@@ -73,10 +110,23 @@ export async function generateWithFallback(
   let cleanMsg = rawMsg;
   try {
     const parsed = JSON.parse(rawMsg);
-    if (parsed?.error?.message) {
-      cleanMsg = parsed.error.message;
-    }
-  } catch (e) {}
+    if (parsed?.error?.message) cleanMsg = parsed.error.message;
+  } catch {}
+
+  const lower = cleanMsg.toLowerCase();
+  if (
+    lower.includes("high demand") ||
+    lower.includes("overloaded") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("try again later") ||
+    lower.includes("temporarily unavailable")
+  ) {
+    throw new Error(
+      "Google Gemini đang quá tải. Hệ thống đã tự động thử " +
+      attempted.join(", ") +
+      " nhưng chưa có model nào phản hồi. Bấm Chấm lại để hệ thống thử lại toàn bộ model."
+    );
+  }
 
   if (
     cleanMsg.includes("is not found for API version") ||
@@ -85,13 +135,15 @@ export async function generateWithFallback(
     cleanMsg.includes("gemini-2.0") ||
     cleanMsg.includes("gemini-2.5")
   ) {
-    cleanMsg = "Model AI hiện tại không khả dụng hoặc đã được nâng cấp. Hệ thống đã tự động chuyển sang Gemini 3.8 Flash.";
     if (typeof window !== "undefined") {
       localStorage.setItem("gemini_selected_model", "gemini-3.8-flash");
     }
+    throw new Error(
+      "Model AI đã chọn không còn khả dụng. Hệ thống đã thử các model dự phòng nhưng chưa thành công."
+    );
   }
 
-  throw new Error(cleanMsg || "Không thể kết nối đến Gemini AI. Vui lòng kiểm tra API Key trong phần Cài Đặt.");
+  throw new Error(cleanMsg || "Không thể kết nối đến Gemini AI sau khi đã thử các model dự phòng.");
 }
 
 /**
