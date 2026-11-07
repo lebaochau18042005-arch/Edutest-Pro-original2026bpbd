@@ -3013,7 +3013,7 @@ async function persistGradedResult(record: any): Promise<any> {
   const fileData = typeof normalized.fileData === "string" ? normalized.fileData : "";
   const durableRecord = { ...normalized };
   delete durableRecord.fileData;
-  durableRecord.hasStoredPaperFile = Boolean(fileData);
+  durableRecord.hasStoredPaperFile = Boolean(fileData || normalized.hasStoredPaperFile);
 
   await adminPut(`${GRADED_RESULTS_ROOT}/${key}`, durableRecord);
   if (fileData) {
