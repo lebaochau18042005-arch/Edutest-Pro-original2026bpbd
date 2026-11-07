@@ -2205,54 +2205,61 @@ export async function clientGradePaper(payload: {
   model?: string;
 }): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const { paperFile, rubric, rubrics, studentNameOverride, studentClassOverride, gradingStrictness, apiKey, model } = payload;
-    // Share one budget across OCR, fallback and optional essay assessment.
-    const deadline = Date.now() + 90000;
-    const result = await recognizeAndGradePaper(
-      paperFile,
-      rubric,
-      (contents, config) => generateWithFallback(contents, apiKey, model, config, deadline),
-      gradingStrictness,
-      payload.reviewScan,
-      (scan, currentRubric) => {
-        const detected = String(scan.examCode || "").trim();
-        if (!detected || !Array.isArray(rubrics) || !rubrics.length) return currentRubric;
-        const matched = rubrics.find((r: any) => String(r?.examCode || "").trim() === detected);
-        return matched || currentRubric;
+    const { paperFile, rubric, rubrics, studentNameOverride, studentClassOverride } = payload;
+
+    const scanRes = await fetch("/api/grader/scan-v17", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(() => {
+        try {
+          const token = localStorage.getItem("edutest_admin_token") || "";
+          return token.trim() ? { "x-edutest-admin-token": token.trim() } : {};
+        } catch { return {}; }
+      })() },
+      body: JSON.stringify({ paperFile }),
+    });
+
+    const scanJson = await scanRes.json().catch(() => null);
+    if (!scanRes.ok || !scanJson?.success || !scanJson?.data) {
+      throw new Error(scanJson?.error || "Backend V17 chưa nhận diện được phiếu.");
+    }
+
+    const initialScan = scanJson.data;
+    const detected = String(initialScan.examCode || "").trim();
+    const resolvedRubric =
+      detected && Array.isArray(rubrics) && rubrics.length
+        ? (rubrics.find((r: any) => String(r?.examCode || "").trim() === detected) || rubric)
+        : rubric;
+
+    if (!payload.reviewScan) {
+      throw new Error("Bắt buộc giáo viên duyệt kết quả nhận diện trước khi tính điểm.");
+    }
+
+    const reviewedScan = await payload.reviewScan(initialScan, resolvedRubric);
+
+    // No AI call after teacher confirmation: deterministic code scores immediately.
+    const gradedPaper = gradeScannedPaper(
+      resolvedRubric,
+      reviewedScan,
+      {
+        fileName: paperFile.fileName,
+        data: paperFile.data,
+        mimeType: paperFile.mimeType,
+      },
+      {
+        studentName: studentNameOverride,
+        studentClass: studentClassOverride,
       }
     );
 
-    const gradedPaper = {
-      assessmentType: rubric.assessmentType,
-      gradeWeight: rubric.gradeWeight ?? 1,
-      id: `graded_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      studentName: studentNameOverride || result.studentName || "Học sinh",
-      studentClass: studentClassOverride || result.studentClass || "12A",
-      studentId: result.studentId || result.sbd || "",
-      sbd: result.sbd || result.studentId || "",
-      examCode: result.examCode || rubric?.examCode || "",
-      detectedExamCode: result.examCode || rubric?.examCode || "",
-      examTitle: rubric?.title || "Bài kiểm tra",
-      fileName: paperFile.fileName,
-      fileData: paperFile.data ? (paperFile.data.length < 2000000 ? paperFile.data : undefined) : undefined,
-      fileType: paperFile.mimeType?.includes("pdf") ? "pdf" : "image",
-      gradedAt: new Date().toISOString(),
-      totalScore: result.totalScore,
-      maxScore: result.maxScore,
-      gradeClassification: result.gradeClassification,
-      summaryEvaluation: result.summaryEvaluation || "Đã hoàn thành chấm điểm chi tiết bằng AI.",
-      teacherNotes: result.teacherNotes || "",
-      details: result.details,
-      bubbleCoordinates: result.bubbleCoordinates || [],
-      isReviewedByTeacher: false,
-    };
+    gradedPaper.teacherNotes =
+      "V17: OCR qua AI Gateway phía máy chủ; giáo viên đã duyệt đáp án; điểm được tính bằng mã nguồn, không dùng AI để cho điểm. " +
+      (gradedPaper.teacherNotes || "");
 
     return { success: true, data: gradedPaper };
   } catch (err: any) {
-    return { success: false, error: err.message || "Lỗi chấm bài thi bằng AI" };
+    return { success: false, error: err?.message || "Lỗi chấm bài V17." };
   }
 }
-
 
 export async function clientScanBatchPdf(payload: {
   paperFile: { data: string; mimeType: string; fileName: string };
