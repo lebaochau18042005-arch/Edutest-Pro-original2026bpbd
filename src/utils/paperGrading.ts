@@ -653,8 +653,13 @@ export function gradeScannedPaper(
     };
   });
 
-  // Calculate final total score
-  const totalCalculated = details.reduce((sum, d) => sum + (Number(d.pointsAwarded) || 0), 0);
+  // Calculate score totals by part and whole paper
+  const part1Score = round2(details.filter((d) => d.part === "part1").reduce((sum, d) => sum + (Number(d.pointsAwarded) || 0), 0));
+  const part2Score = round2(details.filter((d) => d.part === "part2").reduce((sum, d) => sum + (Number(d.pointsAwarded) || 0), 0));
+  const part3Score = round2(details.filter((d) => d.part === "part3").reduce((sum, d) => sum + (Number(d.pointsAwarded) || 0), 0));
+  const essayScore = round2(details.filter((d) => d.part === "essay").reduce((sum, d) => sum + (Number(d.pointsAwarded) || 0), 0));
+  const objectiveScore = round2(part1Score + part2Score + part3Score);
+  const totalCalculated = round2(objectiveScore + essayScore);
   const maxScore = Number(rubric?.maxScore);
   if (!Number.isFinite(maxScore) || maxScore <= 0) {
     throw new Error("Chưa thiết lập thang điểm tối đa của bài thi.");
@@ -669,7 +674,7 @@ export function gradeScannedPaper(
   else if (scaledScore >= 5.0) classification = "Trung bình";
   else classification = "Yếu";
 
-  const summary = `Tổng điểm: ${finalTotalScore}/${maxScore} (${classification}). Phần I: đúng ${p1Correct}/${part1QuestionCount || 12} câu; Phần II: đạt ${round2(p2PointsTotal)}đ; Phần III: đúng ${p3Correct}/${part3QuestionCount || 6} câu.`;
+  const summary = `Tổng điểm: ${finalTotalScore}/${maxScore} (${classification}). Phần I: ${part1Score}đ; Phần II: ${part2Score}đ; Phần III: ${part3Score}đ; Trắc nghiệm: ${objectiveScore}đ${essayScore > 0 ? `; Tự luận: ${essayScore}đ` : ""}.`;
 
   return {
     assessmentType: rubric.assessmentType,
@@ -687,6 +692,11 @@ export function gradeScannedPaper(
     fileType: paperFile.mimeType?.includes("pdf") ? "pdf" : "image",
     gradedAt: new Date().toISOString(),
     totalScore: finalTotalScore,
+    part1Score,
+    part2Score,
+    part3Score,
+    essayScore,
+    objectiveScore,
     maxScore,
     gradeClassification: classification,
     summaryEvaluation: summary,
