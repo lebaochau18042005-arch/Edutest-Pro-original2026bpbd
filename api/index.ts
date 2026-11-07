@@ -1,4 +1,4 @@
-import app from "../server";
+import app from "../server.ts";
 
 
 function base64UrlBytes(bytes: Uint8Array): string {
