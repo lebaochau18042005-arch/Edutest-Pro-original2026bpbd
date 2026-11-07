@@ -49,13 +49,13 @@ export interface ModelCardInfo {
 
 export const AVAILABLE_MODELS: ModelCardInfo[] = [
   {
-    id: "gemini-3.5-flash",
-    name: "Gemini 3.5 Flash",
-    badge: "Thế Hệ 3.5 (Tối Tân Nhất)",
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    badge: "Khuyến nghị",
     badgeColor: "bg-blue-100 text-blue-800 border-blue-200",
-    description: "Model thế hệ mới nhất với tốc độ xử lý siêu nhanh, tối ưu bóc tách đề thi THPT, công thức toán LaTeX và biểu đồ.",
-    speed: "Siêu tốc (~0.8s)",
-    accuracy: "Xuất sắc (SOTA)",
+    description: "Model Flash hiện hành, phù hợp nhận diện và chấm bài đa phương thức.",
+    speed: "Rất nhanh",
+    accuracy: "Cao",
     isDefault: true,
   },
   {
@@ -102,7 +102,7 @@ export const getStoredApiKey = (): string => {
 };
 
 export const getStoredSelectedModel = (): string => {
-  if (typeof window === "undefined") return "gemini-3.5-flash";
+  if (typeof window === "undefined") return DEFAULT_GEMINI_MODEL;
   const stored = (localStorage.getItem("gemini_selected_model") || "").trim();
   const validIds = AVAILABLE_MODELS.map((m) => m.id);
   if (
@@ -112,8 +112,8 @@ export const getStoredSelectedModel = (): string => {
     stored.includes("2.0") ||
     stored.includes("2.5")
   ) {
-    localStorage.setItem("gemini_selected_model", "gemini-3.5-flash");
-    return "gemini-3.5-flash";
+    localStorage.setItem("gemini_selected_model", DEFAULT_GEMINI_MODEL);
+    return DEFAULT_GEMINI_MODEL;
   }
   return stored;
 };
@@ -125,7 +125,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"ai" | "cloud">("ai");
   const [apiKey, setApiKey] = useState("");
-  const [selectedModel, setSelectedModel] = useState("gemini-3.5-flash");
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_GEMINI_MODEL);
   const [showKey, setShowKey] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [validationError, setValidationError] = useState("");
