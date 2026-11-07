@@ -560,19 +560,19 @@ export function validateReviewedScanForRubric(rubric: any, scan: PaperScan): str
     const type = rubricType(item);
     if (type === "multiple_choice") {
       p1++;
-      const key = item.printedNumber ?? p1;
+      const key = p1;
       const mark = scan.part1[key];
       if (isUnknownMark(mark) || isInvalidPart1Mark(mark)) errors.push(`Phần I - câu ${key}: ô tô chưa rõ, tô nhiều hoặc ký hiệu không hợp lệ.`);
     } else if (type === "true_false") {
       p2++;
-      const key = item.printedNumber ?? p2;
+      const key = p2;
       const sub = scan.part2[key] || {};
       for (const k of ["a","b","c","d"]) {
         if (isUnknownMark(sub[k]) || isInvalidTrueFalseMark(sub[k])) errors.push(`Phần II - câu ${key}${k}: ô Đ/S chưa rõ, tô nhiều hoặc ký hiệu không hợp lệ.`);
       }
     } else if (type === "short_answer") {
       p3++;
-      const key = item.printedNumber ?? p3;
+      const key = p3;
       if (isUnknownMark(scan.part3[key])) errors.push(`Phần III - câu ${key}: kết quả tô/ghi chưa rõ.`);
     }
   }
@@ -628,7 +628,7 @@ export function gradeScannedPaper(
       part1QuestionCount++;
       // Find what student bubbled for this question
       // Try qNum or local part index (1..12)
-      const studentChoice = (scan.part1[item.printedNumber ?? part1QuestionCount] || "").toUpperCase();
+      const studentChoice = (scan.part1[part1QuestionCount] || "").toUpperCase();
       const teacherLetter = extractOptionLetter(item.correctAnswer);
 
       const isCorrect = Boolean(studentChoice && teacherLetter && studentChoice === teacherLetter);
@@ -639,7 +639,7 @@ export function gradeScannedPaper(
       let feedback = "";
 
       if (isUnknownMark(studentChoice) || isInvalidPart1Mark(studentChoice)) {
-        throw new Error(`Phần I - câu ${item.printedNumber ?? part1QuestionCount}: ô tô chưa rõ/tô nhiều. Cần giáo viên duyệt trước khi chấm.`);
+        throw new Error(`Phần I - câu ${part1QuestionCount}: ô tô chưa rõ/tô nhiều. Cần giáo viên duyệt trước khi chấm.`);
       } else if (!studentChoice) {
         status = "ungraded";
         feedback = `Học sinh chưa tô đáp án / Bỏ trống. Đáp án đúng là: ${teacherLetter}.`;
@@ -670,7 +670,7 @@ export function gradeScannedPaper(
     if (partNum === 2 || item.questionType === "true_false") {
       part2QuestionCount++;
       // Find student's true/false markings for this question
-      const studentSubMap = scan.part2[item.printedNumber ?? part2QuestionCount] || {};
+      const studentSubMap = scan.part2[part2QuestionCount] || {};
       const expectedSubMap = parseTrueFalseMap(item.correctAnswer, item.statements);
 
       let subMatchCount = 0;
@@ -679,7 +679,7 @@ export function gradeScannedPaper(
       ["a", "b", "c", "d"].forEach((subKey) => {
         const studentMark = (studentSubMap[subKey] || "").toUpperCase();
         if (isUnknownMark(studentMark) || isInvalidTrueFalseMark(studentMark)) {
-          throw new Error(`Phần II - câu ${item.printedNumber ?? part2QuestionCount}${subKey}: ô Đ/S chưa rõ/tô nhiều. Cần giáo viên duyệt trước khi chấm.`);
+          throw new Error(`Phần II - câu ${part2QuestionCount}${subKey}: ô Đ/S chưa rõ/tô nhiều. Cần giáo viên duyệt trước khi chấm.`);
         }
         const studentBool = studentMark === "Đ" || studentMark === "TRUE" || studentMark === "T" ? true : (studentMark === "S" || studentMark === "FALSE" || studentMark === "F" ? false : null);
         const expectedBool = expectedSubMap[subKey] !== undefined ? expectedSubMap[subKey] : null;
@@ -724,9 +724,9 @@ export function gradeScannedPaper(
     // ──────────────────────────────────────────
     if (partNum === 3 || item.questionType === "short_answer") {
       part3QuestionCount++;
-      const studentVal = scan.part3[item.printedNumber ?? part3QuestionCount] || "";
+      const studentVal = scan.part3[part3QuestionCount] || "";
       if (isUnknownMark(studentVal)) {
-        throw new Error(`Phần III - câu ${item.printedNumber ?? part3QuestionCount}: kết quả chưa rõ. Cần giáo viên duyệt trước khi chấm.`);
+        throw new Error(`Phần III - câu ${part3QuestionCount}: kết quả chưa rõ. Cần giáo viên duyệt trước khi chấm.`);
       }
       const isMatch = isEquivalentNumeric(studentVal, item.correctAnswer);
       const pointsAwarded = isMatch ? maxPts : 0;
