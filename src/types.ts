@@ -404,6 +404,11 @@ export interface GradedPaperResult {
   fileType: "image" | "pdf";
   gradedAt: string;
   totalScore: number;
+  part1Score?: number;
+  part2Score?: number;
+  part3Score?: number;
+  essayScore?: number;
+  objectiveScore?: number;
   maxScore: number;
   gradeClassification: "Xuất sắc" | "Giỏi" | "Khá" | "Trung bình" | "Yếu" | "Chưa đạt";
   summaryEvaluation: string;
