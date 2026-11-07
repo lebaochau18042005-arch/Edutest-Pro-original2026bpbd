@@ -11,7 +11,7 @@ import type { RubricItem, GradedPaperResult, GradedQuestionDetail } from "../typ
 
 type Generate = (contents: any, config?: any) => Promise<string>;
 export type PaperScan = Awaited<ReturnType<typeof scanPaperMarkings>>;
-export type ReviewPaperScan = (scan: PaperScan) => Promise<PaperScan>;
+export type ReviewPaperScan = (scan: PaperScan, rubric: any) => Promise<PaperScan>;
 
 const MOET_TF_SCORE = [0, 0.1, 0.25, 0.5, 1.0];
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -715,24 +715,30 @@ export async function recognizeAndGradePaper(
   rubric: any,
   generate: Generate,
   strictness = "standard",
-  reviewScan?: ReviewPaperScan
+  reviewScan?: ReviewPaperScan,
+  resolveRubric?: (scan: PaperScan, currentRubric: any) => any
 ): Promise<GradedPaperResult> {
-  const errors = validateRubricSettings(rubric);
-  if (errors.length) throw new Error(errors.join(" "));
   // Step 1: Scan student markings from image (Pure OCR, zero teacher answer bias)
   const initialScan = await scanPaperMarkings(paper, generate);
+
+  // Resolve the exact answer key only AFTER reading the exam code from the student's sheet.
+  // This prevents grading code 2013 with an answer key for 2010.
+  const resolvedRubric = resolveRubric ? (resolveRubric(initialScan, rubric) || rubric) : rubric;
+  const errors = validateRubricSettings(resolvedRubric);
+  if (errors.length) throw new Error(errors.join(" "));
+
   if (!reviewScan) {
     throw new Error("Bắt buộc giáo viên duyệt kết quả nhận diện phiếu trước khi tính điểm.");
   }
-  const scanned = await reviewScan(initialScan);
-  const scanErrors = validateReviewedScanForRubric(rubric, scanned);
+  const scanned = await reviewScan(initialScan, resolvedRubric);
+  const scanErrors = validateReviewedScanForRubric(resolvedRubric, scanned);
   if (scanErrors.length) {
     throw new Error("Phiếu còn dữ liệu chưa xác nhận:\n" + scanErrors.join("\n"));
   }
 
   // Step 2: Grade deterministically in code
   const result = gradeScannedPaper(
-    rubric,
+    resolvedRubric,
     scanned,
     { fileName: paper.fileName || "bai_lam.jpg", data: paper.data, mimeType: paper.mimeType }
   );
