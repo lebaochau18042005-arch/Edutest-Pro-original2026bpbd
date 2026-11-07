@@ -212,7 +212,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
   const openGradedPaper = async (paper: GradedPaperResult) => {
     if (paper.fileData || !(paper as any).hasStoredPaperFile) {
-      void openGradedPaper(paper);
+      setSelectedPaperForModal(paper);
       return;
     }
     try {
