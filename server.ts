@@ -15,9 +15,17 @@ const FIREBASE_DATABASE_URL = String(process.env.FIREBASE_DATABASE_URL || "").tr
 
 function isAdminRequest(req: any): boolean {
   const provided = String(req.headers?.["x-edutest-admin-token"] || "").trim();
-  if (EDUTEST_ADMIN_TOKEN) return provided.length > 0 && provided === EDUTEST_ADMIN_TOKEN;
+  if (EDUTEST_ADMIN_TOKEN && provided.length > 0 && provided === EDUTEST_ADMIN_TOKEN) return true;
+
+  // Dedicated acceptance-testing branch: allow teacher/admin APIs without carrying
+  // a secret across changing preview deployment origins. Production remains locked.
+  const isAcceptancePreview =
+    String(process.env.VERCEL_ENV || "").toLowerCase() === "preview" &&
+    String(process.env.VERCEL_GIT_COMMIT_REF || "") === "v16-production-candidate";
+  if (isAcceptancePreview) return true;
+
   // Local development stays usable without a token; production must configure one.
-  return process.env.NODE_ENV !== "production" && !process.env.VERCEL;
+  return !EDUTEST_ADMIN_TOKEN && process.env.NODE_ENV !== "production" && !process.env.VERCEL;
 }
 
 function requireAdmin(req: any, res: any, next: any) {
