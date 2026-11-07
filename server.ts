@@ -1,4 +1,4 @@
-import { recognizeAndGradePaper } from "./src/utils/paperGrading";
+import { recognizeAndGradePaper, scanPaperMarkings } from "./src/utils/paperGrading";
 import express from "express";
 import path from "path";
 import os from "os";
@@ -21,7 +21,8 @@ function isAdminRequest(req: any): boolean {
   // a secret across changing preview deployment origins. Production remains locked.
   const isAcceptancePreview =
     String(process.env.VERCEL_ENV || "").toLowerCase() === "preview" &&
-    String(process.env.VERCEL_GIT_COMMIT_REF || "") === "v16-production-candidate";
+    (String(process.env.VERCEL_GIT_COMMIT_REF || "") === "v16-production-candidate" ||
+     String(process.env.VERCEL_GIT_COMMIT_REF || "") === "v17-grader-gateway");
   if (isAcceptancePreview) return true;
 
   // Local development stays usable without a token; production must configure one.
@@ -38,6 +39,110 @@ function requireAdmin(req: any, res: any, next: any) {
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+
+function extractGatewayText(payload: any): string {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) return payload.output_text.trim();
+  const chunks: string[] = [];
+  for (const item of payload?.output || []) {
+    for (const block of item?.content || []) {
+      const t = block?.text ?? block?.output_text;
+      if (typeof t === "string" && t.trim()) chunks.push(t.trim());
+    }
+  }
+  return chunks.join("\n").trim();
+}
+
+async function gatewayGenerateForPaper(contents: any): Promise<string> {
+  const token = String(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || "").trim();
+  if (!token) throw new Error("AI Gateway chưa có thông tin xác thực trên máy chủ.");
+
+  let prompt = "";
+  let mimeType = "image/jpeg";
+  let base64Data = "";
+  const parts = Array.isArray(contents) ? (contents[0]?.parts || []) : [];
+  for (const part of parts) {
+    if (typeof part?.text === "string") prompt += (prompt ? "\n" : "") + part.text;
+    if (part?.inlineData?.data) {
+      mimeType = part.inlineData.mimeType || mimeType;
+      base64Data = String(part.inlineData.data);
+    }
+  }
+  if (!base64Data) throw new Error("Không nhận được dữ liệu phiếu để OCR.");
+
+  const fileData = `data:${mimeType};base64,${base64Data}`;
+  const isPdf = mimeType.includes("pdf");
+  const attachment = isPdf
+    ? { type: "input_file", filename: "student-paper.pdf", file_data: fileData }
+    : { type: "input_image", image_url: fileData, detail: "high" };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 70000);
+  try {
+    const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: "anthropic/claude-sonnet-5",
+        input: [{
+          role: "user",
+          content: [
+            { type: "input_text", text: prompt + "\n\nCHỈ TRẢ JSON HỢP LỆ, KHÔNG MARKDOWN." },
+            attachment,
+          ],
+        }],
+        providerOptions: {
+          gateway: {
+            models: [
+              "google/gemini-3.6-flash",
+              "openai/gpt-6-astra"
+            ],
+          },
+        },
+      }),
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const message = payload?.error?.message || payload?.message || `AI Gateway HTTP ${response.status}`;
+      throw new Error(message);
+    }
+    const text = extractGatewayText(payload);
+    if (!text) throw new Error("AI Gateway không trả dữ liệu OCR.");
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// V17: OCR only on the server. Teacher review and deterministic scoring happen after this call.
+app.post("/api/grader/scan-v17", requireAdmin, async (req, res) => {
+  try {
+    const paperFile = req.body?.paperFile;
+    if (!paperFile?.data || !paperFile?.mimeType) {
+      return res.status(400).json({ success: false, error: "Thiếu file bài làm." });
+    }
+    const scan = await scanPaperMarkings(
+      { data: paperFile.data, mimeType: paperFile.mimeType },
+      (contents) => gatewayGenerateForPaper(contents)
+    );
+    res.json({
+      success: true,
+      engine: "v17-ai-gateway",
+      durable: false,
+      data: scan,
+    });
+  } catch (err: any) {
+    const message = err?.name === "AbortError"
+      ? "AI Gateway phản hồi quá chậm. Hãy bấm chấm lại; bài chưa bị mất."
+      : (err?.message || "Không thể OCR bài làm qua AI Gateway.");
+    res.status(502).json({ success: false, engine: "v17-ai-gateway", error: message });
+  }
+});
 
 app.get("/api/system-status", (req, res) => {
   const firebaseUrl = String(process.env.FIREBASE_DATABASE_URL || "").trim();
