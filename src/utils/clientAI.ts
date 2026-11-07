@@ -2144,6 +2144,7 @@ export async function clientGradePaper(payload: {
   reviewScan?: import("./paperGrading").ReviewPaperScan;
   paperFile: { data: string; mimeType: string; fileName: string };
   rubric: any;
+  rubrics?: any[];
   studentNameOverride?: string;
   studentClassOverride?: string;
   gradingStrictness?: string;
@@ -2151,11 +2152,22 @@ export async function clientGradePaper(payload: {
   model?: string;
 }): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const { paperFile, rubric, studentNameOverride, studentClassOverride, gradingStrictness, apiKey, model } = payload;
+    const { paperFile, rubric, rubrics, studentNameOverride, studentClassOverride, gradingStrictness, apiKey, model } = payload;
     // Share one budget across OCR, fallback and optional essay assessment.
     const deadline = Date.now() + 90000;
-    const result = await recognizeAndGradePaper(paperFile, rubric,
-      (contents, config) => generateWithFallback(contents, apiKey, model, config, deadline), gradingStrictness, payload.reviewScan);
+    const result = await recognizeAndGradePaper(
+      paperFile,
+      rubric,
+      (contents, config) => generateWithFallback(contents, apiKey, model, config, deadline),
+      gradingStrictness,
+      payload.reviewScan,
+      (scan, currentRubric) => {
+        const detected = String(scan.examCode || "").trim();
+        if (!detected || !Array.isArray(rubrics) || !rubrics.length) return currentRubric;
+        const matched = rubrics.find((r: any) => String(r?.examCode || "").trim() === detected);
+        return matched || currentRubric;
+      }
+    );
 
     const gradedPaper = {
       assessmentType: rubric.assessmentType,
@@ -2215,14 +2227,20 @@ export async function clientScanBatchPdf(payload: {
 export function clientGradeBatchScans(payload: {
   scans: any[];
   rubric: any;
+  rubrics?: any[];
   sourceFileName: string;
 }): { success: boolean; data?: any[]; error?: string } {
   try {
-    const { scans, rubric, sourceFileName } = payload;
+    const { scans, rubric, rubrics, sourceFileName } = payload;
     if (!Array.isArray(scans) || !scans.length) throw new Error("Chưa có danh sách học sinh đã nhận diện.");
     const results = scans.map((scan, index) => {
+      const detected = String(scan?.examCode || "").trim();
+      const resolvedRubric =
+        detected && Array.isArray(rubrics)
+          ? (rubrics.find((r: any) => String(r?.examCode || "").trim() === detected) || rubric)
+          : rubric;
       const graded = gradeScannedPaper(
-        rubric,
+        resolvedRubric,
         scan,
         { fileName: sourceFileName + " - " + (scan.sourceLabel || ("HS " + (index + 1))), mimeType: "application/pdf" },
         { studentName: scan.studentName || undefined, studentClass: scan.studentClass || undefined }
