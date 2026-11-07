@@ -2961,29 +2961,152 @@ let gradedPaperResults: any[] = [
 
 // 6. AI Auto-Grading & Exam Rubric APIs
 
-// API: Get all graded papers
-app.get("/api/grader/results", requireAdmin, (req, res) => {
-  res.json({ success: true, data: gradedPaperResults });
-});
+// Durable graded-paper storage in Firebase Realtime Database.
+// Metadata/details are stored separately from the original file payload so result listing stays fast.
+const GRADED_RESULTS_ROOT = "gradedPaperResults";
+const GRADED_FILES_ROOT = "gradedPaperFiles";
 
-// API: Delete a graded paper
-app.delete("/api/grader/results/:id", requireAdmin, (req, res) => {
-  gradedPaperResults = gradedPaperResults.filter((p) => p.id !== req.params.id);
-  res.json({ success: true, message: "Đã xóa bài chấm" });
-});
+function safeGradedResultKey(id: string): string {
+  return String(id || "").trim().replace(/[.#$[\]\/]/g, "_");
+}
 
-// API: Update teacher notes / review
-app.put("/api/grader/results/:id", requireAdmin, (req, res) => {
-  const index = gradedPaperResults.findIndex((p) => p.id === req.params.id);
-  if (index !== -1) {
-    gradedPaperResults[index] = {
-      ...gradedPaperResults[index],
-      ...req.body,
-      isReviewedByTeacher: true,
-    };
-    return res.json({ success: true, data: gradedPaperResults[index] });
+function roundGraderScore(value: unknown): number {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+
+function normalizeGradedResult(record: any): any {
+  if (!record || typeof record !== "object") throw new Error("Kết quả chấm không hợp lệ.");
+  const id = String(record.id || "").trim();
+  if (!id) throw new Error("Kết quả chấm thiếu id.");
+
+  const details = Array.isArray(record.details) ? record.details : [];
+  const part1Score = roundGraderScore(details.filter((d: any) => d?.part === "part1").reduce((s: number, d: any) => s + Number(d?.pointsAwarded || 0), 0));
+  const part2Score = roundGraderScore(details.filter((d: any) => d?.part === "part2").reduce((s: number, d: any) => s + Number(d?.pointsAwarded || 0), 0));
+  const part3Score = roundGraderScore(details.filter((d: any) => d?.part === "part3").reduce((s: number, d: any) => s + Number(d?.pointsAwarded || 0), 0));
+  const essayScore = roundGraderScore(details.filter((d: any) => d?.part === "essay").reduce((s: number, d: any) => s + Number(d?.pointsAwarded || 0), 0));
+  const objectiveScore = roundGraderScore(part1Score + part2Score + part3Score);
+  const calculatedTotal = roundGraderScore(objectiveScore + essayScore);
+  const maxScore = Number(record.maxScore);
+  if (!Number.isFinite(maxScore) || maxScore <= 0) throw new Error("Kết quả chấm thiếu thang điểm hợp lệ.");
+
+  const totalScore = Math.min(maxScore, Math.max(0, calculatedTotal));
+  return {
+    ...record,
+    id,
+    totalScore,
+    part1Score,
+    part2Score,
+    part3Score,
+    essayScore,
+    objectiveScore,
+    maxScore,
+    details,
+    gradedAt: record.gradedAt || new Date().toISOString(),
+    serverUpdatedAt: new Date().toISOString(),
+  };
+}
+
+async function persistGradedResult(record: any): Promise<any> {
+  const normalized = normalizeGradedResult(record);
+  const key = safeGradedResultKey(normalized.id);
+  const fileData = typeof normalized.fileData === "string" ? normalized.fileData : "";
+  const durableRecord = { ...normalized };
+  delete durableRecord.fileData;
+  durableRecord.hasStoredPaperFile = Boolean(fileData || normalized.hasStoredPaperFile);
+
+  await adminPut(`${GRADED_RESULTS_ROOT}/${key}`, durableRecord);
+  if (fileData) {
+    await adminPut(`${GRADED_FILES_ROOT}/${key}`, {
+      id: normalized.id,
+      fileName: normalized.fileName || "",
+      fileType: normalized.fileType || "image",
+      fileData,
+      updatedAt: new Date().toISOString(),
+    });
   }
-  res.status(404).json({ error: "Không tìm thấy bài đã chấm" });
+
+  const verified = await adminGet<any>(`${GRADED_RESULTS_ROOT}/${key}`);
+  if (!verified || String(verified.id || "") !== normalized.id) {
+    throw new Error("Đã ghi kết quả nhưng không đọc xác nhận được từ Firebase.");
+  }
+  const fields = ["totalScore", "part1Score", "part2Score", "part3Score", "essayScore", "objectiveScore"];
+  for (const field of fields) {
+    if (roundGraderScore(verified[field]) !== roundGraderScore(durableRecord[field])) {
+      throw new Error(`Kết quả lưu không khớp trường ${field}.`);
+    }
+  }
+  return verified;
+}
+
+async function listDurableGradedResults(): Promise<any[]> {
+  const data = await adminGet<Record<string, any>>(GRADED_RESULTS_ROOT);
+  return Object.values(data || {}).sort((a: any, b: any) =>
+    String(b?.gradedAt || "").localeCompare(String(a?.gradedAt || ""))
+  );
+}
+
+// API: Get all graded papers from durable storage
+app.get("/api/grader/results", requireAdmin, async (req, res) => {
+  try {
+    const data = await listDurableGradedResults();
+    res.json({ success: true, durable: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, durable: false, error: err?.message || "Không thể tải kết quả chấm từ Firebase." });
+  }
+});
+
+// API: Save a newly graded paper. Success is returned only after Firebase read-after-write verification.
+app.post("/api/grader/results", requireAdmin, async (req, res) => {
+  try {
+    const verified = await persistGradedResult(req.body);
+    gradedPaperResults = [verified, ...gradedPaperResults.filter((p) => p.id !== verified.id)];
+    res.json({ success: true, durable: true, verified: true, data: verified });
+  } catch (err: any) {
+    res.status(500).json({ success: false, durable: false, verified: false, error: err?.message || "Không thể lưu kết quả chấm." });
+  }
+});
+
+// API: Load original paper image/PDF payload on demand
+app.get("/api/grader/results/:id/file", requireAdmin, async (req, res) => {
+  try {
+    const key = safeGradedResultKey(req.params.id);
+    const data = await adminGet<any>(`${GRADED_FILES_ROOT}/${key}`);
+    if (!data) return res.status(404).json({ success: false, error: "Không tìm thấy file bài làm đã lưu." });
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Không thể tải file bài làm." });
+  }
+});
+
+// API: Delete a graded paper and its stored file
+app.delete("/api/grader/results/:id", requireAdmin, async (req, res) => {
+  try {
+    const key = safeGradedResultKey(req.params.id);
+    await Promise.all([
+      adminDelete(`${GRADED_RESULTS_ROOT}/${key}`),
+      adminDelete(`${GRADED_FILES_ROOT}/${key}`).catch(() => undefined),
+    ]);
+    gradedPaperResults = gradedPaperResults.filter((p) => p.id !== req.params.id);
+    res.json({ success: true, durable: true, message: "Đã xóa bài chấm" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Không thể xóa bài chấm." });
+  }
+});
+
+// API: Update teacher review / detail scores and persist durably
+app.put("/api/grader/results/:id", requireAdmin, async (req, res) => {
+  try {
+    const key = safeGradedResultKey(req.params.id);
+    const existing = await adminGet<any>(`${GRADED_RESULTS_ROOT}/${key}`);
+    if (!existing) return res.status(404).json({ success: false, error: "Không tìm thấy bài đã chấm" });
+    const merged = { ...existing, ...req.body, id: existing.id || req.params.id, isReviewedByTeacher: true };
+    const verified = await persistGradedResult(merged);
+    gradedPaperResults = [verified, ...gradedPaperResults.filter((p) => p.id !== verified.id)];
+    res.json({ success: true, durable: true, verified: true, data: verified });
+  } catch (err: any) {
+    res.status(500).json({ success: false, durable: false, verified: false, error: err?.message || "Không thể cập nhật bài chấm." });
+  }
 });
 
 // API: Extract Rubric / Answer Key from Document or Text
@@ -3193,11 +3316,14 @@ app.post("/api/ai/grade-paper", async (req, res) => {
     };
 
 
-    gradedPaperResults.unshift(gradedRecord);
+    const verifiedGradedRecord = await persistGradedResult(gradedRecord);
+    gradedPaperResults = [verifiedGradedRecord, ...gradedPaperResults.filter((p) => p.id !== verifiedGradedRecord.id)];
 
     res.json({
       success: true,
-      data: gradedRecord,
+      durable: true,
+      verified: true,
+      data: verifiedGradedRecord,
       message: `Đã nhận dạng và tính điểm tạm cho ${gradedRecord.studentName}. Kết quả CHƯA CHÍNH THỨC cho đến khi giáo viên duyệt phiếu.`,
     });
   } catch (err: any) {
