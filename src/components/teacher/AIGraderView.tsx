@@ -1981,7 +1981,7 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedPaperForModal(paper);
+                                void openGradedPaper(paper);
                               }}
                               className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
                               title="Xem đối chiếu chi tiết"
