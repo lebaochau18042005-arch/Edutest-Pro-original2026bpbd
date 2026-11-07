@@ -1,3 +1,4 @@
+import { upload } from "@vercel/blob/client";
 import { recognizeAndGradePaper, scanBatchPdfMarkings, gradeScannedPaper } from "./paperGrading";
 import { withGradingTimeout } from "./gradingTimeout";
 /**
@@ -2207,15 +2208,36 @@ export async function clientGradePaper(payload: {
   try {
     const { paperFile, rubric, rubrics, studentNameOverride, studentClassOverride } = payload;
 
+    // Upload the file directly from the browser to Vercel Blob first.
+    // This avoids Vercel Function request-body limits for multi-page PDFs.
+    const rawBase64 = String(paperFile.data || "").includes(",")
+      ? String(paperFile.data).split(",").pop() || ""
+      : String(paperFile.data || "");
+    const bytes = Uint8Array.from(atob(rawBase64), (ch) => ch.charCodeAt(0));
+    const blob = new Blob([bytes], { type: paperFile.mimeType });
+    const safeName = (paperFile.fileName || "student-paper").replace(/[^a-zA-Z0-9._-]/g, "_");
+
+    const uploaded = await upload(`grader-v17/${Date.now()}-${safeName}`, blob, {
+      access: "public",
+      handleUploadUrl: "/api/grader/upload-v17",
+      multipart: blob.size > 4_000_000,
+    });
+
+    const adminHeaders = (() => {
+      try {
+        const token = localStorage.getItem("edutest_admin_token") || "";
+        return token.trim() ? { "x-edutest-admin-token": token.trim() } : {};
+      } catch { return {}; }
+    })();
+
     const scanRes = await fetch("/api/grader/scan-v17", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(() => {
-        try {
-          const token = localStorage.getItem("edutest_admin_token") || "";
-          return token.trim() ? { "x-edutest-admin-token": token.trim() } : {};
-        } catch { return {}; }
-      })() },
-      body: JSON.stringify({ paperFile }),
+      headers: { "Content-Type": "application/json", ...adminHeaders },
+      body: JSON.stringify({
+        blobUrl: uploaded.url,
+        mimeType: paperFile.mimeType,
+        fileName: paperFile.fileName,
+      }),
     });
 
     const scanJson = await scanRes.json().catch(() => null);
