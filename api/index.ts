@@ -1,4 +1,4 @@
-import app from "../server.ts";
+import app from "./backend.bundle.mjs";
 
 
 function base64UrlBytes(bytes: Uint8Array): string {
