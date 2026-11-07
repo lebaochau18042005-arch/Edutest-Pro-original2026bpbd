@@ -1312,10 +1312,10 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
                           {item.status === "error" && (
                             <span
-                              title={(item as any).errorMessage || "Lỗi chấm bài"}
+                              title={(item as any).errorMsg || "Lỗi chấm bài"}
                               className="max-w-[320px] px-2 py-1 bg-rose-100 text-rose-700 rounded-md font-semibold text-[10px] break-words"
                             >
-                              {(item as any).errorMessage || "Lỗi chấm bài"}
+                              {(item as any).errorMsg || "Lỗi chấm bài"}
                             </span>
                           )}
 
