@@ -1,3 +1,5 @@
+import app from "../server";
+
 
 function base64UrlBytes(bytes: Uint8Array): string {
   let binary = "";
@@ -414,6 +416,5 @@ export default async function handler(req: any, res: any) {
     req.url = `/api/${requestedPath}${query.toString() ? `?${query.toString()}` : ""}`;
   }
 
-  const { default: app } = await import("../server");
   return app(req as any, res as any);
 }
