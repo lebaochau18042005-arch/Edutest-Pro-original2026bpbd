@@ -2583,6 +2583,11 @@ export function exportGradedPapersToExcel(
       Lớp: p.studentClass,
       "Tên Đề Thi": p.examTitle || examTitle,
       "Mã Đề": p.examCode || "101",
+      "Điểm Phần I": p.part1Score ?? (p.details || []).filter(d => d.part === "part1").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0),
+      "Điểm Phần II": p.part2Score ?? (p.details || []).filter(d => d.part === "part2").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0),
+      "Điểm Phần III": p.part3Score ?? (p.details || []).filter(d => d.part === "part3").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0),
+      "Tổng Điểm Trắc Nghiệm": p.objectiveScore ?? (p.details || []).filter(d => d.part !== "essay").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0),
+      "Điểm Tự Luận": p.essayScore ?? (p.details || []).filter(d => d.part === "essay").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0),
       "Tổng Điểm": p.totalScore,
       "Thang Điểm": p.maxScore,
       "Xếp Loại": p.gradeClassification,
@@ -2614,6 +2619,11 @@ export function exportGradedPapersToExcel(
     { wch: 10 }, // Lop
     { wch: 30 }, // Ten De
     { wch: 10 }, // Ma De
+    { wch: 12 }, // Diem Phan I
+    { wch: 12 }, // Diem Phan II
+    { wch: 12 }, // Diem Phan III
+    { wch: 18 }, // Tong Diem Trac Nghiem
+    { wch: 12 }, // Diem Tu Luan
     { wch: 12 }, // Tong Diem
     { wch: 12 }, // Thang Diem
     { wch: 14 }, // Xep Loai
@@ -2660,6 +2670,11 @@ export function generateGradedPapersTSV(papers: GradedPaperResult[]): string {
     "Lớp",
     "Tên Đề Thi",
     "Mã Đề",
+    "Điểm Phần I",
+    "Điểm Phần II",
+    "Điểm Phần III",
+    "Tổng Điểm Trắc Nghiệm",
+    "Điểm Tự Luận",
     "Tổng Điểm",
     "Thang Điểm",
     "Xếp Loại",
@@ -2686,6 +2701,11 @@ export function generateGradedPapersTSV(papers: GradedPaperResult[]): string {
       p.studentClass,
       p.examTitle || "",
       p.examCode || "101",
+      String(p.part1Score ?? (p.details || []).filter(d => d.part === "part1").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)),
+      String(p.part2Score ?? (p.details || []).filter(d => d.part === "part2").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)),
+      String(p.part3Score ?? (p.details || []).filter(d => d.part === "part3").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)),
+      String(p.objectiveScore ?? (p.details || []).filter(d => d.part !== "essay").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)),
+      String(p.essayScore ?? (p.details || []).filter(d => d.part === "essay").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)),
       String(p.totalScore),
       String(p.maxScore),
       p.gradeClassification,
