@@ -1816,6 +1816,10 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
                     <th className="py-3.5 px-3 font-bold">Lớp</th>
                     <th className="py-3.5 px-3 font-bold">Mã Đề</th>
                     <th className="py-3.5 px-4 font-bold">File Bài Làm</th>
+                    <th className="py-3.5 px-3 font-bold text-center">Phần I</th>
+                    <th className="py-3.5 px-3 font-bold text-center">Phần II</th>
+                    <th className="py-3.5 px-3 font-bold text-center">Phần III</th>
+                    <th className="py-3.5 px-3 font-bold text-center">TN</th>
                     <th className="py-3.5 px-4 font-bold text-center">Tổng Điểm</th>
                     <th className="py-3.5 px-3 font-bold text-center">Xếp Loại</th>
                     <th className="py-3.5 px-4 font-bold">Thời Gian Chấm</th>
@@ -1825,7 +1829,7 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
                 <tbody className="divide-y divide-slate-100">
                   {filteredPapers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-slate-400 text-xs">
+                      <td colSpan={13} className="py-8 text-center text-slate-400 text-xs">
                         Chưa có kết quả bài chấm nào phù hợp với bộ lọc.
                       </td>
                     </tr>
@@ -1861,6 +1865,10 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
                         <td className="py-3 px-4 text-slate-500 font-medium max-w-xs truncate">
                           {paper.fileName}
                         </td>
+                        <td className="py-3 px-3 text-center font-bold text-slate-700">{paper.part1Score ?? (paper.details || []).filter(d => d.part === "part1").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)}</td>
+                        <td className="py-3 px-3 text-center font-bold text-slate-700">{paper.part2Score ?? (paper.details || []).filter(d => d.part === "part2").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)}</td>
+                        <td className="py-3 px-3 text-center font-bold text-slate-700">{paper.part3Score ?? (paper.details || []).filter(d => d.part === "part3").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)}</td>
+                        <td className="py-3 px-3 text-center font-black text-blue-700">{paper.objectiveScore ?? (paper.details || []).filter(d => d.part !== "essay").reduce((s,d)=>s+(Number(d.pointsAwarded)||0),0)}</td>
                         <td className="py-3 px-4 text-center">
                           <span
                             className={`inline-block px-2.5 py-1 rounded-xl font-black text-sm ${
