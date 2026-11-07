@@ -158,13 +158,18 @@ CẤU TRÚC CÓ THỂ GẶP TRÊN PHIẾU:
      * Câu 12: Thí sinh tô ô nào? (A/B/C/D)
 
 3. PHẦN II. CÂU TRẮC NGHIỆM ĐÚNG SAI (nếu phiếu có; số câu có thể thay đổi):
-   - Gồm 4 khối: Câu 1, Câu 2, Câu 3, Câu 4.
-   - Mỗi câu có 4 dòng a, b, c, d. Mỗi dòng có 2 ô: cột [Đ] (Đúng) bên trái và cột [S] (Sai) bên phải.
-   - Đọc xem từng dòng thí sinh tô vào ô [Đ] hay [S]. Trả về a: "Đ"|"S", b: "Đ"|"S", c: "Đ"|"S", d: "Đ"|"S".
+   - Mỗi khối có tiêu đề Câu 1, Câu 2... và hai cột in rõ "Đúng" và "Sai".
+   - Mỗi câu có 4 dòng a, b, c, d. Mỗi dòng có 2 ô tròn cạnh nhau.
+   - So sánh HAI ô trên cùng một dòng; ô có vùng tô xám/đen đậm hơn là lựa chọn của thí sinh.
+   - Không được coi nét chì xám là bỏ trống nếu nó đậm hơn rõ rệt so với ô còn lại.
+   - Trả về a: "Đ"|"S", b: "Đ"|"S", c: "Đ"|"S", d: "Đ"|"S".
 
 4. PHẦN III. CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN / ĐIỀN SỐ (nếu phiếu có; số câu có thể thay đổi):
-   - Gồm 6 khối: Câu 1, Câu 2, Câu 3, Câu 4, Câu 5, Câu 6.
-   - Đọc giá trị số thí sinh viết ở ô trên và các cột số tô đen ở dưới (ví dụ: "40", "-2.5", "12", "0.75").
+   - Mỗi Câu là một khối lưới số riêng, gồm nhiều CỘT vị trí từ trái sang phải.
+   - Trong mỗi cột có thể có dấu âm '-', dấu phẩy/chấm thập phân và các số 0-9.
+   - Xác định ô tô đậm nhất trong từng cột rồi ghép các ký hiệu/chữ số theo thứ tự trái sang phải.
+   - Không đọc toàn khối như một ô văn bản. Phải đọc từng cột vị trí.
+   - Ví dụ có thể tạo "40", "-2,5", "12", "0,75".
 
 5. PHẦN TỰ LUẬN (Nếu có bài làm viết tay): Chép lại nguyên văn lời giải.
 
@@ -262,6 +267,117 @@ TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON THEO SCHEMA ĐƯỢC ĐỊNH NGHĨA.`
     const numbers = rawJson[part].map((row: any) => row.question);
     if (numbers.some((n: any) => !Number.isInteger(n) || n < 1) || new Set(numbers).size !== numbers.length) throw new Error("Dữ liệu nhận dạng bị trùng hoặc sai số câu; cần kiểm tra phiếu.");
   }
+
+  // Second-pass OMR for hard-to-read Part II / Part III.
+  // A full-page pass can read Part I well but miss the denser Đ/S and numeric grids.
+  const hasUnclearPart2 = (rawJson.part2 || []).some((p: any) =>
+    ["a","b","c","d"].some(k => !p?.[k] || String(p[k]).trim() === "?")
+  );
+  const hasUnclearPart3 = (rawJson.part3 || []).some((p: any) =>
+    !p?.value || String(p.value).trim() === "?"
+  );
+
+  if (hasUnclearPart2 || hasUnclearPart3) {
+    const focusedPrompt = [
+      "QUÉT LẠI CHUYÊN BIỆT PHẦN II VÀ PHẦN III TRÊN PHIẾU TRẮC NGHIỆM NÀY.",
+      "Không dùng đáp án giáo viên. Chỉ quan sát ô học sinh tô.",
+      "",
+      "PHẦN II - ĐÚNG/SAI:",
+      "- Mỗi Câu có 4 dòng a,b,c,d.",
+      "- Trên mỗi dòng có đúng 2 ô nằm dưới hai cột Đúng và Sai.",
+      "- Ô được tô đậm hơn rõ rệt so với vòng tròn chỉ có viền.",
+      "- Trả a,b,c,d bằng 'Đ' hoặc 'S'. Nếu thật sự không phân biệt được mới trả '?'.",
+      "- Không được bỏ qua chỉ vì nét tô xám; so sánh độ đậm giữa hai ô cùng dòng.",
+      "",
+      "PHẦN III - TRẢ LỜI NGẮN:",
+      "- Mỗi Câu là một khối lưới số riêng.",
+      "- Đọc từng cột vị trí từ trái sang phải.",
+      "- Mỗi cột có các lựa chọn dấu âm '-', dấu phẩy/chấm thập phân và các chữ số 0-9.",
+      "- Mỗi cột chỉ lấy ký hiệu/chữ số được tô đậm nhất.",
+      "- Ghép các ký hiệu theo thứ tự trái sang phải thành giá trị cuối cùng.",
+      "- Ví dụ: tô '-' rồi '2' rồi ',' rồi '5' => '-2,5'.",
+      "- Nếu một vị trí thực sự bỏ trống thì bỏ qua vị trí đó; nếu không chắc mới trả '?'.",
+      "",
+      "Chỉ trả JSON theo schema được yêu cầu."
+    ].join("\n");
+
+    const focusedConfig = {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          part2: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.INTEGER },
+                a: { type: Type.STRING },
+                b: { type: Type.STRING },
+                c: { type: Type.STRING },
+                d: { type: Type.STRING },
+              },
+              required: ["question","a","b","c","d"],
+            },
+          },
+          part3: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.INTEGER },
+                value: { type: Type.STRING },
+              },
+              required: ["question","value"],
+            },
+          },
+        },
+        required: ["part2","part3"],
+      },
+    };
+
+    try {
+      const focusedText = await generate(
+        [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: paper.mimeType || "image/jpeg", data: cleanBase64 } },
+            { text: focusedPrompt },
+          ],
+        }],
+        focusedConfig
+      );
+      const focused = JSON.parse(focusedText || "{}");
+
+      const byQ2 = new Map<number, any>((focused.part2 || []).map((x:any) => [Number(x.question), x]));
+      (rawJson.part2 || []).forEach((row:any) => {
+        const retry = byQ2.get(Number(row.question));
+        if (!retry) return;
+        for (const k of ["a","b","c","d"]) {
+          const current = String(row?.[k] ?? "").trim();
+          const candidate = String(retry?.[k] ?? "").trim().toUpperCase();
+          if ((!current || current === "?") && ["Đ","S","D","T","F","TRUE","FALSE"].includes(candidate)) {
+            row[k] = candidate === "D" || candidate === "T" || candidate === "TRUE" ? "Đ"
+              : candidate === "F" || candidate === "FALSE" ? "S"
+              : candidate;
+          }
+        }
+      });
+
+      const byQ3 = new Map<number, any>((focused.part3 || []).map((x:any) => [Number(x.question), x]));
+      (rawJson.part3 || []).forEach((row:any) => {
+        const current = String(row?.value ?? "").trim();
+        const retry = byQ3.get(Number(row.question));
+        const candidate = String(retry?.value ?? "").trim();
+        if ((!current || current === "?") && candidate && candidate !== "?") {
+          row.value = candidate;
+        }
+      });
+    } catch (err) {
+      console.warn("Focused OMR retry for Part II/III failed:", err);
+    }
+  }
+
   // Format into lookup maps
   const part1Map: Record<number, string> = {};
   (rawJson.part1 || []).forEach((p: any) => {
