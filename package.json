@@ -38,7 +38,8 @@
     "recharts": "^3.10.1",
     "vite": "^6.2.3",
     "wmf": "^1.0.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@vercel/blob": "^2.8.2"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
