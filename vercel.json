@@ -19,9 +19,7 @@
   "installCommand": "npm install",
   "functions": {
     "api/index.ts": {
-      "includeFiles": [
-        "api/backend.bundle.mjs"
-      ],
+      "includeFiles": "api/backend.bundle.mjs",
       "maxDuration": 60
     }
   }
