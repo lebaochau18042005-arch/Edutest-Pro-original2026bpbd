@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { handleUpload } from "@vercel/blob/client";
 import { adminDelete, adminGet, adminPut } from "./firebaseAdmin";
 
 dotenv.config();
@@ -53,12 +54,12 @@ function extractGatewayText(payload: any): string {
   return chunks.join("\n").trim();
 }
 
-async function gatewayGenerateForPaper(contents: any): Promise<string> {
+async function gatewayGenerateForPaper(contents: any, remoteFile?: { url: string; mimeType: string; fileName?: string }): Promise<string> {
   const token = String(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || "").trim();
   if (!token) throw new Error("AI Gateway chưa có thông tin xác thực trên máy chủ.");
 
   let prompt = "";
-  let mimeType = "image/jpeg";
+  let mimeType = remoteFile?.mimeType || "image/jpeg";
   let base64Data = "";
   const parts = Array.isArray(contents) ? (contents[0]?.parts || []) : [];
   for (const part of parts) {
@@ -67,6 +68,13 @@ async function gatewayGenerateForPaper(contents: any): Promise<string> {
       mimeType = part.inlineData.mimeType || mimeType;
       base64Data = String(part.inlineData.data);
     }
+  }
+
+  if (!base64Data && remoteFile?.url) {
+    const fileResp = await fetch(remoteFile.url);
+    if (!fileResp.ok) throw new Error(`Không tải được file Blob V17 (HTTP ${fileResp.status}).`);
+    const buf = Buffer.from(await fileResp.arrayBuffer());
+    base64Data = buf.toString("base64");
   }
   if (!base64Data) throw new Error("Không nhận được dữ liệu phiếu để OCR.");
 
@@ -119,16 +127,55 @@ async function gatewayGenerateForPaper(contents: any): Promise<string> {
   }
 }
 
+
+// V17: large papers upload directly from browser to Blob, bypassing Vercel Function body limits.
+app.post("/api/grader/upload-v17", requireAdmin, async (req, res) => {
+  try {
+    const jsonResponse = await handleUpload({
+      body: req.body,
+      request: req as any,
+      onBeforeGenerateToken: async (pathname) => {
+        const lower = String(pathname || "").toLowerCase();
+        if (!/\.(pdf|png|jpe?g|webp)$/.test(lower)) {
+          throw new Error("Chỉ cho phép PDF/JPG/PNG/WEBP.");
+        }
+        return {
+          allowedContentTypes: [
+            "application/pdf",
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+          ],
+          addRandomSuffix: true,
+          tokenPayload: JSON.stringify({ purpose: "grader-v17" }),
+        };
+      },
+      onUploadCompleted: async () => {},
+    });
+    res.json(jsonResponse);
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || "Không tạo được phiên upload V17." });
+  }
+});
+
 // V17: OCR only on the server. Teacher review and deterministic scoring happen after this call.
 app.post("/api/grader/scan-v17", requireAdmin, async (req, res) => {
   try {
     const paperFile = req.body?.paperFile;
-    if (!paperFile?.data || !paperFile?.mimeType) {
-      return res.status(400).json({ success: false, error: "Thiếu file bài làm." });
+    const blobUrl = String(req.body?.blobUrl || "").trim();
+    const mimeType = String(paperFile?.mimeType || req.body?.mimeType || "").trim();
+    const fileName = String(paperFile?.fileName || req.body?.fileName || "student-paper").trim();
+
+    if ((!paperFile?.data && !blobUrl) || !mimeType) {
+      return res.status(400).json({ success: false, error: "Thiếu file bài làm hoặc URL Blob." });
     }
+
     const scan = await scanPaperMarkings(
-      { data: paperFile.data, mimeType: paperFile.mimeType },
-      (contents) => gatewayGenerateForPaper(contents)
+      { data: paperFile?.data || "", mimeType },
+      (contents) => gatewayGenerateForPaper(
+        contents,
+        blobUrl ? { url: blobUrl, mimeType, fileName } : undefined
+      )
     );
     res.json({
       success: true,
