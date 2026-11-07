@@ -10,10 +10,11 @@ import { Question, QuestionType, TrueFalseStatement } from "../types";
 import { normalizeExamQuestions3Parts } from "./examHelpers";
 
 export const FALLBACK_MODELS = [
-  "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
   "gemini-3-flash-preview",
+  "gemini-3.5-flash-lite",
   "gemini-3.1-pro-preview",
-  "gemini-3.1-flash-lite",
 ];
 
 function getAI(apiKey?: string): GoogleGenAI | null {
@@ -40,7 +41,7 @@ export async function generateWithFallback(
     throw new Error("Vui lòng cấu hình Google Gemini API Key trong phần Cài Đặt (nút đỏ trên Header).");
   }
 
-  const selectedModel = preferredModel || getStoredSelectedModel() || "gemini-3.5-flash";
+  const selectedModel = preferredModel || getStoredSelectedModel() || "gemini-3.8-flash";
   const modelsToTry = [
     selectedModel,
     ...FALLBACK_MODELS.filter((m) => m !== selectedModel),
@@ -84,9 +85,9 @@ export async function generateWithFallback(
     cleanMsg.includes("gemini-2.0") ||
     cleanMsg.includes("gemini-2.5")
   ) {
-    cleanMsg = "Model AI hiện tại không khả dụng hoặc đã được nâng cấp. Hệ thống đã tự động chuyển sang Gemini 3.5 Flash.";
+    cleanMsg = "Model AI hiện tại không khả dụng hoặc đã được nâng cấp. Hệ thống đã tự động chuyển sang Gemini 3.8 Flash.";
     if (typeof window !== "undefined") {
-      localStorage.setItem("gemini_selected_model", "gemini-3.5-flash");
+      localStorage.setItem("gemini_selected_model", "gemini-3.8-flash");
     }
   }
 
