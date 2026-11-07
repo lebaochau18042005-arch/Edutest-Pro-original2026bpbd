@@ -197,6 +197,39 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     }
   };
 
+  const persistGradedPaper = async (paper: GradedPaperResult): Promise<GradedPaperResult> => {
+    const res = await fetch("/api/grader/results", {
+      method: "POST",
+      headers: graderAdminHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(paper),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success || !json?.durable || !json?.verified || !json?.data) {
+      throw new Error(json?.error || "Máy chủ chưa xác nhận lưu bền vững kết quả chấm.");
+    }
+    return { ...paper, ...json.data } as GradedPaperResult;
+  };
+
+  const openGradedPaper = async (paper: GradedPaperResult) => {
+    if (paper.fileData || !(paper as any).hasStoredPaperFile) {
+      void openGradedPaper(paper);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/grader/results/${paper.id}/file`, { headers: graderAdminHeaders() });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success && json?.data?.fileData) {
+        const hydrated = { ...paper, fileData: json.data.fileData } as GradedPaperResult;
+        setSelectedPaperForModal(hydrated);
+        setGradedPapers((prev) => prev.map((p) => p.id === paper.id ? hydrated : p));
+        return;
+      }
+    } catch (err) {
+      console.warn("Không tải được file bài làm đã lưu:", err);
+    }
+    setSelectedPaperForModal(paper);
+  };
+
   // Convert an exam from system into Rubric
   const handleSelectExamAsRubric = (examId: string, examCode?: string) => {
     const exam = exams.find((e) => e.id === examId);
@@ -585,15 +618,28 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     finally { setIsScanningBatchPdf(false); }
   };
 
-  const handleGradeBatchPdf = () => {
+  const handleGradeBatchPdf = async () => {
     if (!activeRubric) { setBatchPdfError("Hãy chọn biểu điểm/đáp án trước khi chấm."); setActiveStep("rubric_setup"); return; }
     if (!batchPdfFile || !batchPdfScans.length) { setBatchPdfError("Chưa có danh sách học sinh đã nhận diện từ PDF."); return; }
     const rubricErrors = validateRubricSettings(activeRubric);
     if (rubricErrors.length) { setBatchPdfError(rubricErrors.join("\n")); return; }
     const result = clientGradeBatchScans({ scans: batchPdfScans, rubric: activeRubric, rubrics, sourceFileName: batchPdfFile.name });
     if (!result.success || !result.data?.length) { setBatchPdfError(result.error || "Không thể chấm PDF tổng."); return; }
-    setGradedPapers((prev) => [...result.data!, ...prev]);
-    setActiveStep("results_table");
+
+    setIsGradingBatch(true);
+    try {
+      const saved: GradedPaperResult[] = [];
+      for (const paper of result.data) {
+        const verified = await persistGradedPaper(paper as GradedPaperResult);
+        saved.push(verified);
+      }
+      setGradedPapers((prev) => [...saved, ...prev.filter((p) => !saved.some((s) => s.id === p.id))]);
+      setActiveStep("results_table");
+    } catch (err: any) {
+      setBatchPdfError("Đã tính điểm nhưng KHÔNG xác nhận được việc lưu kết quả: " + (err?.message || "Lỗi lưu Firebase."));
+    } finally {
+      setIsGradingBatch(false);
+    }
   };
   // Remove item from queue
   const handleRemoveQueueItem = (id: string) => {
@@ -699,10 +745,11 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
             ...json.data,
             fileData: json.data.fileData || (base64Data && base64Data.length < 3000000 ? base64Data : undefined),
           };
+          const verifiedResult = await persistGradedPaper(finalResult as GradedPaperResult);
           item.status = "success";
-          item.result = finalResult;
-          // Add to overall graded papers list immediately
-          setGradedPapers((prev) => [finalResult, ...prev.filter((p) => p.id !== finalResult.id)]);
+          item.result = verifiedResult;
+          // Only show success after Firebase read-after-write verification.
+          setGradedPapers((prev) => [verifiedResult, ...prev.filter((p) => p.id !== verifiedResult.id)]);
         } else {
           item.status = "error";
           item.errorMsg = json.error || "Không thể chấm bài này";
@@ -741,7 +788,9 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
   const handleDeleteGradedPaper = async (id: string) => {
     if (!confirm("Bạn có chắc chắn muốn xóa kết quả chấm của bài này?")) return;
     try {
-      await fetch(`/api/grader/results/${id}`, { method: "DELETE", headers: graderAdminHeaders() });
+      const res = await fetch(`/api/grader/results/${id}`, { method: "DELETE", headers: graderAdminHeaders() });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) throw new Error(json?.error || "Không thể xóa kết quả đã lưu.");
       setGradedPapers((prev) => prev.filter((p) => p.id !== id));
       if (selectedPaperForModal?.id === id) {
         setSelectedPaperForModal(null);
@@ -809,11 +858,16 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
 
     // Save to server
     try {
-      await fetch(`/api/grader/results/${updatedPaper.id}`, {
+      const res = await fetch(`/api/grader/results/${updatedPaper.id}`, {
         method: "PUT",
         headers: graderAdminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(updatedPaper),
       });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success || !json?.verified) throw new Error(json?.error || "Máy chủ chưa xác nhận lưu cập nhật.");
+      const durablePaper = { ...updatedPaper, ...json.data } as GradedPaperResult;
+      setSelectedPaperForModal(durablePaper);
+      setGradedPapers((prev) => prev.map((p) => p.id === durablePaper.id ? durablePaper : p));
     } catch (err) {
       console.error("Save updated paper error:", err);
     }
@@ -827,11 +881,16 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     setGradedPapers((prev) => prev.map((p) => (p.id === updatedPaper.id ? updatedPaper : p)));
 
     try {
-      await fetch(`/api/grader/results/${updatedPaper.id}`, {
+      const res = await fetch(`/api/grader/results/${updatedPaper.id}`, {
         method: "PUT",
         headers: graderAdminHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(updatedPaper),
       });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success || !json?.verified) throw new Error(json?.error || "Máy chủ chưa xác nhận lưu ghi chú.");
+      const durablePaper = { ...updatedPaper, ...json.data } as GradedPaperResult;
+      setSelectedPaperForModal(durablePaper);
+      setGradedPapers((prev) => prev.map((p) => p.id === durablePaper.id ? durablePaper : p));
     } catch (err) {
       console.error(err);
     }
@@ -1854,7 +1913,7 @@ Câu 4: Tự luận tính tích phân I = 2e - 1 (2.0đ)"
                       <tr
                         key={paper.id}
                         className="hover:bg-blue-50/40 transition-colors cursor-pointer group"
-                        onClick={() => setSelectedPaperForModal(paper)}
+                        onClick={() => { void openGradedPaper(paper); }}
                       >
                         <td className="py-3 px-4 font-bold text-slate-400 text-center">
                           {idx + 1}
