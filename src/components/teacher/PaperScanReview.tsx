@@ -14,14 +14,23 @@ export function PaperScanReview({ scan, rubric, imageUrl, mimeType, onConfirm, o
   const rows = rubric.items.map(item => {
     const type = rubricType(item);
     counts[type] = (counts[type] || 0) + 1;
-    return { type, number: item.printedNumber ?? counts[type] };
+    // OMR numbering restarts inside each section. Rubric questionIndex/printedNumber
+    // may be global (e.g. 13,14,15...) and must not be used to index scan.part2/part3.
+    return {
+      type,
+      scanNumber: counts[type],
+      displayNumber: item.printedNumber ?? item.questionIndex ?? counts[type],
+    };
   }).filter(row => row.type !== "essay");
-  const valid = rows.every(({ type, number }) => type === "multiple_choice"
-    ? ["", "A", "B", "C", "D"].includes(draft.part1[number])
+  const valid = rows.every(({ type, scanNumber }) => type === "multiple_choice"
+    ? ["", "A", "B", "C", "D"].includes(draft.part1[scanNumber])
     : type === "true_false"
-      ? [..."abcd"].every(k => ["", "Đ", "S"].includes(draft.part2[number]?.[k]))
-      : typeof draft.part3[number] === "string" && !/[?？]/.test(draft.part3[number]));
-  const codeMatches = !rubric.examCode || draft.examCode?.trim() === rubric.examCode.trim();
+      ? [..."abcd"].every(k => ["", "Đ", "S"].includes(draft.part2[scanNumber]?.[k]))
+      : typeof draft.part3[scanNumber] === "string" && !/[?？]/.test(draft.part3[scanNumber]));
+  const detectedCode = String(draft.examCode || "").trim();
+  const rubricCode = String(rubric.examCode || "").trim();
+  // Blank OCR code is allowed for manual teacher confirmation. Only a clear mismatch blocks grading.
+  const codeMatches = !rubricCode || !detectedCode || detectedCode === rubricCode;
   const change = (edit: (value: PaperScan) => void) => {
     setDraft(value => { const next = structuredClone(value); edit(next); return next; });
     setConfirmed(false);
@@ -41,17 +50,23 @@ export function PaperScanReview({ scan, rubric, imageUrl, mimeType, onConfirm, o
         <div className="overflow-auto space-y-3 p-2">
           <label className="block">Mã đề đọc trên phiếu <input className="border p-2 rounded" value={draft.examCode || ""} onChange={e => change(s => { s.examCode = e.target.value; })} /></label>
           {!codeMatches && <p className="text-red-700">Mã đề chưa khớp biểu điểm. Kiểm tra mã trên ảnh hoặc chọn lại biểu điểm; không sửa mã theo đáp án nếu phiếu khác đề.</p>}
-          {rows.map(({ type, number }) => <div key={`${type}:${number}`} className="border rounded-xl p-3 flex flex-wrap items-center gap-3">
-            <strong>{type === "multiple_choice" ? "Phần I" : type === "true_false" ? "Phần II" : "Phần III"} · Câu {number}</strong>
-            {type === "multiple_choice" ? choice(draft.part1[number], ["", "A", "B", "C", "D"], `Phần I câu ${number}`, v => change(s => { s.part1[number] = v; }))
-              : type === "true_false" ? [..."abcd"].map(k => <label key={k}>{k}) {choice(draft.part2[number]?.[k], ["", "Đ", "S"], `Phần II câu ${number} ý ${k}`, v => change(s => { s.part2[number] = { ...s.part2[number], [k]: v }; }))}</label>)
-              : <><input aria-label={`Phần III câu ${number}`} className="border p-2 rounded" placeholder="Chưa đọc được" value={draft.part3[number] ?? ""} onChange={e => change(s => { s.part3[number] = e.target.value; })} /><button type="button" className="text-blue-700" onClick={() => change(s => { s.part3[number] = ""; })}>Xác nhận bỏ trống</button></>}
+          {rows.map(({ type, scanNumber, displayNumber }) => <div key={`${type}:${scanNumber}`} className="border rounded-xl p-3 flex flex-wrap items-center gap-3">
+            <strong>{type === "multiple_choice" ? "Phần I" : type === "true_false" ? "Phần II" : "Phần III"} · Câu {scanNumber}</strong>
+            {String(displayNumber) !== String(scanNumber) && <span className="text-xs text-slate-500">(câu {displayNumber} trong biểu điểm)</span>}
+            {type === "multiple_choice" ? choice(draft.part1[scanNumber], ["", "A", "B", "C", "D"], `Phần I câu ${scanNumber}`, v => change(s => { s.part1[scanNumber] = v; }))
+              : type === "true_false" ? [..."abcd"].map(k => <label key={k}>{k}) {choice(draft.part2[scanNumber]?.[k], ["", "Đ", "S"], `Phần II câu ${scanNumber} ý ${k}`, v => change(s => { s.part2[scanNumber] = { ...s.part2[scanNumber], [k]: v }; }))}</label>)
+              : <><input aria-label={`Phần III câu ${scanNumber}`} className="border p-2 rounded" placeholder="Chưa đọc được" value={draft.part3[scanNumber] ?? ""} onChange={e => change(s => { s.part3[scanNumber] = e.target.value; })} /><button type="button" className="text-blue-700" onClick={() => change(s => { s.part3[scanNumber] = ""; })}>Xác nhận bỏ trống</button></>}
           </div>)}
         </div>
       </div>
       {!valid && <p className="text-amber-800">Có câu chưa đọc rõ hoặc thiếu dữ liệu. Hãy kiểm tra các câu trước khi chấm.</p>}
-      <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> Tôi đã đối chiếu tất cả đáp án ở trên với phiếu gốc.</label>
-      <div className="flex justify-end gap-3"><button type="button" onClick={onCancel} className="border rounded-lg p-3">Dừng, kiểm tra lại phiếu</button><button type="button" disabled={!valid || !codeMatches || !confirmed} onClick={() => onConfirm(draft)} className="bg-blue-600 text-white rounded-lg p-3 disabled:opacity-40">Xác nhận đáp án và tính điểm</button></div>
+      <div className="sticky bottom-0 bg-white pt-3 border-t space-y-3">
+        <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> Tôi đã đối chiếu tất cả đáp án ở trên với phiếu gốc.</label>
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onCancel} className="border rounded-lg p-3">Dừng, kiểm tra lại phiếu</button>
+          <button type="button" disabled={!valid || !codeMatches || !confirmed} onClick={() => onConfirm(draft)} className="bg-blue-600 text-white rounded-lg p-3 disabled:opacity-40">Xác nhận đáp án và tính điểm</button>
+        </div>
+      </div>
     </div>
   </div>;
 }
