@@ -11,6 +11,7 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 const EDUTEST_ADMIN_TOKEN = String(process.env.EDUTEST_ADMIN_TOKEN || "").trim();
+const FIREBASE_DATABASE_URL = String(process.env.FIREBASE_DATABASE_URL || "").trim();
 
 function isAdminRequest(req: any): boolean {
   const provided = String(req.headers?.["x-edutest-admin-token"] || "").trim();
