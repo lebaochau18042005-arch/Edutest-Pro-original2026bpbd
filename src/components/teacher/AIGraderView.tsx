@@ -590,7 +590,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     if (!batchPdfFile || !batchPdfScans.length) { setBatchPdfError("Chưa có danh sách học sinh đã nhận diện từ PDF."); return; }
     const rubricErrors = validateRubricSettings(activeRubric);
     if (rubricErrors.length) { setBatchPdfError(rubricErrors.join("\n")); return; }
-    const result = clientGradeBatchScans({ scans: batchPdfScans, rubric: activeRubric, sourceFileName: batchPdfFile.name });
+    const result = clientGradeBatchScans({ scans: batchPdfScans, rubric: activeRubric, rubrics, sourceFileName: batchPdfFile.name });
     if (!result.success || !result.data?.length) { setBatchPdfError(result.error || "Không thể chấm PDF tổng."); return; }
     setGradedPapers((prev) => [...result.data!, ...prev]);
     setActiveStep("results_table");
@@ -672,9 +672,13 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
         const apiKey = getStoredApiKey();
         const model = getStoredSelectedModel();
         const json = await clientGradePaper({
-          reviewScan: scan => new Promise<PaperScan>((resolve, reject) => {
+          reviewScan: (scan, resolvedRubric) => new Promise<PaperScan>((resolve, reject) => {
             reviewWaiter.current = { resolve, reject };
-            setScanReview({ scan, rubric: activeRubric, imageUrl: item.previewUrl, mimeType: item.mimeType });
+            if (resolvedRubric?.id && resolvedRubric.id !== activeRubric?.id) {
+              setActiveRubric(resolvedRubric);
+              setSelectedRubricId(resolvedRubric.id);
+            }
+            setScanReview({ scan, rubric: resolvedRubric, imageUrl: item.previewUrl, mimeType: item.mimeType });
           }),
           paperFile: {
             data: base64Data,
@@ -682,6 +686,7 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
             fileName: item.file.name,
           },
           rubric: activeRubric,
+          rubrics,
           studentNameOverride: item.studentName !== "Học sinh" ? item.studentName : undefined,
           studentClassOverride: item.studentClass,
           gradingStrictness,
@@ -780,9 +785,20 @@ export const AIGraderView: React.FC<AIGraderViewProps> = ({
     else if (scaledScore >= 5.0) classification = "Trung bình";
     else classification = "Yếu";
 
+    const part1Score = Number(updatedDetails.filter(d => d.part === "part1").reduce((s,d)=>s+Number(d.pointsAwarded||0),0).toFixed(2));
+    const part2Score = Number(updatedDetails.filter(d => d.part === "part2").reduce((s,d)=>s+Number(d.pointsAwarded||0),0).toFixed(2));
+    const part3Score = Number(updatedDetails.filter(d => d.part === "part3").reduce((s,d)=>s+Number(d.pointsAwarded||0),0).toFixed(2));
+    const essayScore = Number(updatedDetails.filter(d => d.part === "essay").reduce((s,d)=>s+Number(d.pointsAwarded||0),0).toFixed(2));
+    const objectiveScore = Number((part1Score + part2Score + part3Score).toFixed(2));
+
     const updatedPaper: GradedPaperResult = {
       ...selectedPaperForModal,
       totalScore: newTotal,
+      part1Score,
+      part2Score,
+      part3Score,
+      essayScore,
+      objectiveScore,
       gradeClassification: classification,
       details: updatedDetails,
       isReviewedByTeacher: true,
